@@ -1,68 +1,122 @@
+<p align="center">
+  <img src="docs/brand/felix-arena-mark.png" alt="Felix Arena: the Felix cat in a targeting reticle, with Coral and Violet shots meeting below" width="320">
+</p>
+
 <h1 align="center">Felix Arena</h1>
 
 <p align="center">
-  A browser arena game whose entire backend is <a href="https://github.com/gabloe/felix">Felix</a>.<br>
-  Every match is a log, so every kill can be replayed from it.
+  A browser arena game built on <a href="https://github.com/gabloe/felix">Felix</a>.
 </p>
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license"></a>
 </p>
 
+Felix Arena is a team deathmatch for up to eight players, Coral against
+Violet, flying low-poly hover-craft in a walled arena seen from a tilted
+top-down camera. When you die, the last few seconds replay from your view,
+your killer's, or a camera that orbits the fight, and spectators can join a
+match in progress. It is for people who want a small multiplayer game they can
+host themselves, and for game developers evaluating Felix as the backend for
+live play, spectating and replays. The project is at the design stage: there
+is a design, an art direction and a style frame, and no game code yet.
+
+In the design, each arena's simulation commits every tick to a durable Felix
+stream as an
+[atomic commit](https://github.com/gabloe/felix/blob/main/docs/atomic-commit.md),
+and every 30th tick also updates a stream state key that points at it as a
+keyframe. Players and spectators join by reading that key and subscribing from
+its offset, and the kill cam is a read of the same stream from an offset named
+in the kill event. Inputs go on an in-memory stream with
+[drop-new delivery](https://github.com/gabloe/felix/blob/main/docs/semantics.md#delivery-to-subscribers),
+presence and the lobby are
+[cache](https://github.com/gabloe/felix/blob/main/docs/cache-on-log.md) keys with
+a TTL, and who may play or watch is a Felix RBAC role, enforced through tokens
+the control plane
+[narrows](https://github.com/gabloe/felix/blob/main/docs/auth.md#control-plane-token-exchange-flow)
+to one arena. Tick streams are replicated across three brokers, so a match can
+continue after its broker
+[fails](https://github.com/gabloe/felix/blob/main/docs/semantics.md#failover).
+
 ![The style frame: two teams of hover-craft trading fire around a glowing crystal in a walled arena](docs/screenshots/style-frame.jpg)
 
-Up to eight players fly low-poly hover-craft in a walled arena, Coral against
-Violet, seen from a tilted top-down camera. An authoritative simulation commits
-every tick to a durable Felix stream. When you die, the last few seconds replay
-from that stream, from your view, your killer's, or a camera that orbits the
-fight. Spectators join a match in progress by reading the same stream from its
-last keyframe, and a hundred of them cost the players nothing.
+## Features
 
-**Status: design stage.** There is a [design](docs/design.md), an
-[art direction](docs/art.md) and a [style frame](prototype/style-frame.html)
-that proves the look. No game code yet.
+Nothing is playable yet. What exists today is the style frame, one HTML page
+that renders a moment of a match in the final look: the arena, two teams of
+craft from Kenney's Space Kit, bolts, hits, the centre crystal, the lighting
+and the post processing. It is the reference every later milestone is built
+against.
 
-## Why it exists
+## Quick start
 
-A broker does not argue for itself. Felix can fan one record out to hundreds of
-subscribers, isolate a slow one, and serve any offset of a log again. In a game
-those become features you can feel: a kill cam that is a read of the log, a
-spectator feed that is more subscribers on it, and a match that survives losing
-the server it was on. The [design](docs/design.md#how-multiplayer-games-are-normally-built)
-compares this with how games are usually built, and says what it costs.
-
-## See the style frame
-
-The style frame is one HTML file that loads Three.js from jsDelivr. Serve the
-`prototype` folder and open it:
+The style frame loads Three.js from jsDelivr, so it needs a network connection
+and any static file server. Serve the `prototype` folder and open it:
 
 ```bash
 cd prototype && python3 -m http.server 8000
 # open http://localhost:8000/style-frame.html
 ```
 
-Drag to orbit. Add `?t=1.2` to freeze the action at a moment.
+Drag to orbit the camera. Add `?t=1.2` to the URL to freeze the action at that
+moment.
 
-## Build order
+## How it works
 
-| M | Milestone | Proves |
+Three of the project's own processes will sit around Felix: the browser
+client, a stateless gateway that bridges WebSocket to Felix's QUIC protocol,
+and a Rust simulation that is the single authority for each arena, stepping it
+at 30 Hz. The game rules live in one Rust crate, linked by the simulation and
+compiled to WebAssembly for the browser's prediction, so the two cannot
+disagree about the rules.
+
+| What | Felix primitive | Name |
 |---|---|---|
-| 0 | The look, locked | The game looks good at 60 fps on a laptop iGPU before any gameplay exists |
-| 1 | A browser reaches Felix | Ticks flow at 30 Hz through the gateway, every hop timed |
-| 2 | One authority | Playable through Felix with prediction and interpolation |
-| 3 | Join mid-match | A spectator draws a correct frame in under 500 ms |
-| 4 | The kill cam | A replay from the log on screen within 800 ms of a kill |
-| 5 | Isolation and gaps | A throttled client falls behind alone and recovers |
-| 6 | Per-arena sign-in | The broker enforces who can play and who can only watch |
-| 7 | Scale and failover | 100 spectators, and a match that survives losing its broker |
-| 8 | Self-hosting | Anyone can run it from published images |
+| Ticks: the match | Durable stream, 1 shard, `Quorum`, 3 replicas | `arena.ticks.<arena>` |
+| Latest keyframe | Stream state key on the tick stream | `keyframe` |
+| Match start offsets | Stream state keys on the tick stream | `match/<n>` |
+| Player inputs | Ephemeral stream | `arena.input.<arena>` |
+| Who is connected | Cache keys with TTL | `arena.members.<arena>/<session>` |
+| Simulation epoch | Counter | `arena.epoch.<arena>/sim` |
+| Lobby: every arena's status | Cache keys with TTL | `arena.lobby/<arena>` |
+| Who may play, who may watch | Felix RBAC roles | `role:arena-<arena>-play`, `role:arena-<arena>-watch` |
 
-## Related
+[docs/design.md](docs/design.md) has the full design, including the tick
+format, joining mid-match, the kill cam, prediction and failure modes. Its
+section
+[How multiplayer games are normally built](docs/design.md#how-multiplayer-games-are-normally-built)
+compares this with the usual way of building a session-based game.
 
-[felix-canvas](https://github.com/gabloe/felix-canvas) is the sibling project:
-a multiplayer drawing canvas on Felix. This one reuses its gateway, its
-sign-in and its approach to joins and gaps.
+## Status
 
-## Licence
+The design and art direction are written and the style frame is done. M0,
+locking the look in a real app, is next. Each milestone is a
+[GitHub milestone](https://github.com/gabloe/felix-arena/milestones) with an
+issue per piece of work.
+
+| M | Milestone | Status |
+|---|---|---|
+| [0](https://github.com/gabloe/felix-arena/milestone/1) | The look, locked | Next |
+| [1](https://github.com/gabloe/felix-arena/milestone/2) | A browser reaches Felix | Planned |
+| [2](https://github.com/gabloe/felix-arena/milestone/3) | One authority | Planned |
+| [3](https://github.com/gabloe/felix-arena/milestone/4) | Join mid-match | Planned |
+| [4](https://github.com/gabloe/felix-arena/milestone/5) | The kill cam | Planned |
+| [5](https://github.com/gabloe/felix-arena/milestone/6) | Isolation and gaps | Planned |
+| [6](https://github.com/gabloe/felix-arena/milestone/7) | Per-arena sign-in | Planned |
+| [7](https://github.com/gabloe/felix-arena/milestone/8) | Scale and failover | Planned |
+| [8](https://github.com/gabloe/felix-arena/milestone/9) | Self-hosting | Planned |
+
+## Documentation
+
+- [docs/design.md](docs/design.md): the game, the architecture, the data model, the kill cam, failure modes, targets and the build order.
+- [docs/art.md](docs/art.md): the art direction, from the palette and lighting to the rules that keep new content consistent.
+- [prototype/assets/CREDITS.md](prototype/assets/CREDITS.md): the sources and licences of the models and the HDRI.
+
+## Contributing
+
+[CONTRIBUTING.md](CONTRIBUTING.md) describes how code, art and pull requests
+should read.
+
+## License
 
 MIT. Models and the HDRI are CC0; see [prototype/assets/CREDITS.md](prototype/assets/CREDITS.md).
