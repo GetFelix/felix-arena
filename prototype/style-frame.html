@@ -1,0 +1,634 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Felix Arena style frame</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --void: #0a0f15;
+    --ink: #e8edf3;
+    --muted: #8a96a6;
+    --panel: rgba(13, 19, 27, 0.72);
+    --line: rgba(255, 255, 255, 0.08);
+    --accent: hsl(192, 90%, 42%);
+    --coral: hsl(12, 90%, 62%);
+    --violet: hsl(262, 78%, 70%);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--void); color: var(--ink); overflow: hidden; }
+  body { font-family: Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  canvas { display: block; }
+  .hud { position: fixed; inset: 0; pointer-events: none; }
+  .score {
+    position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 14px; padding: 8px 16px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    backdrop-filter: blur(8px); font-weight: 700; font-size: 15px; letter-spacing: 0.02em;
+  }
+  .score .n { font-size: 20px; min-width: 24px; text-align: center; }
+  .score .coral { color: var(--coral); }
+  .score .violet { color: var(--violet); }
+  .score .clock { font-family: "JetBrains Mono", monospace; font-weight: 500; font-size: 13px; color: var(--muted); }
+  .feed { position: absolute; top: 16px; right: 16px; display: grid; gap: 6px; justify-items: end; }
+  .feed div {
+    padding: 6px 10px; border-radius: 8px; background: var(--panel); border: 1px solid var(--line);
+    font-size: 13px; font-weight: 600; display: flex; gap: 8px; align-items: center;
+  }
+  .feed .x { color: var(--muted); font-weight: 500; }
+  .tag { position: absolute; left: 16px; bottom: 16px; display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--muted); }
+  .tag i { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 10px var(--accent); }
+  .loading { position: fixed; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 13px; }
+  @media (max-width: 600px) { .feed { display: none; } .score { top: 12px; } }
+</style>
+</head>
+<body>
+<div class="loading" id="loading">Loading arena</div>
+<div class="hud">
+  <div class="score"><span class="coral">CORAL</span><span class="n coral">12</span><span class="clock">04:21</span><span class="n violet">9</span><span class="violet">VIOLET</span></div>
+  <div class="feed">
+    <div><span style="color:var(--coral)">Rook</span><span class="x">eliminated</span><span style="color:var(--violet)">Vex</span></div>
+    <div><span style="color:var(--violet)">Mara</span><span class="x">eliminated</span><span style="color:var(--coral)">Ash</span></div>
+  </div>
+  <div class="tag"><i></i>felix-arena style frame</div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+
+// ?t=1.3 freezes the combat loop at that time, for screenshots.
+const params = new URLSearchParams(location.search);
+const FROZEN = params.has('t') ? parseFloat(params.get('t')) : null;
+
+// Palette. Every colour in the scene comes from here; see docs/art.md.
+const C = {
+  void: '#0a0f15',
+  floor: '#2a3646',
+  floorAlt: '#2e3b4d',
+  seam: '#111821',
+  wall: '#2b3544',
+  hull: '#d3dae3',
+  hullDark: '#6c7889',
+  trim: '#1b212a',
+  rock: 'hsl(22, 16%, 36%)',
+  accent: 'hsl(192, 90%, 42%)',
+  accentGlow: 'hsl(190, 95%, 58%)',
+  prop: 'hsl(208, 16%, 46%)',
+  coral: 'hsl(12, 90%, 60%)',
+  violet: 'hsl(262, 75%, 64%)',
+};
+const col = (s) => new THREE.Color(s);
+const hdr = (s, k) => new THREE.Color(s).multiplyScalar(k);
+
+const ARENA_X = 20, ARENA_Z = 14;
+
+const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.NeutralToneMapping;
+renderer.toneMappingExposure = 1.12;
+document.body.prepend(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = col(C.void);
+scene.fog = new THREE.Fog(C.void, 42, 90);
+
+const camera = new THREE.PerspectiveCamera(30, innerWidth / innerHeight, 1, 200);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.minPolarAngle = 0.35;
+controls.maxPolarAngle = 1.05;
+controls.minDistance = 22;
+controls.maxDistance = 140;
+controls.enablePan = false;
+controls.target.set(0, 0, 0);
+
+// Lighting: one warm key that casts every shadow, a cool sky fill, and a cyan rim
+// from behind so silhouettes separate from the dark floor.
+scene.add(new THREE.HemisphereLight('#9fb6d8', '#1c140d', 0.32));
+const key = new THREE.DirectionalLight('#ffe6c7', 3.6);
+key.position.set(-16, 30, 14);
+key.castShadow = true;
+key.shadow.mapSize.set(2048, 2048);
+key.shadow.camera.left = -27; key.shadow.camera.right = 27;
+key.shadow.camera.top = 22; key.shadow.camera.bottom = -22;
+key.shadow.camera.near = 5; key.shadow.camera.far = 80;
+key.shadow.bias = -0.0004;
+key.shadow.normalBias = 0.03;
+scene.add(key);
+const rim = new THREE.DirectionalLight(C.accentGlow, 0.9);
+rim.position.set(18, 10, -22);
+scene.add(rim);
+
+const fx = new THREE.Group();
+scene.add(fx);
+
+// ---------- textures made on a canvas ----------
+function radialTexture(stops, size = 128) {
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  const g = c.getContext('2d');
+  const grd = g.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  for (const [o, s] of stops) grd.addColorStop(o, s);
+  g.fillStyle = grd;
+  g.fillRect(0, 0, size, size);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+const glowTex = radialTexture([[0, 'rgba(255,255,255,1)'], [0.25, 'rgba(255,255,255,0.55)'], [1, 'rgba(255,255,255,0)']]);
+const blobTex = radialTexture([[0, 'rgba(0,0,0,0.55)'], [0.6, 'rgba(0,0,0,0.25)'], [1, 'rgba(0,0,0,0)']]);
+
+function flareTexture() {
+  const s = 128, c = document.createElement('canvas');
+  c.width = c.height = s;
+  const g = c.getContext('2d');
+  g.translate(s / 2, s / 2);
+  g.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < 4; i++) {
+    g.rotate(Math.PI / 4);
+    const grd = g.createLinearGradient(-s / 2, 0, s / 2, 0);
+    grd.addColorStop(0, 'rgba(255,255,255,0)');
+    grd.addColorStop(0.5, i % 2 ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,1)');
+    grd.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = grd;
+    g.fillRect(-s / 2, i % 2 ? -2 : -4, s, i % 2 ? 4 : 8);
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+const flareTex = flareTexture();
+
+// The floor: 2 m panels with slight value changes, dark seams, lane markings that glow.
+function floorTextures() {
+  const ppm = 32, w = ARENA_X * 2 * ppm, h = ARENA_Z * 2 * ppm;
+  const mk = () => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+  const colorC = mk(), roughC = mk(), emitC = mk();
+  const g = colorC.getContext('2d'), r = roughC.getContext('2d'), e = emitC.getContext('2d');
+  e.fillStyle = '#000'; e.fillRect(0, 0, w, h);
+  let seed = 7;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  const panel = 2 * ppm;
+  for (let y = 0; y < h; y += panel) {
+    for (let x = 0; x < w; x += panel) {
+      const alt = ((x + y) / panel) % 2 === 0;
+      const base = new THREE.Color(alt ? C.floor : C.floorAlt).offsetHSL(0, 0, (rnd() - 0.5) * 0.018);
+      g.fillStyle = '#' + base.getHexString();
+      g.fillRect(x, y, panel, panel);
+      const rv = 120 + Math.floor(rnd() * 50);
+      r.fillStyle = `rgb(${rv},${rv},${rv})`;
+      r.fillRect(x, y, panel, panel);
+    }
+  }
+  // seams
+  g.strokeStyle = C.seam; g.lineWidth = 2;
+  r.strokeStyle = '#fff'; r.lineWidth = 3;
+  for (let x = 0; x <= w; x += panel) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, h); g.stroke(); r.beginPath(); r.moveTo(x, 0); r.lineTo(x, h); r.stroke(); }
+  for (let y = 0; y <= h; y += panel) { g.beginPath(); g.moveTo(0, y); g.lineTo(w, y); g.stroke(); r.beginPath(); r.moveTo(0, y); r.lineTo(w, y); r.stroke(); }
+  // markings: centre ring, midline, spawn zones
+  const cx = w / 2, cy = h / 2;
+  const line = (ctx, style, width) => { ctx.strokeStyle = style; ctx.lineWidth = width; };
+  for (const ctx of [g, e]) {
+    line(ctx, ctx === g ? 'hsl(192, 60%, 30%)' : '#0b8fb8', 5);
+    ctx.beginPath(); ctx.arc(cx, cy, 4.2 * ppm, 0, Math.PI * 2); ctx.stroke();
+    ctx.setLineDash([ppm * 0.8, ppm * 0.6]);
+    ctx.beginPath(); ctx.moveTo(cx, 0.6 * ppm); ctx.lineTo(cx, cy - 4.2 * ppm); ctx.moveTo(cx, cy + 4.2 * ppm); ctx.lineTo(cx, h - 0.6 * ppm); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  const zone = (x0, color) => {
+    g.fillStyle = color; g.globalAlpha = 0.06; g.fillRect(x0, 4 * ppm, 4 * ppm, h - 8 * ppm); g.globalAlpha = 1;
+    for (const ctx of [g, e]) {
+      ctx.strokeStyle = color; ctx.globalAlpha = ctx === e ? 0.55 : 0.6; ctx.lineWidth = 4;
+      ctx.strokeRect(x0 + 4, 4 * ppm, 4 * ppm - 8, h - 8 * ppm); ctx.globalAlpha = 1;
+    }
+  };
+  zone(0.5 * ppm, C.coral);
+  zone(w - 4.5 * ppm, C.violet);
+  const tex = (c, srgb) => {
+    const t = new THREE.CanvasTexture(c);
+    if (srgb) t.colorSpace = THREE.SRGBColorSpace;
+    t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    return t;
+  };
+  return { map: tex(colorC, true), roughnessMap: tex(roughC, false), emissiveMap: tex(emitC, true) };
+}
+
+// ---------- materials ----------
+const M = {
+  hull: new THREE.MeshStandardMaterial({ color: C.hull, roughness: 0.42, metalness: 0.25 }),
+  hullDark: new THREE.MeshStandardMaterial({ color: C.hullDark, roughness: 0.5, metalness: 0.35 }),
+  trim: new THREE.MeshStandardMaterial({ color: C.trim, roughness: 0.65, metalness: 0.2 }),
+  // Props keep Kenney's accent faces but in a quiet steel, so cyan stays rare.
+  accent: new THREE.MeshStandardMaterial({ color: C.prop, roughness: 0.45, metalness: 0.3 }),
+  rock: new THREE.MeshStandardMaterial({ color: C.rock, roughness: 0.85, metalness: 0, flatShading: true }),
+  crystal: new THREE.MeshStandardMaterial({ color: C.accentGlow, roughness: 0.2, metalness: 0, emissive: col(C.accentGlow), emissiveIntensity: 2.2 }),
+  wall: new THREE.MeshStandardMaterial({ color: C.wall, roughness: 0.6, metalness: 0.15 }),
+  strip: new THREE.MeshBasicMaterial({ color: hdr(C.accentGlow, 1.25) }),
+};
+function teamMaterial(color) {
+  return new THREE.MeshStandardMaterial({ color, roughness: 0.32, metalness: 0.15, emissive: col(color), emissiveIntensity: 0.12 });
+}
+
+// Kenney's Space Kit names its materials consistently, so restyling is a lookup.
+function restyle(root, accentMat) {
+  const map = { metal: M.hull, metalDark: M.hullDark, dark: M.trim, metalRed: accentMat, _defaultMat: M.hullDark, rock: M.rock, rockTrack: M.rock, crystal: M.crystal };
+  root.traverse((o) => {
+    if (!o.isMesh) return;
+    o.castShadow = true;
+    o.receiveShadow = true;
+    const swap = (m) => map[m.name] || M.hull;
+    o.material = Array.isArray(o.material) ? o.material.map(swap) : swap(o.material);
+  });
+  return root;
+}
+
+// Recentre a Kenney model on the origin, base on y = 0, then scale.
+function normalise(root, scale) {
+  const box = new THREE.Box3().setFromObject(root);
+  const c = box.getCenter(new THREE.Vector3());
+  root.position.sub(new THREE.Vector3(c.x, box.min.y, c.z));
+  const g = new THREE.Group();
+  g.add(root);
+  g.scale.setScalar(scale);
+  return g;
+}
+
+// ---------- load ----------
+const base = 'assets/models/space-kit/';
+const names = ['craft_speederA', 'craft_speederB', 'craft_speederD', 'craft_racer', 'barrels', 'machine_barrelLarge',
+  'machine_generator', 'rock_largeA', 'rock_largeB', 'rock_crystalsLargeA', 'structure_closed', 'turret_single',
+  'hangar_roundA', 'satelliteDish_large'];
+const loader = new GLTFLoader();
+const pmrem = new THREE.PMREMGenerator(renderer);
+
+const [models, envTex] = await Promise.all([
+  Promise.all(names.map((n) => loader.loadAsync(base + n + '.glb').then((g) => [n, g.scene]))).then(Object.fromEntries),
+  new RGBELoader().loadAsync('assets/hdri/studio_small_09_1k.hdr'),
+]);
+scene.environment = pmrem.fromEquirectangular(envTex).texture;
+scene.environmentIntensity = 0.38;
+envTex.dispose();
+
+function place(name, x, z, { scale = 1, rot = 0, accent = M.accent, y = 0 } = {}) {
+  const g = normalise(restyle(models[name].clone(true), accent), scale);
+  g.position.set(x, y, z);
+  g.rotation.y = rot;
+  scene.add(g);
+  return g;
+}
+
+// ---------- arena ----------
+const ft = floorTextures();
+const floor = new THREE.Mesh(
+  new THREE.PlaneGeometry(ARENA_X * 2, ARENA_Z * 2),
+  new THREE.MeshStandardMaterial({ map: ft.map, roughnessMap: ft.roughnessMap, roughness: 0.75, metalness: 0.05, emissiveMap: ft.emissiveMap, emissive: hdr('#ffffff', 1.6) })
+);
+floor.rotation.x = -Math.PI / 2;
+floor.receiveShadow = true;
+scene.add(floor);
+
+const outer = new THREE.Mesh(new THREE.PlaneGeometry(240, 240), new THREE.MeshStandardMaterial({ color: '#0e141c', roughness: 0.95 }));
+outer.rotation.x = -Math.PI / 2;
+outer.position.y = -0.6;
+outer.receiveShadow = true;
+scene.add(outer);
+
+const T = 0.9;
+// Perimeter: rounded slabs so edges catch the key light, with a glowing cap strip.
+function wall(x, z, w, d, h = 1.3) {
+  const m = new THREE.Mesh(new RoundedBoxGeometry(w, h, d, 3, 0.14), M.wall);
+  m.position.set(x, h / 2 - 0.6, z);
+  m.castShadow = m.receiveShadow = true;
+  scene.add(m);
+  // A thin strip on the inner top edge, so the light reads as trim, not a neon tube.
+  const along = w > d;
+  const s = new THREE.Mesh(new THREE.BoxGeometry(along ? w - 1.8 : 0.1, 0.05, along ? 0.1 : d - 0.2), M.strip);
+  s.position.set(along ? x : x - Math.sign(x) * (d > 0 ? T / 2 - 0.12 : 0), h - 0.6 + 0.01, along ? z - Math.sign(z) * (T / 2 - 0.12) : z);
+  scene.add(s);
+}
+wall(0, -ARENA_Z - T / 2, ARENA_X * 2 + T * 2, T, 1.9);
+wall(0, ARENA_Z + T / 2, ARENA_X * 2 + T * 2, T, 1.9);
+wall(-ARENA_X - T / 2, 0, T, ARENA_Z * 2, 1.9);
+wall(ARENA_X + T / 2, 0, T, ARENA_Z * 2, 1.9);
+
+// Low cover walls, point-symmetric so neither team has the better side.
+function cover(x, z, w, d) {
+  const m = new THREE.Mesh(new RoundedBoxGeometry(w, 1.0, d, 3, 0.12), M.wall);
+  m.position.set(x, 0.5, z);
+  m.castShadow = m.receiveShadow = true;
+  scene.add(m);
+  const s = new THREE.Mesh(new THREE.BoxGeometry(w - 0.3, 0.04, 0.08), M.strip);
+  s.position.set(x, 1.005, z);
+  if (d > w) s.scale.set((d - 0.3) / (w - 0.3), 1, 1), s.rotation.y = Math.PI / 2;
+  scene.add(s);
+}
+for (const k of [1, -1]) {
+  cover(k * 12.5, k * -1.5, 1.0, 6);
+  cover(k * 4.5, k * 9.5, 6, 1.0);
+  place('structure_closed', k * 7.5, k * -5.5, { scale: 2.0, rot: Math.PI / 4 });
+  place('barrels', k * 3.2, k * -8.8, { scale: 2.6, rot: k * 0.6 });
+  place('machine_barrelLarge', k * 16.2, k * 9.6, { scale: 2.2 });
+  place('machine_barrelLarge', k * 17.6, k * 7.9, { scale: 1.7 });
+  place('rock_largeA', k * 9.5, k * 9.8, { scale: 3.2, rot: 1.2 });
+  place('rock_largeB', k * 16.8, k * -10.4, { scale: 2.8, rot: 0.4 });
+  place('machine_generator', k * -6.2, k * 2.2, { scale: 2.4, rot: k > 0 ? 0 : Math.PI });
+  place('turret_single', k * -18.4, k * -12.2, { scale: 2.0, rot: k > 0 ? 0.7 : 0.7 + Math.PI });
+}
+// Centre landmark: a crystal on a plinth.
+const plinth = new THREE.Mesh(new THREE.CylinderGeometry(2.0, 2.3, 0.35, 32), M.wall);
+plinth.position.y = 0.17;
+plinth.castShadow = plinth.receiveShadow = true;
+scene.add(plinth);
+const plinthRing = new THREE.Mesh(new THREE.TorusGeometry(2.05, 0.035, 8, 64), M.strip);
+plinthRing.rotation.x = Math.PI / 2;
+plinthRing.position.y = 0.36;
+scene.add(plinthRing);
+const crystal = place('rock_crystalsLargeA', 0, 0, { scale: 3.0, y: 0.3 });
+const crystalLight = new THREE.PointLight(C.accentGlow, 9, 12, 2);
+crystalLight.position.set(0, 2.2, 0);
+scene.add(crystalLight);
+
+// Outside the walls, silhouettes that fall away into the fog.
+place('hangar_roundA', -12, -21, { scale: 3.4, rot: 0.2 });
+place('hangar_roundA', 14, 21.5, { scale: 3.0, rot: Math.PI + 0.3 });
+place('satelliteDish_large', 26, -10, { scale: 5, rot: -0.8 });
+place('satelliteDish_large', -26, 9, { scale: 4.4, rot: 2.3 });
+place('structure_closed', 25, 4, { scale: 4, rot: 0.3, y: -0.6 });
+place('structure_closed', -24.5, -5, { scale: 3.2, rot: 0.8, y: -0.6 });
+
+// ---------- players ----------
+const coralMat = teamMaterial(C.coral);
+const violetMat = teamMaterial(C.violet);
+function craft(name, color, mat, x, z, scale) {
+  const body = normalise(restyle(models[name].clone(true), mat), scale);
+  const g = new THREE.Group();
+  g.add(body);
+  g.position.set(x, 0, z);
+  scene.add(g);
+  const pool = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 3.4), new THREE.MeshBasicMaterial({ map: glowTex, color: hdr(color, 0.28), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+  pool.rotation.x = -Math.PI / 2;
+  const blob = new THREE.Mesh(new THREE.PlaneGeometry(3.0, 3.0), new THREE.MeshBasicMaterial({ map: blobTex, transparent: true, depthWrite: false }));
+  blob.rotation.x = -Math.PI / 2;
+  fx.add(pool, blob);
+  const engine = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: hdr(color, 3), blending: THREE.AdditiveBlending, depthWrite: false }));
+  engine.scale.setScalar(0.9);
+  fx.add(engine);
+  return { g, body, pool, blob, engine, color, mat, home: new THREE.Vector2(x, z), phase: Math.random() * 6, aim: 0 };
+}
+const players = {
+  rook: craft('craft_speederA', C.coral, coralMat, -10.5, 3.0, 1.3),
+  ash: craft('craft_racer', C.coral, coralMat, -4.5, -7.0, 1.5),
+  vex: craft('craft_speederB', C.violet, violetMat, 6.5, -1.0, 1.3),
+  mara: craft('craft_speederD', C.violet, violetMat, 10.5, 6.5, 1.1),
+};
+const targets = { rook: 'vex', ash: 'mara', vex: 'rook', mara: 'ash' };
+
+// ---------- effects ----------
+const flashLights = [0, 1, 2].map(() => { const l = new THREE.PointLight('#fff', 0, 9, 2); scene.add(l); return l; });
+
+function bolt(color) {
+  const g = new THREE.Group();
+  const core = new THREE.Mesh(new THREE.CapsuleGeometry(0.09, 0.9, 4, 8), new THREE.MeshBasicMaterial({ color: hdr(color, 6) }));
+  core.rotation.z = Math.PI / 2;
+  const halo = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 0.7), new THREE.MeshBasicMaterial({ map: glowTex, color: hdr(color, 1.4), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+  halo.rotation.x = -Math.PI / 2;
+  halo.position.x = -0.9;
+  g.add(core, halo);
+  g.visible = false;
+  fx.add(g);
+  return g;
+}
+function flash(color, size) {
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: flareTex, color: hdr(color, 4), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
+  s.scale.setScalar(size);
+  s.visible = false;
+  fx.add(s);
+  return s;
+}
+function burst(color) {
+  const n = 70;
+  const pos = new Float32Array(n * 3), vel = [];
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * Math.PI * 2, u = Math.random();
+    vel.push(new THREE.Vector3(Math.cos(a) * (2 + u * 7), 2 + Math.random() * 6, Math.sin(a) * (2 + u * 7)));
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  const sparks = new THREE.Points(geo, new THREE.PointsMaterial({ map: glowTex, color: hdr(color, 5), size: 0.32, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.8, 1.0, 48), new THREE.MeshBasicMaterial({ color: hdr(color, 3), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+  ring.rotation.x = -Math.PI / 2;
+  const debris = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.08, 0.16), M.hullDark);
+    d.castShadow = true;
+    const a = Math.random() * Math.PI * 2;
+    debris.push({ m: d, v: new THREE.Vector3(Math.cos(a) * (2 + Math.random() * 3), 4 + Math.random() * 3, Math.sin(a) * (2 + Math.random() * 3)), spin: new THREE.Vector3(Math.random() * 9, Math.random() * 9, Math.random() * 9) });
+    scene.add(d);
+  }
+  const f = flash(color, 4.5);
+  fx.add(sparks, ring);
+  return { sparks, ring, debris, vel, f, color };
+}
+
+// Each shooter has a fixed beat in a 2.4 s loop, two shots a beat.
+const LOOP = 2.4;
+const shooters = [
+  { from: 'rook', at: 0.0 },
+  { from: 'mara', at: 0.75 },
+  { from: 'ash', at: 1.35 },
+  { from: 'vex', at: 1.95 },
+].map((s, i) => {
+  const p = players[s.from];
+  return { ...s, bolts: [bolt(p.color), bolt(p.color)], muzzle: flash(p.color, 2.2), hitfx: burst(p.color), light: flashLights[i % 3] };
+});
+const SPEED = 30;
+
+const tmp = new THREE.Vector3(), tmp2 = new THREE.Vector3();
+function nose(p, out) {
+  return out.set(Math.sin(p.aim) * 1.3, 0.55, Math.cos(p.aim) * 1.3).add(p.g.position);
+}
+
+function updatePlayers(t) {
+  for (const [name, p] of Object.entries(players)) {
+    const x = p.home.x + Math.sin(t * 0.55 + p.phase) * 0.9;
+    const z = p.home.y + Math.cos(t * 0.43 + p.phase * 1.3) * 0.7;
+    const y = 0.42 + Math.sin(t * 2.1 + p.phase) * 0.06;
+    p.g.position.set(x, y, z);
+  }
+  for (const [name, p] of Object.entries(players)) {
+    const q = players[targets[name]].g.position;
+    p.aim = Math.atan2(q.x - p.g.position.x, q.z - p.g.position.z);
+    p.g.rotation.y = p.aim;
+    p.g.rotation.z = Math.sin(t * 1.3 + p.phase) * 0.04;
+    p.pool.position.set(p.g.position.x, 0.02, p.g.position.z);
+    p.blob.position.set(p.g.position.x, 0.015, p.g.position.z);
+    p.engine.position.set(p.g.position.x - Math.sin(p.aim) * 1.1, p.g.position.y + 0.35, p.g.position.z - Math.cos(p.aim) * 1.1);
+    p.engine.material.opacity = 0.75 + Math.sin(t * 30 + p.phase) * 0.1;
+  }
+}
+
+function updateShots(t) {
+  for (const s of shooters) {
+    const p = players[s.from], q = players[targets[s.from]];
+    const local = ((t - s.at) % LOOP + LOOP) % LOOP;
+    nose(p, tmp);
+    const end = tmp2.copy(q.g.position).setY(q.g.position.y + 0.45);
+    const dist = tmp.distanceTo(end), flight = dist / SPEED;
+    let flashLevel = 0;
+    s.bolts.forEach((b, i) => {
+      const u = (local - i * 0.12) / flight;
+      b.visible = u >= 0 && u < 1;
+      if (b.visible) {
+        b.position.lerpVectors(tmp, end, u);
+        b.rotation.y = p.aim - Math.PI / 2;
+      }
+      const since = local - i * 0.12;
+      if (since >= 0 && since < 0.07) flashLevel = Math.max(flashLevel, 1 - since / 0.07);
+    });
+    s.muzzle.visible = flashLevel > 0;
+    s.muzzle.position.copy(tmp);
+    s.muzzle.material.opacity = flashLevel;
+    s.muzzle.material.rotation = local * 40;
+    // impact
+    const h = local - flight;
+    const fxs = s.hitfx;
+    const live = h >= 0 && h < 0.9;
+    fxs.sparks.visible = fxs.ring.visible = live;
+    fxs.f.visible = live && h < 0.12;
+    let lightLevel = flashLevel * 14;
+    if (live) {
+      const arr = fxs.sparks.geometry.attributes.position.array;
+      for (let i = 0; i < fxs.vel.length; i++) {
+        const v = fxs.vel[i];
+        arr[i * 3] = end.x + v.x * h;
+        arr[i * 3 + 1] = Math.max(0.05, end.y + v.y * h - 9 * h * h);
+        arr[i * 3 + 2] = end.z + v.z * h;
+      }
+      fxs.sparks.geometry.attributes.position.needsUpdate = true;
+      fxs.sparks.material.opacity = Math.max(0, 1 - h / 0.9);
+      fxs.ring.position.set(end.x, 0.06, end.z);
+      fxs.ring.scale.setScalar(0.3 + h * 3.2);
+      fxs.ring.material.opacity = Math.max(0, 1 - h / 0.5);
+      fxs.f.position.copy(end);
+      fxs.f.material.opacity = 1 - h / 0.12;
+      lightLevel = Math.max(lightLevel, 22 * Math.max(0, 1 - h / 0.25));
+    }
+    for (const d of fxs.debris) {
+      d.m.visible = live;
+      if (!live) continue;
+      d.m.position.set(end.x + d.v.x * h, Math.max(0.05, end.y + d.v.y * h - 12 * h * h), end.z + d.v.z * h);
+      d.m.rotation.set(d.spin.x * h, d.spin.y * h, d.spin.z * h);
+    }
+    s.light.color.set(p.color);
+    s.light.intensity = lightLevel;
+    s.light.position.copy(live && h < 0.25 ? end : tmp);
+  }
+}
+
+// ---------- post ----------
+const rt = new THREE.WebGLRenderTarget(innerWidth, innerHeight, { type: THREE.HalfFloatType, samples: 4 });
+const composer = new EffectComposer(renderer, rt);
+composer.addPass(new RenderPass(scene, camera));
+const gtao = new GTAOPass(scene, camera, innerWidth, innerHeight);
+gtao.blendIntensity = 0.85;
+gtao.updateGtaoMaterial({ radius: 0.9, distanceExponent: 1.4, thickness: 1.2, scale: 1.0, samples: 16 });
+// AO is computed without the glow effects, then applied to the full image.
+const gtaoRender = gtao.render.bind(gtao);
+gtao.render = (...a) => { fx.visible = false; gtaoRender(...a); fx.visible = true; };
+composer.addPass(gtao);
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth / 2, innerHeight / 2), 0.42, 0.45, 0.9);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+const vignette = new ShaderPass({
+  uniforms: { tDiffuse: { value: null }, amount: { value: 0.42 }, grain: { value: 0.025 }, time: { value: 0 } },
+  vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+  fragmentShader: `
+    uniform sampler2D tDiffuse; uniform float amount; uniform float grain; uniform float time; varying vec2 vUv;
+    float hash(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233)) + time) * 43758.5453); }
+    void main(){
+      vec4 c = texture2D(tDiffuse, vUv);
+      vec2 d = vUv - 0.5;
+      float v = smoothstep(0.85, 0.2, length(d * vec2(1.0, 0.82)));
+      c.rgb *= mix(1.0 - amount, 1.0, v);
+      c.rgb += (hash(vUv * 1000.0) - 0.5) * grain;
+      gl_FragColor = c;
+    }`,
+});
+composer.addPass(vignette);
+
+function resize() {
+  const w = innerWidth, h = innerHeight;
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  renderer.setSize(w, h);
+  composer.setSize(w, h);
+  gtao.setSize(w, h);
+}
+addEventListener('resize', resize);
+
+// ---------- camera and loop ----------
+const ELEV = 0.98; // about 56 degrees above the floor
+let radius = 63, yawBase = 0.35;
+// Fit the arena to the viewport. In portrait the long axis runs up the screen.
+function fit() {
+  const a = camera.aspect, k = 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+  const [w, h] = a >= 1 ? [46, 34] : [24, 46];
+  radius = Math.max(h / k, w / (k * a));
+  yawBase = a >= 1 ? 0.35 : 0.35 + Math.PI / 2;
+  scene.fog.near = radius * 0.7;
+  scene.fog.far = radius * 1.45;
+  camera.far = radius * 3;
+  camera.updateProjectionMatrix();
+}
+fit();
+addEventListener('resize', fit);
+let userMoved = false;
+controls.addEventListener('start', () => { userMoved = true; });
+function placeCamera(t) {
+  const yaw = yawBase + Math.sin(t * 0.07) * 0.45;
+  camera.position.set(Math.sin(yaw) * Math.cos(ELEV) * radius, Math.sin(ELEV) * radius, Math.cos(yaw) * Math.cos(ELEV) * radius);
+  camera.lookAt(controls.target);
+}
+placeCamera(FROZEN ?? 0);
+controls.update();
+document.getElementById('loading').remove();
+
+const clock = new THREE.Clock();
+renderer.setAnimationLoop(() => {
+  const t = FROZEN ?? clock.getElapsedTime();
+  updatePlayers(t);
+  updateShots(t);
+  crystal.rotation.y = t * 0.2;
+  crystalLight.intensity = 9 + Math.sin(t * 1.7) * 1.5;
+  if (!userMoved) placeCamera(t);
+  controls.update();
+  vignette.uniforms.time.value = t % 10;
+  composer.render();
+});
+</script>
+</body>
+</html>
