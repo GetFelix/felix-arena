@@ -134,7 +134,8 @@ everyone reads that stream. The seams above become properties of the broker.
 ## Architecture
 
 Three process types of our own sit around Felix: the browser client, a
-stateless gateway that bridges WebSocket to Felix's QUIC protocol, and the
+stateless gateway that bridges WebSocket to Felix's QUIC protocol
+([felix-gateway](https://github.com/GetFelix/felix-gateway)), and the
 simulation that is the authority for each arena.
 
 ```mermaid
@@ -308,8 +309,8 @@ clients ever race for a slot, because only the sim writes the roster.
 
 ### The gateway
 
-The gateway is felix-canvas's gateway with a game-shaped protocol. It keeps
-that gateway's rules: it holds no game state, never reorders anything, opens
+The gateway is [felix-gateway](https://github.com/GetFelix/felix-gateway), the one felix-canvas uses,
+with a game-shaped protocol. It keeps that gateway's rules: it holds no game state, never reorders anything, opens
 one Felix connection per browser session with that session's narrowed token,
 and is the place the browser's WebSocket ends. It differs in three ways:
 
@@ -317,7 +318,7 @@ and is the place the browser's WebSocket ends. It differs in three ways:
 - **Two subscription slots per connection on the tick stream:** `live` and `replay`, so a kill cam never disturbs the live view.
 - **The sender stamp** on inputs, above.
 
-The [throttle](https://github.com/GetFelix/felix-canvas/blob/main/docs/protocol.md)
+The [throttle](https://github.com/GetFelix/felix-gateway/blob/main/docs/protocol.md#throttle)
 message carries over unchanged, for demonstration 3.
 
 **Latency budget, in-region, one way, p50:**
@@ -619,7 +620,7 @@ stack runs its own small IdP because of
 | M | Milestone | Proves | Rough size |
 |---|---|---|---|
 | 0 | The look, locked: the style frame ported to a Vite app, the asset pipeline, quality tiers, effects pools, measured on an iGPU | The game will look good, at 60 fps, before any gameplay exists | 1 to 2 weeks |
-| 1 | A browser reaches Felix: the gateway from felix-canvas with binary frames, a sim committing empty ticks, the dev stack | Ticks flow at 30 Hz, with every hop timed | 1 week |
+| 1 | A browser reaches Felix: felix-gateway with binary frames, a sim committing empty ticks, the dev stack | Ticks flow at 30 Hz, with every hop timed | 1 week |
 | 2 | One authority: `core` in Rust and WebAssembly, inputs with the sender stamp, prediction, interpolation, the match loop | It is playable, and feels it, through Felix | 2 to 3 weeks |
 | 3 | Join mid-match: keyframes by commit, the join path, members and the lobby | Demonstration 2 | 1 week |
 | 4 | The kill cam: replay offsets in kill events, the replay slot, three views, replays from the feed | Demonstration 1, the headline | 1 to 2 weeks |
@@ -660,7 +661,7 @@ listed here until they are.
 6. Already filed and relevant: per-stream retention ([#964](https://github.com/GetFelix/felix/issues/964)), silent tail drops ([#965](https://github.com/GetFelix/felix/issues/965)), cross-product narrowing ([#968](https://github.com/GetFelix/felix/issues/968)), one token per connection ([#969](https://github.com/GetFelix/felix/issues/969)), no all-or-nothing create ([#967](https://github.com/GetFelix/felix/issues/967)), TTL expiry invisible to watches ([#960](https://github.com/GetFelix/felix/issues/960)), broker-wide ack offsets ([#956](https://github.com/GetFelix/felix/issues/956)), and the dev-stack pair [#954](https://github.com/GetFelix/felix/issues/954) and [#955](https://github.com/GetFelix/felix/issues/955).
 
 **What this project would contribute upstream:** the first and third gaps
-above as features, a shared browser gateway crate with felix-canvas, and
+above as features, the gateway changes above in felix-gateway, and
 numbers for a 30 Hz durable stream under 100 subscribers.
 
 **Open questions**
