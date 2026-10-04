@@ -64,7 +64,8 @@ moment.
 ## How it works
 
 Three of the project's own processes will sit around Felix: the browser
-client, a stateless gateway that bridges WebSocket to Felix's QUIC protocol,
+client, a stateless gateway that bridges WebSocket to Felix's QUIC protocol
+([felix-gateway](https://github.com/GetFelix/felix-gateway)),
 and a Rust simulation that is the single authority for each arena, stepping it
 at 30 Hz. The game rules live in one Rust crate, linked by the simulation and
 compiled to WebAssembly for the browser's prediction, so the two cannot
