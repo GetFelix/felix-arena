@@ -1,12 +1,12 @@
 # Felix Arena design
 
-A browser arena game whose entire backend is [Felix](https://github.com/gabloe/felix).
+A browser arena game whose entire backend is [Felix](https://github.com/GetFelix/felix).
 Small hover-craft fight in a walled arena, seen from a tilted top-down camera.
 Every match is a durable Felix stream, and the headline feature falls out of
 that: after a kill, the last few seconds replay from the match's log, from the
 victim's view, the killer's view, or a camera that orbits the fight.
 
-It exists to argue what [felix-canvas](https://github.com/gabloe/felix-canvas)
+It exists to argue what [felix-canvas](https://github.com/GetFelix/felix-canvas)
 argues for documents, in a domain where latency is felt in the hands: that one
 log can be the live feed, the spectator broadcast, the replay system and the
 crash recovery at once. The audience is a game developer who would otherwise
@@ -205,7 +205,7 @@ setting, not a redesign, and worth measuring once M7's numbers exist.
 Everything is scoped `(tenant, namespace, name)`. An arena is a persistent room
 that runs match after match, so its streams are created once, at deployment,
 and never per match. That sidesteps the lack of an all-or-nothing create
-([felix#967](https://github.com/gabloe/felix/issues/967)).
+([felix#967](https://github.com/GetFelix/felix/issues/967)).
 
 | What | Felix primitive | Name | Durability |
 |---|---|---|---|
@@ -253,7 +253,7 @@ Each tick is one atomic commit on the tick stream (`Client::commit`,
 `docs/atomic-commit.md`). Three properties make commit the right call rather
 than a plain publish:
 
-1. **The answer carries the offset.** `CommitOk { offset }` comes back on every commit. A plain acked publish returns its offset only when the whole broker runs with ack-on-commit ([felix#956](https://github.com/gabloe/felix/issues/956)); the sim needs the offset of every tick for the kill cam, without making every stream on the broker pay for it.
+1. **The answer carries the offset.** `CommitOk { offset }` comes back on every commit. A plain acked publish returns its offset only when the whole broker runs with ack-on-commit ([felix#956](https://github.com/GetFelix/felix/issues/956)); the sim needs the offset of every tick for the kill cam, without making every stream on the broker pay for it.
 2. **A keyframe and its pointer land together.** Every 30th tick is a keyframe, and its commit also writes the stream state key `keyframe`. A reader of that key gets the keyframe's offset as the value's version, and on a `Quorum` stream a state read never reflects a commit a failover could take back.
 3. **Order.** The sim waits for each commit's answer before sending the next, so ticks land in tick order. A commit takes a few milliseconds in-region, well inside the 33 ms tick.
 
@@ -317,7 +317,7 @@ and is the place the browser's WebSocket ends. It differs in three ways:
 - **Two subscription slots per connection on the tick stream:** `live` and `replay`, so a kill cam never disturbs the live view.
 - **The sender stamp** on inputs, above.
 
-The [throttle](https://github.com/gabloe/felix-canvas/blob/main/docs/protocol.md)
+The [throttle](https://github.com/GetFelix/felix-canvas/blob/main/docs/protocol.md)
 message carries over unchanged, for demonstration 3.
 
 **Latency budget, in-region, one way, p50:**
@@ -425,7 +425,7 @@ log.
 matches through the `match/<n>` state keys, for as long as retention keeps the
 log. Felix keeps durable logs until a broker-wide limit trims them, and
 per-stream retention is not applied yet
-([felix#964](https://github.com/gabloe/felix/issues/964)). A replay whose
+([felix#964](https://github.com/GetFelix/felix/issues/964)). A replay whose
 offset has been trimmed is refused as `CursorTooOld`, and the client says
 "Replay no longer available".
 
@@ -540,13 +540,13 @@ broker enforces both, not the gateway. A deployment that wants public
 spectating assigns the watch role to an IdP group everyone is in.
 
 Token exchange narrows by a cross product of actions and resources
-([felix#968](https://github.com/gabloe/felix/issues/968)), so the roles must
+([felix#968](https://github.com/GetFelix/felix/issues/968)), so the roles must
 grant exactly the actions above and no more: a role that also granted publish
 on the tick stream would put it in every narrowed token.
 
 Membership uses felix-canvas's TTL member list, including its workaround for
 cache entries that expire without telling a watch
-([felix#960](https://github.com/gabloe/felix/issues/960)).
+([felix#960](https://github.com/GetFelix/felix/issues/960)).
 
 ## Failure modes
 
@@ -561,7 +561,7 @@ cache entries that expire without telling a watch
 | Owning broker lost | Promotes a replica holding every acknowledged tick | The sim's commit fails or times out. It pauses game time and retries through `ClusterClient`. Subscriptions follow the shard to its new owner or end, and clients resubscribe from their last offset plus one | A pause of about the failover window, then play continues |
 | A commit unanswered at failover | May or may not have landed | The sim retries the same tick. A commit is not idempotent, so it may land twice; readers drop a repeated `(epoch, tick)` | Nothing |
 | Kill cam window trimmed | Refuses with `CursorTooOld` | Skips the replay | "Replay no longer available" |
-| Newest ticks dropped with nothing after them | No signal ([felix#965](https://github.com/gabloe/felix/issues/965)) | Rarely matters: a tick follows every 33 ms, so a drop shows as a gap at once. During the results screen the sim keeps committing the final keyframe once a second, so the match's last record is never the one lost | Nothing |
+| Newest ticks dropped with nothing after them | No signal ([felix#965](https://github.com/GetFelix/felix/issues/965)) | Rarely matters: a tick follows every 33 ms, so a drop shows as a gap at once. During the results screen the sim keeps committing the final keyframe once a second, so the match's last record is never the one lost | Nothing |
 
 **Every recovery is the join path.** A client that fell behind, reconnected, or
 followed a failover does one thing: read the keyframe, subscribe from it. One
@@ -592,27 +592,27 @@ As in felix-canvas, the 100 spectators are made as Felix subscriptions from a
 small Rust example, because 100 browser tabs are not a measurable population.
 Real browsers carry the player-facing paths. Each spectator is one Felix client
 in the gateway, because a connection carries one token
-([felix#969](https://github.com/gabloe/felix/issues/969)); that cost is part of
+([felix#969](https://github.com/GetFelix/felix/issues/969)); that cost is part of
 what demonstration 5 measures.
 
 ## Self-hosting
 
-The same shape as felix-canvas's [self-hosting guide](https://github.com/gabloe/felix-canvas/blob/main/docs/self-hosting.md):
+The same shape as felix-canvas's [self-hosting guide](https://github.com/GetFelix/felix-canvas/blob/main/docs/self-hosting.md):
 signed release images, a Docker Compose install and a Helm chart.
 
 | Service | Image |
 |---|---|
 | Felix broker (1 or 3) and control plane | Felix's own images |
 | Identity provider | Your own, or Dex in the compose file |
-| Gateway | `ghcr.io/gabloe/felix-arena-gateway`, which also serves the built web client |
-| Simulation | `ghcr.io/gabloe/felix-arena-sim`, one replica or a few |
+| Gateway | `ghcr.io/getfelix/felix-arena-gateway`, which also serves the built web client |
+| Simulation | `ghcr.io/getfelix/felix-arena-sim`, one replica or a few |
 | Seed | A one-shot job that creates arenas: streams, caches, counter and roles |
 
 A deployment sets the broker's low-delay batching settings and keeps
 `drop_new`. A standalone broker needs a long-lived node token until
-[felix#955](https://github.com/gabloe/felix/issues/955) is fixed, and the dev
+[felix#955](https://github.com/GetFelix/felix/issues/955) is fixed, and the dev
 stack runs its own small IdP because of
-[felix#954](https://github.com/gabloe/felix/issues/954), as felix-canvas does.
+[felix#954](https://github.com/GetFelix/felix/issues/954), as felix-canvas does.
 
 ## Build order
 
@@ -657,7 +657,7 @@ listed here until they are.
 3. **No bounded range read.** A kill cam wants ticks `a` to `b`; it subscribes from `a`, receives live ticks too, and closes. A read with an end offset would make that a single request.
 4. **A commit is not idempotent.** Documented in Felix's `docs/atomic-commit.md`. A retried tick can land twice; readers dedupe on `(epoch, tick)`.
 5. **The subscriber queue policy is broker-wide.** Low-delay batching and `drop_new` must be chosen together for the whole broker. A per-stream policy would let a game share a broker with workloads that want `block`.
-6. Already filed and relevant: per-stream retention ([#964](https://github.com/gabloe/felix/issues/964)), silent tail drops ([#965](https://github.com/gabloe/felix/issues/965)), cross-product narrowing ([#968](https://github.com/gabloe/felix/issues/968)), one token per connection ([#969](https://github.com/gabloe/felix/issues/969)), no all-or-nothing create ([#967](https://github.com/gabloe/felix/issues/967)), TTL expiry invisible to watches ([#960](https://github.com/gabloe/felix/issues/960)), broker-wide ack offsets ([#956](https://github.com/gabloe/felix/issues/956)), and the dev-stack pair [#954](https://github.com/gabloe/felix/issues/954) and [#955](https://github.com/gabloe/felix/issues/955).
+6. Already filed and relevant: per-stream retention ([#964](https://github.com/GetFelix/felix/issues/964)), silent tail drops ([#965](https://github.com/GetFelix/felix/issues/965)), cross-product narrowing ([#968](https://github.com/GetFelix/felix/issues/968)), one token per connection ([#969](https://github.com/GetFelix/felix/issues/969)), no all-or-nothing create ([#967](https://github.com/GetFelix/felix/issues/967)), TTL expiry invisible to watches ([#960](https://github.com/GetFelix/felix/issues/960)), broker-wide ack offsets ([#956](https://github.com/GetFelix/felix/issues/956)), and the dev-stack pair [#954](https://github.com/GetFelix/felix/issues/954) and [#955](https://github.com/GetFelix/felix/issues/955).
 
 **What this project would contribute upstream:** the first and third gaps
 above as features, a shared browser gateway crate with felix-canvas, and

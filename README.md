@@ -5,7 +5,7 @@
 <h1 align="center">Felix Arena</h1>
 
 <p align="center">
-  A browser arena game built on <a href="https://github.com/gabloe/felix">Felix</a>.
+  A browser arena game built on <a href="https://github.com/GetFelix/felix">Felix</a>.
 </p>
 
 <p align="center">
@@ -23,20 +23,20 @@ is a design, an art direction and a style frame, and no game code yet.
 
 In the design, each arena's simulation commits every tick to a durable Felix
 stream as an
-[atomic commit](https://github.com/gabloe/felix/blob/main/docs/atomic-commit.md),
+[atomic commit](https://github.com/GetFelix/felix/blob/main/docs/atomic-commit.md),
 and every 30th tick also updates a stream state key that points at it as a
 keyframe. Players and spectators join by reading that key and subscribing from
 its offset, and the kill cam is a read of the same stream from an offset named
 in the kill event. Inputs go on an in-memory stream with
-[drop-new delivery](https://github.com/gabloe/felix/blob/main/docs/semantics.md#delivery-to-subscribers),
+[drop-new delivery](https://github.com/GetFelix/felix/blob/main/docs/semantics.md#delivery-to-subscribers),
 presence and the lobby are
-[cache](https://github.com/gabloe/felix/blob/main/docs/cache-on-log.md) keys with
+[cache](https://github.com/GetFelix/felix/blob/main/docs/cache-on-log.md) keys with
 a TTL, and who may play or watch is a Felix RBAC role, enforced through tokens
 the control plane
-[narrows](https://github.com/gabloe/felix/blob/main/docs/auth.md#control-plane-token-exchange-flow)
+[narrows](https://github.com/GetFelix/felix/blob/main/docs/auth.md#control-plane-token-exchange-flow)
 to one arena. Tick streams are replicated across three brokers, so a match can
 continue after its broker
-[fails](https://github.com/gabloe/felix/blob/main/docs/semantics.md#failover).
+[fails](https://github.com/GetFelix/felix/blob/main/docs/semantics.md#failover).
 
 ![The style frame: two teams of hover-craft trading fire around a glowing crystal in a walled arena](docs/screenshots/style-frame.jpg)
 
@@ -91,20 +91,20 @@ compares this with the usual way of building a session-based game.
 
 The design and art direction are written and the style frame is done. M0,
 locking the look in a real app, is next. Each milestone is a
-[GitHub milestone](https://github.com/gabloe/felix-arena/milestones) with an
+[GitHub milestone](https://github.com/GetFelix/felix-arena/milestones) with an
 issue per piece of work.
 
 | M | Milestone | Status |
 |---|---|---|
-| [0](https://github.com/gabloe/felix-arena/milestone/1) | The look, locked | Next |
-| [1](https://github.com/gabloe/felix-arena/milestone/2) | A browser reaches Felix | Planned |
-| [2](https://github.com/gabloe/felix-arena/milestone/3) | One authority | Planned |
-| [3](https://github.com/gabloe/felix-arena/milestone/4) | Join mid-match | Planned |
-| [4](https://github.com/gabloe/felix-arena/milestone/5) | The kill cam | Planned |
-| [5](https://github.com/gabloe/felix-arena/milestone/6) | Isolation and gaps | Planned |
-| [6](https://github.com/gabloe/felix-arena/milestone/7) | Per-arena sign-in | Planned |
-| [7](https://github.com/gabloe/felix-arena/milestone/8) | Scale and failover | Planned |
-| [8](https://github.com/gabloe/felix-arena/milestone/9) | Self-hosting | Planned |
+| [0](https://github.com/GetFelix/felix-arena/milestone/1) | The look, locked | Next |
+| [1](https://github.com/GetFelix/felix-arena/milestone/2) | A browser reaches Felix | Planned |
+| [2](https://github.com/GetFelix/felix-arena/milestone/3) | One authority | Planned |
+| [3](https://github.com/GetFelix/felix-arena/milestone/4) | Join mid-match | Planned |
+| [4](https://github.com/GetFelix/felix-arena/milestone/5) | The kill cam | Planned |
+| [5](https://github.com/GetFelix/felix-arena/milestone/6) | Isolation and gaps | Planned |
+| [6](https://github.com/GetFelix/felix-arena/milestone/7) | Per-arena sign-in | Planned |
+| [7](https://github.com/GetFelix/felix-arena/milestone/8) | Scale and failover | Planned |
+| [8](https://github.com/GetFelix/felix-arena/milestone/9) | Self-hosting | Planned |
 
 ## Documentation
 
