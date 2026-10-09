@@ -133,10 +133,12 @@ everyone reads that stream. The seams above become properties of the broker.
 
 ## Architecture
 
-Three process types of our own sit around Felix: the browser client, a
-stateless gateway that bridges WebSocket to Felix's QUIC protocol
-([felix-gateway](https://github.com/GetFelix/felix-gateway)), and the
-simulation that is the authority for each arena.
+Three process types sit around Felix: the browser client, a stateless
+gateway that bridges WebSocket to Felix's QUIC protocol, and the simulation
+that is the authority for each arena. The client and the simulation are this
+project's own; the gateway is
+[felix-gateway](https://github.com/GetFelix/felix-gateway) with the changes in
+[The gateway](#the-gateway), built into this project's image.
 
 ```mermaid
 flowchart LR
@@ -383,8 +385,11 @@ ring, 1,024 records by default (`DEFAULT_LOG_CAPACITY`,
 A kill cam therefore reads memory, not disk. Older kills, replayed from the
 feed, read the log through the segment reader. The subscription carries on
 into live ticks, which supplies the second after the kill; the client closes
-it once it has tick `T + 30`. Felix has no bounded range read, so the replay
-holds a live subscription for those few seconds (see Felix gaps).
+it once it has tick `T + 30`. The replay holds a live subscription for those
+few seconds. Felix 0.6.0-preview.3 added a bounded range read (`Client::read`,
+from an offset to an end offset, without subscribing), so the kill cam could
+fetch exactly `replay_from` to `T + 30` instead. That needs a read message in
+the gateway, which felix-gateway does not have yet.
 
 **Playing it.** The window is 3 seconds before the kill and 1 second after:
 120 ticks, about 40 KB. The replay world is a second instance of the client's
@@ -655,13 +660,13 @@ listed here until they are.
 
 1. **An event does not carry its publisher.** The gateway stamps the sender on inputs, which moves a trust decision out of the broker. A broker-stamped, authenticated principal on each delivered event would remove it.
 2. **No conditional append or writer fencing.** Felix has no way to say "append only if I still own this stream", so a stale sim is fenced by readers comparing epochs. An expected-offset publish or a writer lease would fence it at the broker.
-3. **No bounded range read.** A kill cam wants ticks `a` to `b`; it subscribes from `a`, receives live ticks too, and closes. A read with an end offset would make that a single request.
+3. **Bounded range read, now in Felix.** A kill cam wants ticks `a` to `b`. Felix 0.6.0-preview.3 added `Client::read` with an end offset, which makes that one request; the gateway would need to expose it. Until then the kill cam subscribes from `a`, receives live ticks too, and closes.
 4. **A commit is not idempotent.** Documented in Felix's `docs/atomic-commit.md`. A retried tick can land twice; readers dedupe on `(epoch, tick)`.
 5. **The subscriber queue policy is broker-wide.** Low-delay batching and `drop_new` must be chosen together for the whole broker. A per-stream policy would let a game share a broker with workloads that want `block`.
 6. Already filed and relevant: per-stream retention ([#964](https://github.com/GetFelix/felix/issues/964)), silent tail drops ([#965](https://github.com/GetFelix/felix/issues/965)), cross-product narrowing ([#968](https://github.com/GetFelix/felix/issues/968)), one token per connection ([#969](https://github.com/GetFelix/felix/issues/969)), no all-or-nothing create ([#967](https://github.com/GetFelix/felix/issues/967)), TTL expiry invisible to watches ([#960](https://github.com/GetFelix/felix/issues/960)), broker-wide ack offsets ([#956](https://github.com/GetFelix/felix/issues/956)), and the dev-stack pair [#954](https://github.com/GetFelix/felix/issues/954) and [#955](https://github.com/GetFelix/felix/issues/955).
 
-**What this project would contribute upstream:** the first and third gaps
-above as features, the gateway changes above in felix-gateway, and
+**What this project would contribute upstream:** the first gap above as a
+feature, the gateway changes above in felix-gateway, and
 numbers for a 30 Hz durable stream under 100 subscribers.
 
 **Open questions**
