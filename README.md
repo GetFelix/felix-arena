@@ -12,14 +12,15 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license"></a>
 </p>
 
-Felix Arena is a team deathmatch for up to eight players, Coral against
-Violet, flying low-poly hover-craft in a walled arena seen from a tilted
-top-down camera. When you die, the last few seconds replay from your view,
-your killer's, or a camera that orbits the fight, and spectators can join a
-match in progress. It is for people who want a small multiplayer game they can
+Felix Arena is a planned team deathmatch for up to eight players, Coral
+against Violet, flying low-poly hover-craft in a walled arena seen from a
+tilted top-down camera. The project is at the design stage: there is a design,
+an art direction and a style frame, and no game code yet. In the design, when
+you die the last few seconds will replay from your view, your killer's, or a
+camera that orbits the fight, and spectators will be able to join a match in
+progress. It is meant for people who want a small multiplayer game they can
 host themselves, and for game developers evaluating Felix as the backend for
-live play, spectating and replays. The project is at the design stage: there
-is a design, an art direction and a style frame, and no game code yet.
+live play, spectating and replays.
 
 In the design, each arena's simulation commits every tick to a durable Felix
 stream as an
@@ -63,11 +64,13 @@ moment.
 
 ## How it works
 
-Three of the project's own processes will sit around Felix: the browser
-client, a stateless gateway that bridges WebSocket to Felix's QUIC protocol
-([felix-gateway](https://github.com/GetFelix/felix-gateway)),
-and a Rust simulation that is the single authority for each arena, stepping it
-at 30 Hz. The game rules live in one Rust crate, linked by the simulation and
+Three processes will sit around Felix: the browser client, a stateless
+gateway that bridges WebSocket to Felix's QUIC protocol, and a Rust simulation
+that is the single authority for each arena, stepping it at 30 Hz. The client
+and the simulation are this project's own. The gateway is
+[felix-gateway](https://github.com/GetFelix/felix-gateway) with game-shaped
+changes (binary frames, a second subscription slot for replays), shipped in
+this project's own image, which also serves the web client. The game rules live in one Rust crate, linked by the simulation and
 compiled to WebAssembly for the browser's prediction, so the two cannot
 disagree about the rules.
 
@@ -112,6 +115,7 @@ issue per piece of work.
 - [docs/design.md](docs/design.md): the game, the architecture, the data model, the kill cam, failure modes, targets and the build order.
 - [docs/art.md](docs/art.md): the art direction, from the palette and lighting to the rules that keep new content consistent.
 - [prototype/assets/CREDITS.md](prototype/assets/CREDITS.md): the sources and licences of the models and the HDRI.
+- [Arena](https://docs.getfelix.dev/built-on-felix/arena/) in the Felix docs: how the game is planned to use Felix.
 
 ## Contributing
 
