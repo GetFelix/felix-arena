@@ -60,10 +60,12 @@ export interface Snapshot {
 
 /** The snapshot of a decoded tick. */
 export function snapshot(tick: Tick): Snapshot {
-  return {
+  const crafts = tick.crafts;
+  const bolts = tick.bolts;
+  const out = {
     epoch: tick.epoch,
     tick: tick.tick,
-    crafts: tick.crafts.map((c) => ({
+    crafts: crafts.map((c) => ({
       slot: c.slot,
       violet: c.violet,
       alive: c.alive,
@@ -75,8 +77,10 @@ export function snapshot(tick: Tick): Snapshot {
       health: c.health,
       lastInput: c.lastInput,
     })),
-    bolts: tick.bolts.map((b) => ({ id: b.id, owner: b.owner, x: b.x, z: b.z, heading: b.heading })),
+    bolts: bolts.map((b) => ({ id: b.id, owner: b.owner, x: b.x, z: b.z, heading: b.heading })),
   };
+  for (const item of [...crafts, ...bolts]) item.free();
+  return out;
 }
 
 /** What to draw at one moment. Positions are fractional centimetres and headings fractional 65536ths. */

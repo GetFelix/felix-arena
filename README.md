@@ -114,6 +114,13 @@ page decodes ticks with. It needs the `wasm32-unknown-unknown` target, which
 (`cargo install wasm-bindgen-cli --version 0.2.129`).
 
 `?as=` picks the dev user to sign in as (default `cleo`, who may only watch).
+
+The live game is `play.html`: `http://localhost:5173/play.html?arena=alpha&as=ana`
+flies `ana`'s craft (WASD to move, the mouse to aim, the left button to fire,
+Space to boost) and `as=ben` in a second window flies the other. Your craft
+is predicted through `core` and everyone else is interpolated from ticks.
+`&quality=low` draws without post processing or shadows.
+
 `npm run smoke` checks the same path from Node: ticks arrive at 30 Hz, the
 WebAssembly build decodes keyframes to the state hashes the sim logged, a
 replay slot reads the same records while the live one keeps going, and it

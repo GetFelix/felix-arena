@@ -241,7 +241,8 @@ orders records within a shard.
 
 ### Inputs
 
-A client sends one input record per tick, about 20 bytes: a sequence number,
+A client sends one input record per sim tick, timed by the sim's clock as
+the ticks show it (see Interpolation and prediction), about 20 bytes: a sequence number,
 the move vector, the aim angle and the buttons. Because the stream is at most
 once, each record also repeats the previous two inputs, so a lost record is
 almost always covered by the next.
@@ -497,17 +498,41 @@ gateway, which is still less than the live ticks.
 ## Interpolation and prediction
 
 **Your own craft is predicted.** The client applies each input locally at once
-through `core`'s movement code, and keeps the inputs the sim has not yet
-confirmed. Each tick says which input sequence the sim last applied for each
-player. The client resets its craft to the sim's state, replays the
-unconfirmed inputs on top, and if the result differs from what is on screen,
-blends the difference out over 100 ms. With the same rules on both sides, this
-only corrects for timing and collisions with other crafts.
+through `core`'s own step for a craft (`steer`, which the sim runs for every
+craft), and keeps the inputs the sim has not yet confirmed
+(`web/src/prediction.ts`). Each tick says which input sequence the sim last
+applied for each player. The client resets its craft to the sim's state,
+replays the unconfirmed inputs on top, pushed off the other crafts where that
+tick has them by the sim's own separation, and if the result differs from what
+is on screen, blends the difference out over 100 ms. A difference over 3 m is
+a respawn and shows at once. With the same rules on both sides, this only
+corrects for timing and for other crafts moving after the tick the client saw.
 
-**Your own shots are predicted too.** A bolt appears from your nose when you
-click. When the sim's bolt for that input arrives, the client swaps its local
-bolt for the real one, matched on `(player, input sequence)`. A shot the sim
-rejected, because you were already dead, fades out.
+Between inputs, the craft is drawn the part of a tick it has moved since the
+last one, under the controls as they are this frame, and it faces where you
+aim at once. So a key or the mouse shows on the next frame, not the next tick.
+
+**Inputs follow the sim's clock.** A page that sent on a timer of its own
+would drift against the sim's 30 Hz, and every drifted tick is an input the sim
+skips or applies twice, which the prediction then takes back. So the client
+sends once a sim tick, timed from the earliest-arriving tick as the
+interpolator's clock is, and when the ticks show the sim applying no new input
+or two at once twice in a second, it moves its sends half a tick.
+
+`web/src/prediction.test.ts` plays against core's world as the sim, with
+100 ms each way and jitter, while a second craft rams the player: the sim
+applies every input exactly once, no correction moves the craft more than
+10 cm in a frame, about four pixels at 1080p, and nothing snaps. CI's dev
+stack job drives the live page in headless Chromium and checks that an input
+reaches the screen within a frame.
+
+**Your own shots are predicted too.** A bolt appears from your nose when the
+input that fires it is sent, and flies until core says the arena stops it.
+When the sim's bolt for that input arrives, matched on `(player, input
+sequence)` give or take three inputs, the client slides its local bolt onto
+the real one over 200 ms, and ends it when the real one ends, so a hit shows
+where the target is drawn. A shot the sim rejected, because you were already
+dead, fades out.
 
 **Everyone else is interpolated.** Other crafts and bolts are drawn between the
 two ticks around a render time that runs two ticks (67 ms) behind the newest

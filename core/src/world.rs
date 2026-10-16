@@ -177,13 +177,16 @@ impl World {
         let mut craft = self.crafts[i];
         let slot = craft.slot;
         let mut hidden = self.hidden[usize::from(slot)];
-        craft.boost_cooldown = craft.boost_cooldown.saturating_sub(1);
-        craft.fire_cooldown = craft.fire_cooldown.saturating_sub(1);
-        if let Some(input) = control {
-            craft.last_input = input.seq;
-        }
-        if craft.alive {
-            self.fly(&mut craft, &mut hidden, control);
+        let alive = craft.alive;
+        let shot = steer(&mut craft, control);
+        if alive {
+            hidden.since_damage = hidden.since_damage.saturating_add(1);
+            if craft.health < MAX_HEALTH
+                && hidden.since_damage >= REGEN_AFTER
+                && (hidden.since_damage - REGEN_AFTER).is_multiple_of(REGEN_EVERY)
+            {
+                craft.health += 1;
+            }
         } else {
             hidden.respawn_in = hidden.respawn_in.saturating_sub(1);
             if hidden.respawn_in == 0 {
@@ -200,6 +203,22 @@ impl World {
                 self.events.push(Event::Spawned { slot });
             }
         }
+        if let Some(shot) = shot {
+            let bolt = self.next_bolt;
+            self.next_bolt = self.next_bolt.wrapping_add(1);
+            self.bolts.push(Bolt {
+                id: bolt,
+                owner: slot,
+                x: shot.x,
+                z: shot.z,
+                heading: shot.heading,
+            });
+            self.events.push(Event::Fired {
+                slot,
+                bolt,
+                seq: shot.seq,
+            });
+        }
         self.crafts[i] = craft;
         self.hidden[usize::from(slot)] = hidden;
     }
@@ -210,70 +229,9 @@ impl World {
         Craft::spawned(slot, team, x as i16, z as i16, heading)
     }
 
-    fn fly(&mut self, craft: &mut Craft, hidden: &mut Hidden, control: Option<Input>) {
-        hidden.since_damage = hidden.since_damage.saturating_add(1);
-        if craft.health < MAX_HEALTH
-            && hidden.since_damage >= REGEN_AFTER
-            && (hidden.since_damage - REGEN_AFTER).is_multiple_of(REGEN_EVERY)
-        {
-            craft.health += 1;
-        }
-
-        let (mut vx, mut vz) = (i32::from(craft.vx), i32::from(craft.vz));
-        match control {
-            Some(input) => {
-                craft.heading = input.aim;
-                let (mx, mz) = (
-                    i32::from(input.move_x.max(-127)),
-                    i32::from(input.move_z.max(-127)),
-                );
-                let stick = length(mx, mz);
-                let full = stick.max(127);
-                (vx, vz) = toward(vx, vz, mx * MAX_SPEED / full, mz * MAX_SPEED / full, ACCEL);
-                if input.buttons & BOOST != 0 && craft.boost_cooldown == 0 {
-                    let (dx, dz) = if stick > 0 {
-                        (mx * fixed::ONE / stick, mz * fixed::ONE / stick)
-                    } else {
-                        (fixed::cos(input.aim), fixed::sin(input.aim))
-                    };
-                    (vx, vz) = (fixed::scale(dx, BOOST_SPEED), fixed::scale(dz, BOOST_SPEED));
-                    craft.boost_cooldown = BOOST_COOLDOWN;
-                }
-                if input.buttons & FIRE != 0 && craft.fire_cooldown == 0 {
-                    craft.fire_cooldown = FIRE_COOLDOWN;
-                    let reach = CRAFT_RADIUS + BOLT_RADIUS + 5;
-                    let bolt = self.next_bolt;
-                    self.next_bolt = self.next_bolt.wrapping_add(1);
-                    self.bolts.push(Bolt {
-                        id: bolt,
-                        owner: craft.slot,
-                        x: (i32::from(craft.x) + fixed::scale(fixed::cos(input.aim), reach)) as i16,
-                        z: (i32::from(craft.z) + fixed::scale(fixed::sin(input.aim), reach)) as i16,
-                        heading: input.aim,
-                    });
-                    self.events.push(Event::Fired {
-                        slot: craft.slot,
-                        bolt,
-                        seq: input.seq,
-                    });
-                }
-            }
-            None => (vx, vz) = toward(vx, vz, 0, 0, COAST_DRAG),
-        }
-
-        let (mut x, mut z) = (
-            i32::from(craft.x) + div_round(vx, HZ),
-            i32::from(craft.z) + div_round(vz, HZ),
-        );
-        (x, z, vx, vz) = resolve(x, z, vx, vz);
-        (craft.x, craft.z, craft.vx, craft.vz) = (x as i16, z as i16, vx as i16, vz as i16);
-    }
-
     fn move_bolts(&mut self) {
         let mut bolts = std::mem::take(&mut self.bolts);
         bolts.retain_mut(|bolt| {
-            let (x0, z0) = (i32::from(bolt.x), i32::from(bolt.z));
-            let (dx, dz) = (fixed::cos(bolt.heading), fixed::sin(bolt.heading));
             // Bolts pass through teammates: no friendly fire.
             let shooter = self
                 .players
@@ -281,14 +239,9 @@ impl World {
                 .find(|p| p.slot == bolt.owner)
                 .map(|p| p.team);
             for step in 1..=BOLT_STEPS {
-                let travel = BOLT_SPEED * step / (HZ * BOLT_STEPS);
-                let (x, z) = (x0 + fixed::scale(dx, travel), z0 + fixed::scale(dz, travel));
-                if x.abs() > HALF_X - BOLT_RADIUS
-                    || z.abs() > HALF_Z - BOLT_RADIUS
-                    || OBSTACLES.iter().any(|o| o.touches(x, z, BOLT_RADIUS))
-                {
+                let Some((x, z)) = bolt_at(bolt, step) else {
                     return false;
-                }
+                };
                 let hit = self.crafts.iter().position(|c| {
                     c.alive && Some(c.team) != shooter && {
                         let (ex, ez) =
@@ -356,39 +309,66 @@ impl World {
         for i in 0..self.crafts.len() {
             for j in i + 1..self.crafts.len() {
                 let (a, b) = (self.crafts[i], self.crafts[j]);
-                if !a.alive || !b.alive {
+                let Some((px, pz)) = overlap(&a, &b) else {
                     continue;
-                }
-                let (dx, dz) = (
-                    i32::from(b.x) - i32::from(a.x),
-                    i32::from(b.z) - i32::from(a.z),
-                );
-                let distance = length(dx, dz);
-                let overlap = 2 * CRAFT_RADIUS - distance;
-                if overlap <= 0 {
-                    continue;
-                }
-                let (dx, dz, distance) = if distance == 0 {
-                    (1, 0, 1)
-                } else {
-                    (dx, dz, distance)
                 };
-                let (px, pz) = (
-                    dx * (overlap / 2 + 1) / distance,
-                    dz * (overlap / 2 + 1) / distance,
-                );
-                for (k, sign) in [(i, -1), (j, 1)] {
-                    let craft = self.crafts[k];
-                    let (x, z, vx, vz) = resolve(
-                        i32::from(craft.x) + sign * px,
-                        i32::from(craft.z) + sign * pz,
-                        i32::from(craft.vx),
-                        i32::from(craft.vz),
-                    );
-                    (self.crafts[k].x, self.crafts[k].z) = (x as i16, z as i16);
-                    (self.crafts[k].vx, self.crafts[k].vz) = (vx as i16, vz as i16);
-                }
+                shove(&mut self.crafts[i], -px, -pz);
+                shove(&mut self.crafts[j], px, pz);
             }
+        }
+    }
+}
+
+/// How far `b` is pushed away from `a`, and `a` the opposite way, when two
+/// live crafts overlap: each by half the overlap.
+fn overlap(a: &Craft, b: &Craft) -> Option<(i32, i32)> {
+    if !a.alive || !b.alive {
+        return None;
+    }
+    let (dx, dz) = (
+        i32::from(b.x) - i32::from(a.x),
+        i32::from(b.z) - i32::from(a.z),
+    );
+    let distance = length(dx, dz);
+    let overlap = 2 * CRAFT_RADIUS - distance;
+    if overlap <= 0 {
+        return None;
+    }
+    let (dx, dz, distance) = if distance == 0 {
+        (1, 0, 1)
+    } else {
+        (dx, dz, distance)
+    };
+    Some((
+        dx * (overlap / 2 + 1) / distance,
+        dz * (overlap / 2 + 1) / distance,
+    ))
+}
+
+fn shove(craft: &mut Craft, px: i32, pz: i32) {
+    let (x, z, vx, vz) = resolve(
+        i32::from(craft.x) + px,
+        i32::from(craft.z) + pz,
+        i32::from(craft.vx),
+        i32::from(craft.vz),
+    );
+    (craft.x, craft.z, craft.vx, craft.vz) = (x as i16, z as i16, vx as i16, vz as i16);
+}
+
+/// `craft` pushed off `others` as the sim separates crafts, with only
+/// `craft` moving: the client's guess at the pushes, with the others where it
+/// last saw them.
+pub fn separate(craft: &mut Craft, others: &[Craft]) {
+    for other in others {
+        if other.slot == craft.slot {
+            continue;
+        }
+        if other.slot < craft.slot {
+            if let Some((px, pz)) = overlap(other, craft) {
+                shove(craft, px, pz);
+            }
+        } else if let Some((px, pz)) = overlap(craft, other) {
+            shove(craft, -px, -pz);
         }
     }
 }
@@ -414,6 +394,107 @@ impl World {
             });
         }
     }
+}
+
+/// Where a shot leaves a craft, and the input that fired it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Shot {
+    pub x: i16,
+    pub z: i16,
+    pub heading: u16,
+    pub seq: u16,
+}
+
+/// One tick of `craft`'s own rules under `control`: its cooldowns, its
+/// steering, the boost, firing and collision with the arena. Other crafts and
+/// bolts are left out. The sim steps every craft through this, and a client
+/// predicts its own craft with it. Answers the shot, when it fired.
+pub fn steer(craft: &mut Craft, control: Option<Input>) -> Option<Shot> {
+    craft.boost_cooldown = craft.boost_cooldown.saturating_sub(1);
+    craft.fire_cooldown = craft.fire_cooldown.saturating_sub(1);
+    if let Some(input) = control {
+        craft.last_input = input.seq;
+    }
+    if !craft.alive {
+        return None;
+    }
+    let mut shot = None;
+    let (mut vx, mut vz) = (i32::from(craft.vx), i32::from(craft.vz));
+    match control {
+        Some(input) => {
+            craft.heading = input.aim;
+            let (mx, mz) = (
+                i32::from(input.move_x.max(-127)),
+                i32::from(input.move_z.max(-127)),
+            );
+            let stick = length(mx, mz);
+            let full = stick.max(127);
+            (vx, vz) = toward(vx, vz, mx * MAX_SPEED / full, mz * MAX_SPEED / full, ACCEL);
+            if input.buttons & BOOST != 0 && craft.boost_cooldown == 0 {
+                let (dx, dz) = if stick > 0 {
+                    (mx * fixed::ONE / stick, mz * fixed::ONE / stick)
+                } else {
+                    (fixed::cos(input.aim), fixed::sin(input.aim))
+                };
+                (vx, vz) = (fixed::scale(dx, BOOST_SPEED), fixed::scale(dz, BOOST_SPEED));
+                craft.boost_cooldown = BOOST_COOLDOWN;
+            }
+            if input.buttons & FIRE != 0 && craft.fire_cooldown == 0 {
+                craft.fire_cooldown = FIRE_COOLDOWN;
+                let reach = CRAFT_RADIUS + BOLT_RADIUS + 5;
+                shot = Some(Shot {
+                    x: (i32::from(craft.x) + fixed::scale(fixed::cos(input.aim), reach)) as i16,
+                    z: (i32::from(craft.z) + fixed::scale(fixed::sin(input.aim), reach)) as i16,
+                    heading: input.aim,
+                    seq: input.seq,
+                });
+            }
+        }
+        None => (vx, vz) = toward(vx, vz, 0, 0, COAST_DRAG),
+    }
+
+    let (mut x, mut z) = (
+        i32::from(craft.x) + div_round(vx, HZ),
+        i32::from(craft.z) + div_round(vz, HZ),
+    );
+    (x, z, vx, vz) = resolve(x, z, vx, vz);
+    (craft.x, craft.z, craft.vx, craft.vz) = (x as i16, z as i16, vx as i16, vz as i16);
+    shot
+}
+
+/// Where `bolt` is after `step` of the [`BOLT_STEPS`] checks along its next
+/// tick of flight, or `None` when the arena stops it there.
+fn bolt_at(bolt: &Bolt, step: i32) -> Option<(i32, i32)> {
+    let travel = BOLT_SPEED * step / (HZ * BOLT_STEPS);
+    let x = i32::from(bolt.x) + fixed::scale(fixed::cos(bolt.heading), travel);
+    let z = i32::from(bolt.z) + fixed::scale(fixed::sin(bolt.heading), travel);
+    let blocked = x.abs() > HALF_X - BOLT_RADIUS
+        || z.abs() > HALF_Z - BOLT_RADIUS
+        || OBSTACLES.iter().any(|o| o.touches(x, z, BOLT_RADIUS));
+    (!blocked).then_some((x, z))
+}
+
+/// How many ticks a bolt fired from `shot` flies before the arena stops it,
+/// if it meets no craft: it is gone in the tick after the last one counted.
+pub fn bolt_ticks(shot: Shot) -> u32 {
+    let mut bolt = Bolt {
+        id: 0,
+        owner: 0,
+        x: shot.x,
+        z: shot.z,
+        heading: shot.heading,
+    };
+    // A bolt crosses the arena's diagonal in under two seconds.
+    for ticks in 0..2 * HZ as u32 {
+        for step in 1..=BOLT_STEPS {
+            match bolt_at(&bolt, step) {
+                None => return ticks,
+                Some((x, z)) if step == BOLT_STEPS => (bolt.x, bolt.z) = (x as i16, z as i16),
+                Some(_) => {}
+            }
+        }
+    }
+    2 * HZ as u32
 }
 
 /// A craft at `(x, z)` moved out of any cover and walls it overlaps, with

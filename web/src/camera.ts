@@ -15,9 +15,11 @@ export class ArenaCamera {
   private yawBase = 0.35;
   private userMoved = false;
 
+  /** A `fixed` camera holds still and ignores the mouse, which aims in the game. */
   constructor(
     element: HTMLElement,
     private readonly fog: Fog,
+    private readonly fixed = false,
   ) {
     this.camera = new PerspectiveCamera(30, innerWidth / innerHeight, 1, 200);
     const c = new OrbitControls(this.camera, element);
@@ -31,6 +33,7 @@ export class ArenaCamera {
     c.addEventListener('start', () => {
       this.userMoved = true;
     });
+    c.enabled = !fixed;
     this.controls = c;
     this.fit();
   }
@@ -53,7 +56,7 @@ export class ArenaCamera {
   /** Moves the camera to time `t` unless the player has taken it. */
   update(t: number): void {
     if (!this.userMoved) {
-      const yaw = this.yawBase + Math.sin(t * 0.07) * 0.45;
+      const yaw = this.yawBase + (this.fixed ? 0 : Math.sin(t * 0.07) * 0.45);
       const r = this.radius;
       this.camera.position.set(
         Math.sin(yaw) * Math.cos(ELEVATION) * r,

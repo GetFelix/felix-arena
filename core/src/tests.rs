@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use crate::input::{BOOST, FIRE};
 use crate::world::{BOLT_DAMAGE, MAX_HEALTH, RESPAWN_AFTER};
-use crate::{Event, Input, Team, Tick, Timing, World, player_key};
+use crate::{Event, Input, Team, Tick, Timing, World, bolt_ticks, player_key, steer};
 
 /// A fixed pseudo-random sequence, so tests are repeatable without a crate.
 struct Lcg(u64);
@@ -382,5 +382,65 @@ fn unknown_bits_are_refused() {
         let mut changed = record.clone();
         changed[at] |= bit;
         assert!(Tick::decode(&changed).is_none(), "byte {at}");
+    }
+}
+
+#[test]
+fn a_lone_craft_predicted_with_steer_matches_the_world() {
+    let mut world = World::new(0);
+    world.join(1);
+    let mut predicted = world.crafts()[0];
+    let mut rng = Lcg(5);
+    let mut shots = Vec::new();
+    for seq in 1..400u16 {
+        let input = Input {
+            seq,
+            move_x: (rng.next() % 255) as i32 as i8,
+            move_z: (rng.next() % 255) as i32 as i8,
+            aim: rng.next() as u16,
+            buttons: (rng.next() % 4) as u8,
+        };
+        if let Some(shot) = steer(&mut predicted, Some(input)) {
+            shots.push(shot.seq);
+        }
+        world.step(|_| Some(input));
+        assert_eq!(world.crafts()[0], predicted, "input {seq}");
+        let fired: Vec<u16> = world
+            .snapshot(0)
+            .events
+            .iter()
+            .filter_map(|e| match e {
+                Event::Fired { seq, .. } => Some(*seq),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(fired, shots.split_off(0), "input {seq}");
+    }
+}
+
+#[test]
+fn bolt_ticks_is_how_long_the_world_keeps_a_bolt_that_meets_no_craft() {
+    for aim in (0..=u16::MAX).step_by(4099) {
+        let mut world = World::new(0);
+        world.join(1);
+        let fire = Input {
+            seq: 1,
+            move_x: 0,
+            move_z: 0,
+            aim,
+            buttons: FIRE,
+        };
+        let mut craft = world.crafts()[0];
+        let shot = steer(&mut craft, Some(fire)).unwrap();
+        world.step(|_| Some(fire));
+        let mut lived = 0;
+        loop {
+            world.step(|_| None);
+            if world.snapshot(0).bolts.is_empty() {
+                break;
+            }
+            lived += 1;
+        }
+        assert_eq!(bolt_ticks(shot), lived, "aim {aim}");
     }
 }

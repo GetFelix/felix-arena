@@ -2,8 +2,8 @@
 // page predicts with. `npm run core` builds it into src/core/.
 import init, { arena, initSync } from './core/felix_arena_core.js';
 
-export { boltSpeed, decodeTick, Inputs, playerKey, World } from './core/felix_arena_core.js';
-export type { Bolt, Craft, Player, Tick, Timing } from './core/felix_arena_core.js';
+export { boltSpeed, decodeTick, Inputs, playerKey, Prediction, World } from './core/felix_arena_core.js';
+export type { Bolt, Craft, Event, Player, Shot, Tick, Timing } from './core/felix_arena_core.js';
 
 /**
  * Load core. A page fetches the module next to its script; Node passes the

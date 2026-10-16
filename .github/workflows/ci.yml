@@ -148,5 +148,13 @@ jobs:
           npm ci
           npm run core
           npm run smoke
+      - name: The live page draws an input within a frame
+        working-directory: web
+        run: |
+          npm run build
+          npx playwright install --with-deps chromium
+          npx vite preview --host 127.0.0.1 --port 4173 --strictPort &
+          for _ in $(seq 1 30); do curl -sf http://127.0.0.1:4173/play.html >/dev/null && break; sleep 1; done
+          node scripts/input-to-pixel.mjs 'http://127.0.0.1:4173/play.html?arena=alpha&as=ana&quality=low'
       - if: failure()
         run: docker compose -f dev/compose.yml logs --no-color
