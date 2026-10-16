@@ -125,26 +125,16 @@ const open = async (user: string, quality: string, width: number, height: number
   await page.goto(`${base}?arena=${ARENA}&as=${user}${quality}`, { waitUntil: 'load' });
   return page;
 };
-// Ana's page draws at full quality for the screenshots; ben's draws lean, to spare the runner's CPU.
-const ana = await open('ana', '', 960, 540);
+// Ana's page draws at full quality and full size for the screenshots, slowly on a runner's software renderer; her
+// inputs still go out on the page's timer. Ben's draws lean, to spare the CPU.
+const ana = await open('ana', '', 1920, 1080);
 const ben = await open('ben', '&quality=low', 480, 270);
 for (const page of [ana, ben]) await page.waitForSelector('#loading', { state: 'detached', timeout: 180_000 });
 const stopBots = await Promise.all(['dan', 'eve'].map(bot));
 
 /** The screenshots, at 1920x1080. */
 async function shoot(name: string): Promise<void> {
-  await ana.setViewportSize({ width: 1920, height: 1080 });
-  // A few frames for the composer to follow the new size.
-  await ana.evaluate(
-    () =>
-      new Promise((resolve) => {
-        let n = 0;
-        const frame = () => (++n >= 3 ? resolve(null) : requestAnimationFrame(frame));
-        requestAnimationFrame(frame);
-      }),
-  );
   await ana.screenshot({ path: join(out!, name), timeout: SHOT_TIMEOUT_MS });
-  await ana.setViewportSize({ width: 960, height: 540 });
   console.log(`saved ${name}`);
 }
 
