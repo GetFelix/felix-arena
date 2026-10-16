@@ -73,14 +73,17 @@ export class Gateway {
   private readonly handlers = new Map<number, (frame: EventFrame) => void>();
   /** The current subscription number of each `stream/slot`. */
   private readonly slots = new Map<string, number>();
-  /** Subscriptions waiting for `subscribed`, by `stream/slot`. */
-  private readonly pending = new Map<string, Pending>();
+  /** Subscribes waiting for an answer, oldest first, by `stream/slot`. */
+  private readonly pending = new Map<string, Pending[]>();
+  private closing = false;
   /** Called with errors that answer no pending request, such as `subscription_ended`. */
   onError: (err: GatewayError) => void = () => {};
 
   private constructor(private readonly socket: WebSocket) {
     socket.addEventListener('message', (message) => this.receive(message));
-    socket.addEventListener('close', () => this.onError(new GatewayError('closed', 'the gateway closed the session')));
+    socket.addEventListener('close', () => {
+      if (!this.closing) this.onError(new GatewayError('closed', 'the gateway closed the session'));
+    });
   }
 
   /** Open a session on `arena` with an ID token, asking for {@link FEATURES}. */
@@ -126,14 +129,33 @@ export class Gateway {
   ): Promise<Subscribed> {
     const key = `${stream}/${slot}`;
     return new Promise((resolve, reject) => {
-      this.pending.get(key)?.reject(new Error('replaced'));
-      this.pending.set(key, { onEvent, resolve, reject });
+      const queue = this.pending.get(key) ?? [];
+      queue.push({ onEvent, resolve, reject });
+      this.pending.set(key, queue);
       this.socket.send(JSON.stringify({ type: 'subscribe', stream, slot, from }));
     });
   }
 
   close(): void {
+    this.closing = true;
     this.socket.close();
+  }
+
+  /**
+   * The oldest unanswered subscribe for this answer. The gateway answers a
+   * connection's subscribes in order, each with `subscribed` or an error.
+   * An error that names no slot is matched by its stream alone.
+   */
+  private answered(json: Json): { key: string; request: Pending; superseded: boolean } | null {
+    let key = `${String(json.stream)}/${String(json.slot)}`;
+    if (json.slot === undefined && !this.pending.has(key)) {
+      key = [...this.pending.keys()].find((k) => k.startsWith(`${String(json.stream)}/`)) ?? key;
+    }
+    const queue = this.pending.get(key);
+    const request = queue?.shift();
+    if (!queue || !request) return null;
+    if (queue.length === 0) this.pending.delete(key);
+    return { key, request, superseded: queue.length > 0 };
   }
 
   private receive(message: MessageEvent): void {
@@ -143,28 +165,31 @@ export class Gateway {
       return;
     }
     const json = JSON.parse(String(message.data)) as Json;
-    const key = `${String(json.stream)}/${String(json.slot)}`;
-    const pending = this.pending.get(key);
-    if (json.type === 'subscribed' && pending) {
-      this.pending.delete(key);
+    if (json.type === 'subscribed') {
+      const answer = this.answered(json);
+      if (!answer) return;
+      const { key, request, superseded } = answer;
       const previous = this.slots.get(key);
       if (previous !== undefined) this.handlers.delete(previous);
+      // A later subscribe to the same slot replaces this one at the gateway.
+      if (superseded) {
+        this.slots.delete(key);
+        return request.reject(new Error('replaced'));
+      }
       const sub = json.sub as number;
       this.slots.set(key, sub);
-      this.handlers.set(sub, pending.onEvent);
-      pending.resolve({
+      this.handlers.set(sub, request.onEvent);
+      request.resolve({
         sub,
         startOffset: json.start_offset as number | null,
         liveOffset: json.live_offset as number | null,
       });
     } else if (json.type === 'error') {
       const err = new GatewayError(String(json.code), String(json.message));
-      if (pending) {
-        this.pending.delete(key);
-        pending.reject(err);
-      } else {
-        this.onError(err);
-      }
+      // `subscription_ended` follows a `subscribed`, so it answers no request.
+      const answer = json.code === 'subscription_ended' ? null : this.answered(json);
+      if (answer) answer.request.reject(err);
+      else this.onError(err);
     }
   }
 }

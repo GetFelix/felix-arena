@@ -32,7 +32,8 @@ it('a watcher sees the live ticks, and a replay slot alongside', async () => {
   console.log(
     `${live.length} ticks in ${LISTEN_MS} ms (${hz.toFixed(1)} Hz), offsets ${seen[0]?.[0]} to ${seen.at(-1)?.[0]}`,
   );
-  expect(hz).toBeGreaterThanOrEqual(27);
+  // The sim skips a tick rather than bursting when a commit runs long.
+  expect(hz).toBeGreaterThanOrEqual(25);
   expect(hz).toBeLessThanOrEqual(32);
   for (let i = 1; i < seen.length; i++) {
     expect(seen[i]![0]!).toBeGreaterThan(seen[i - 1]![0]!);
