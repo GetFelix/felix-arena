@@ -41,10 +41,10 @@ async function shoot(url, file, patch) {
       async (route) => {
         const res = await route.fetch();
         const html = await res.text();
-      if (!html.includes('Math.random()')) {
-        errors.push('the style frame no longer calls Math.random(); update the seeding');
-      }
-      const body = html.replaceAll('Math.random()', 'window.__seeded()');
+        if (!html.includes('Math.random()')) {
+          errors.push('the style frame no longer calls Math.random(); update the seeding');
+        }
+        const body = html.replaceAll('Math.random()', 'window.__seeded()');
         await route.fulfill({ response: res, body });
       },
     );
@@ -73,7 +73,10 @@ await browser.close();
 const read = (f) => pngjs.PNG.sync.read(readFileSync(join(out, f)));
 const [a, b] = [read('style-frame.png'), read('app.png')];
 // A page that drew nothing would match another that drew nothing, so each must show a scene.
-for (const [name, png] of [['style frame', a], ['app', b]]) {
+for (const [name, png] of [
+  ['style frame', a],
+  ['app', b],
+]) {
   const values = new Set();
   for (let i = 0; i < png.data.length; i += 4 * 97) values.add(png.data.readUInt32BE(i));
   if (values.size < 1000) throw new Error(`the ${name} screenshot has only ${values.size} distinct colours`);
