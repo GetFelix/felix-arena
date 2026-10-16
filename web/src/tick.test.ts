@@ -28,7 +28,13 @@ describe('parseFrame', () => {
 
   it('splits the header from the payload', () => {
     const parsed = parseFrame(frame(40, 42n))!;
-    expect(parsed).toMatchObject({ sub: 9, offset: 42, skippedBefore: 2, gatewayReceivedUs: 1000, gatewaySentUs: 1250 });
+    expect(parsed).toMatchObject({
+      sub: 9,
+      offset: 42,
+      skippedBefore: 2,
+      gatewayReceivedUs: 1000,
+      gatewaySentUs: 1250,
+    });
     expect([...parsed.payload]).toEqual([0xaa, 0xbb]);
   });
 

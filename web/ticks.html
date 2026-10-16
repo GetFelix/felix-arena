@@ -10,7 +10,10 @@
         padding: 24px 16px;
         background: var(--void);
         color: var(--hull);
-        font: 14px/1.5 'JetBrains Mono', ui-monospace, monospace;
+        font:
+          14px/1.5 'JetBrains Mono',
+          ui-monospace,
+          monospace;
       }
       main {
         max-width: 720px;
@@ -77,15 +80,34 @@
       <h1>Arena <span id="arena"></span></h1>
       <div id="status" class="status">connecting</div>
       <dl>
-        <div><dt>offset</dt><dd id="offset">-</dd></div>
-        <div><dt>tick</dt><dd id="tick">-</dd></div>
-        <div><dt>epoch</dt><dd id="epoch">-</dd></div>
-        <div><dt>ticks/s</dt><dd id="rate">-</dd></div>
-        <div><dt>dropped</dt><dd id="dropped">0</dd></div>
+        <div>
+          <dt>offset</dt>
+          <dd id="offset">-</dd>
+        </div>
+        <div>
+          <dt>tick</dt>
+          <dd id="tick">-</dd>
+        </div>
+        <div>
+          <dt>epoch</dt>
+          <dd id="epoch">-</dd>
+        </div>
+        <div>
+          <dt>ticks/s</dt>
+          <dd id="rate">-</dd>
+        </div>
+        <div>
+          <dt>dropped</dt>
+          <dd id="dropped">0</dd>
+        </div>
       </dl>
       <table>
         <thead>
-          <tr><th>offset</th><th>tick</th><th>keyframe</th></tr>
+          <tr>
+            <th>offset</th>
+            <th>tick</th>
+            <th>keyframe</th>
+          </tr>
         </thead>
         <tbody id="recent"></tbody>
       </table>

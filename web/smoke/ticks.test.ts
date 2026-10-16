@@ -29,7 +29,9 @@ it('a watcher sees the live ticks, and a replay slot alongside', async () => {
 
   const seen = ticks(live);
   const hz = (live.length * 1000) / LISTEN_MS;
-  console.log(`${live.length} ticks in ${LISTEN_MS} ms (${hz.toFixed(1)} Hz), offsets ${seen[0]?.[0]} to ${seen.at(-1)?.[0]}`);
+  console.log(
+    `${live.length} ticks in ${LISTEN_MS} ms (${hz.toFixed(1)} Hz), offsets ${seen[0]?.[0]} to ${seen.at(-1)?.[0]}`,
+  );
   expect(hz).toBeGreaterThanOrEqual(27);
   expect(hz).toBeLessThanOrEqual(32);
   for (let i = 1; i < seen.length; i++) {
