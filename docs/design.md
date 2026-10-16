@@ -265,7 +265,8 @@ without the ones before it:
 
 | Part | Contents | Size |
 |---|---|---|
-| Header | Epoch (2 bytes), flags with the keyframe bit (1), reserved (1), match number (4), tick number (4), little-endian | 12 bytes |
+| Header | Epoch (2 bytes), flags with the keyframe bit (1) and the timed bit (2), reserved (1), match number (4), tick number (4), little-endian | 12 bytes |
+| Timing, with the timed bit | Commit start in µs since the Unix epoch (8), the sim step (4), the previous tick's commit in µs (4) | 16 bytes |
 | Crafts | Per craft: slot, position and velocity (centimetres, 16-bit), heading, health, flags, last input sequence applied | 16 bytes each |
 | Projectiles | Per live bolt: id, owner, position, heading | 9 bytes each |
 | Events | Hits, kills, spawns, pickups, with whatever each needs | Varies |
@@ -349,7 +350,27 @@ everyone. Arena keeps `drop_new`, the default. The policy is broker-wide
 not per stream.
 
 Instrument every leg separately from the first milestone, so that the instinct
-to blame the broker can be settled with data.
+to blame the broker can be settled with data. The sim writes its commit start,
+its step and the previous tick's commit time into each tick; the gateway's
+binary frame carries when it received the tick from Felix and when it wrote it
+to the WebSocket; the browser notes when it arrived. The dev ticks page
+(`web/ticks.html`) turns those into the p50 and p99 of each leg:
+
+| Leg | From | To | Clocks |
+|---|---|---|---|
+| Sim step | The tick falling due | Its commit starting | The sim's |
+| Commit | Commit start | The sim holding `CommitOk` | The sim's |
+| Broker to gateway | Commit start | The gateway receiving the tick | Sim and gateway |
+| Gateway hop | Received from Felix | Written to the WebSocket | The gateway's |
+| Gateway to browser | Written to the WebSocket | Arrived in the page | Gateway and browser |
+
+A leg that spans two processes compares their wall clocks. In the dev stack on
+Linux they are one clock. Under Docker Desktop or Podman on macOS the
+containers share the VM's clock, so only the gateway to browser leg carries the
+VM's drift. Across machines every such leg carries NTP's error, which is about
+the size of the legs themselves, so a deployment reads the gateway's
+`event_relay` histogram and the sim's commit log instead. The input legs come
+with inputs, in M2.
 
 ## The kill cam
 

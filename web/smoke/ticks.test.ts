@@ -3,6 +3,7 @@
 // the live slot keeps going. `npm run smoke` runs it; CI's dev stack job does.
 import { expect, it } from 'vitest';
 import { Gateway, type EventFrame } from '../src/gateway';
+import { LEGS, Legs } from '../src/legs';
 import { parseTickHeader } from '../src/tick';
 
 const GATEWAY = process.env.ARENA_GATEWAY ?? 'ws://127.0.0.1:8787/ws';
@@ -42,6 +43,26 @@ it('a watcher sees the live ticks, and a replay slot alongside', async () => {
   for (const frame of live) {
     expect(frame.gatewayReceivedUs).toBeGreaterThan(0);
     expect(frame.gatewaySentUs).toBeGreaterThanOrEqual(frame.gatewayReceivedUs);
+  }
+
+  // The sim, the gateway and this client share the runner's clock in CI.
+  const legs = new Legs(live.length);
+  for (const frame of live) {
+    const timing = parseTickHeader(frame.payload)?.timing;
+    expect(timing).toBeTruthy();
+    legs.add(frame, timing!);
+  }
+  console.table(
+    Object.fromEntries(
+      LEGS.map((leg) => {
+        const { count, p50, p99 } = legs.summary(leg.id);
+        return [leg.name, { count, p50_ms: p50 / 1000, p99_ms: p99 / 1000 }];
+      }),
+    ),
+  );
+  for (const leg of LEGS) {
+    expect(legs.summary(leg.id).count).toBeGreaterThan(0);
+    expect(legs.summary(leg.id).p50).toBeGreaterThanOrEqual(0);
   }
 
   const replayed: EventFrame[] = [];
