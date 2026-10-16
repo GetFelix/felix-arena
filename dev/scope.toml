@@ -1,0 +1,15 @@
+# What the gateway lets a browser session reach in one arena. dev/seed.mjs
+# creates these streams for arenas `alpha` and `bravo`.
+
+[scope]
+field = "arena"
+
+[[scope.streams]]
+alias = "ticks"
+name = "arena.ticks.{scope}"
+actions = ["subscribe"]
+
+[[scope.streams]]
+alias = "input"
+name = "arena.input.{scope}"
+actions = ["publish"]
