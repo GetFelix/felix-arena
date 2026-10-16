@@ -86,6 +86,24 @@ cd web && npm install && npm run core && npm run dev
 1920x1080 and writes `style-frame.png`, `app.png`, `diff.png` and `diff.json`;
 the `style frame` CI job runs it and uploads them as the `frames` artifact.
 
+## Run a release
+
+Each release on GitHub carries the built web client as
+`felix-arena-web-<version>.tar.gz`, so playing it needs no Node or npm, only a
+static file server:
+
+```bash
+gh release download v0.1.0 -R GetFelix/felix-arena -p 'felix-arena-web-*'
+shasum -a 256 -c felix-arena-web-v0.1.0.tar.gz.sha256
+tar -xzf felix-arena-web-v0.1.0.tar.gz
+cd felix-arena-web-v0.1.0 && python3 -m http.server 5173
+# open http://localhost:5173/play.html?offline
+```
+
+`play.html?offline` runs the game in the page against three bots. With the
+development stack below running, `play.html?arena=alpha&as=ana` plays through
+Felix instead.
+
 ## Development stack
 
 `dev/up.sh` starts Felix (a control plane and one broker), a stand-in identity
