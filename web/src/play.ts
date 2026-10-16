@@ -3,7 +3,6 @@
 import { Clock, Color, Fog, Group, Scene, Vector3 } from 'three';
 import { buildArena } from './arena';
 import { hdriUrl, modelUrls } from './assets';
-import { Bolts, type BoltView } from './bolts';
 import { ArenaCamera } from './camera';
 import { Controls } from './controls';
 import {
@@ -113,7 +112,6 @@ async function main(): Promise<void> {
   const arena = buildArena(scene, arenaLayout(), models, renderer.capabilities.getMaxAnisotropy());
   const glow = glowTexture();
   const fleet = new Fleet(scene, fx, models, { glow, blob: blobTexture() });
-  const bolts = new Bolts(fx, glow);
   const effects = new Effects(scene, fx, { glow, flare: flareTexture() }, seeded(1));
   const pickup = new Pickup(fx, glow, arena.crystalLight);
   const hud = new Hud();
@@ -244,12 +242,11 @@ async function main(): Promise<void> {
     debug.crafts = crafts.map(({ slot, violet, alive, x, z }) => ({ slot, violet, alive, x, z }));
 
     const claimed = own?.claimed ?? new Set<number>();
-    const drawn: BoltView[] = [];
     const byId = new Map<number, { x: number; z: number }>();
     const violet = new Map(crafts.map((c) => [c.slot, c.violet]));
     for (const b of frame?.bolts ?? []) {
       byId.set(b.id, b);
-      if (!claimed.has(b.id)) drawn.push({ violet: violet.get(b.owner) ?? false, x: b.x, z: b.z, heading: b.heading });
+      if (!claimed.has(b.id)) effects.bolt(violet.get(b.owner) ?? false, b.x, b.z, b.heading);
     }
     if (own) {
       const mine = violet.get(own.slot) ?? false;
@@ -257,11 +254,10 @@ async function main(): Promise<void> {
       const hits = (x: number, z: number) =>
         crafts.some((c) => c.alive && c.violet !== mine && Math.hypot(c.x - x, c.z - z) < reach);
       for (const shot of own.drawShots(now, (id) => byId.has(id), hits)) {
-        drawn.push({ violet: mine, x: shot.x, z: shot.z, heading: shot.heading, size: shot.opacity });
+        effects.bolt(mine, shot.x, shot.z, shot.heading, shot.opacity);
       }
       for (const fired of own.firedSince(shown ?? now)) effects.fired(mine, fired.x, fired.z, t);
     }
-    bolts.update(drawn);
 
     while (frame && due[0] && due[0].tick <= frame.renderTick) {
       const e = due.shift()!;
