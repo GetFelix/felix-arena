@@ -108,6 +108,39 @@
         background: var(--accent);
         box-shadow: 0 0 10px var(--accent);
       }
+      .quality {
+        margin-left: 12px;
+        pointer-events: auto;
+      }
+      .quality select {
+        margin-left: 6px;
+        padding: 3px 6px;
+        font: inherit;
+        color: var(--ink);
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 6px;
+      }
+      .bench {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        margin: 0;
+        padding: 16px 20px;
+        max-width: calc(100vw - 32px);
+        overflow: auto;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        font:
+          13px/1.5 'JetBrains Mono',
+          ui-monospace,
+          monospace;
+        color: var(--ink);
+        pointer-events: auto;
+        user-select: text;
+      }
       .phase {
         position: absolute;
         top: 66px;
@@ -341,7 +374,19 @@
         </div>
         <div class="next" id="board-next"></div>
       </div>
-      <div class="tag"><i></i><span id="where">felix-arena</span></div>
+      <div class="tag">
+        <i></i><span id="where">felix-arena</span>
+        <label class="quality"
+          >Quality
+          <select id="quality">
+            <option value="auto">Auto</option>
+            <option value="high">High</option>
+            <option value="medium">Medium</option>
+            <option value="low">Low</option>
+          </select></label
+        >
+      </div>
+      <pre class="bench" id="bench" hidden></pre>
     </div>
     <script type="module" src="/src/play.ts"></script>
   </body>
