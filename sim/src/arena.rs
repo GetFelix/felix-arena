@@ -6,7 +6,7 @@ use tokio::time::{Instant, MissedTickBehavior};
 use tracing::{info, warn};
 
 use crate::latency::Window;
-use crate::tick::Header;
+use crate::tick::{Header, Timing, record};
 
 /// 30 Hz.
 pub(crate) const TICK: Duration = Duration::from_nanos(1_000_000_000 / 30);
@@ -32,6 +32,7 @@ where
     timer.set_missed_tick_behavior(MissedTickBehavior::Skip);
     let mut tick: u32 = 0;
     let mut last_due: Option<Instant> = None;
+    let mut previous_commit: Option<Duration> = None;
     let mut report = Report::new(Instant::now());
     loop {
         let due = timer.tick().await;
@@ -44,17 +45,26 @@ where
         let header = Header {
             epoch,
             keyframe: tick.is_multiple_of(KEYFRAME_EVERY),
+            timed: true,
             match_number: 0,
             tick,
         };
         let started = Instant::now();
-        let answer = tokio::time::timeout(COMMIT_TIMEOUT, commit(header.encode().to_vec()))
+        let timing = Timing {
+            commit_start_us: unix_micros(),
+            step_us: micros(started - due),
+            previous_commit_us: previous_commit.map_or(0, micros),
+        };
+        let answer = tokio::time::timeout(COMMIT_TIMEOUT, commit(record(&header, Some(&timing))))
             .await
             .unwrap_or_else(|_| Err(anyhow::anyhow!("no answer within {COMMIT_TIMEOUT:?}")));
+        previous_commit = None;
         match answer {
             Ok(offset) => {
-                report.latency.record(started.elapsed());
+                let took = started.elapsed();
+                report.latency.record(took);
                 report.offset = Some(offset);
+                previous_commit = Some(took);
             }
             Err(err) => {
                 report.failed += 1;
@@ -70,6 +80,20 @@ where
             report.log(&arena, now);
         }
     }
+}
+
+fn micros(duration: Duration) -> u32 {
+    u32::try_from(duration.as_micros()).unwrap_or(u32::MAX)
+}
+
+/// Microseconds since the Unix epoch on this host's clock, which the gateway
+/// and the browser compare their own times against.
+fn unix_micros() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| {
+            u64::try_from(since.as_micros()).unwrap_or(u64::MAX)
+        })
 }
 
 /// What one arena did since the last report.
@@ -159,6 +183,7 @@ mod tests {
         assert_eq!(seen.len(), 30);
         for (i, (header, _)) in seen.iter().enumerate() {
             assert_eq!(header.tick, i as u32);
+            assert!(header.timed);
             assert_eq!(header.epoch, 1);
             assert_eq!(header.keyframe, i % 30 == 0);
         }

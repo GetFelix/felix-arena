@@ -16,6 +16,8 @@ export interface EventFrame {
   gatewayReceivedUs: number;
   /** When the gateway handed the frame to the WebSocket, on its clock. */
   gatewaySentUs: number;
+  /** When this page received the frame, on its own clock. */
+  receivedUs: number;
   payload: Uint8Array;
 }
 
@@ -24,7 +26,7 @@ const NO_OFFSET = 0xffff_ffff_ffff_ffffn;
 const MIN_HEADER = 40;
 
 /** Parse one binary frame, or `null` for a kind this client does not know. */
-export function parseFrame(data: ArrayBuffer): EventFrame | null {
+export function parseFrame(data: ArrayBuffer, receivedUs = nowUs()): EventFrame | null {
   const view = new DataView(data);
   if (data.byteLength < 2 || view.getUint8(0) !== EVENT_KIND) return null;
   // The header may grow; the payload starts where its length byte says.
@@ -37,8 +39,14 @@ export function parseFrame(data: ArrayBuffer): EventFrame | null {
     skippedBefore: view.getUint32(16, true),
     gatewayReceivedUs: Number(view.getBigUint64(24, true)),
     gatewaySentUs: Number(view.getBigUint64(32, true)),
+    receivedUs,
     payload: new Uint8Array(data, headerLen),
   };
+}
+
+/** Microseconds since the Unix epoch on this host's clock. */
+export function nowUs(): number {
+  return Math.round((performance.timeOrigin + performance.now()) * 1000);
 }
 
 /** What `subscribed` reports. */
