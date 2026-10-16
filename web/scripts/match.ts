@@ -16,11 +16,13 @@ if (!base || !out) throw new Error('usage: match.ts <play page url> <out dir>');
 const ARENA = 'alpha';
 const GATEWAY = process.env.ARENA_GATEWAY ?? 'ws://127.0.0.1:8787/ws';
 const IDP = process.env.ARENA_IDP ?? 'http://127.0.0.1:9400';
-const LIMIT_MS = 6 * 60_000;
+const LIMIT_MS = 9 * 60_000;
+/** Software rendering at 1920x1080 takes many seconds a frame on a CI runner. */
+const SHOT_TIMEOUT_MS = 240_000;
 mkdirSync(out, { recursive: true });
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-type Arena = Pick<ArenaDebug, 'slot' | 'own' | 'match' | 'crafts'>;
+type Arena = Pick<ArenaDebug, 'slot' | 'own' | 'match' | 'crafts' | 'phases'>;
 
 loadCore(readFileSync(new URL('../src/core/felix_arena_core_bg.wasm', import.meta.url)));
 
@@ -64,7 +66,7 @@ async function bot(user: string): Promise<() => void> {
 async function arena(page: Page): Promise<Arena> {
   return page.evaluate(() => {
     const a = window.arena!;
-    return { slot: a.slot, own: a.own, match: a.match, crafts: a.crafts };
+    return { slot: a.slot, own: a.own, match: a.match, crafts: a.crafts, phases: a.phases };
   });
 }
 
@@ -133,13 +135,20 @@ const stopBots = await Promise.all(['dan', 'eve'].map(bot));
 async function shoot(name: string): Promise<void> {
   await ana.setViewportSize({ width: 1920, height: 1080 });
   // A few frames for the composer to follow the new size.
-  await ana.evaluate(() => new Promise((resolve) => setTimeout(resolve, 2500)));
-  await ana.screenshot({ path: join(out!, name) });
+  await ana.evaluate(
+    () =>
+      new Promise((resolve) => {
+        let n = 0;
+        const frame = () => (++n >= 3 ? resolve(null) : requestAnimationFrame(frame));
+        requestAnimationFrame(frame);
+      }),
+  );
+  await ana.screenshot({ path: join(out!, name), timeout: SHOT_TIMEOUT_MS });
   await ana.setViewportSize({ width: 960, height: 540 });
   console.log(`saved ${name}`);
 }
 
-const seen: string[] = [];
+let seen: string[] = [];
 let shotLive = false;
 let shotResults = false;
 let done = false;
@@ -147,27 +156,31 @@ const started = Date.now();
 while (!done && Date.now() - started < LIMIT_MS) {
   const [a, b] = await Promise.all([arena(ana), arena(ben)]);
   const m = a.match;
-  if (m) {
-    const step = `${m.number}:${m.phase}`;
-    if (seen.at(-1) !== step) {
-      seen.push(step);
+  if (a.phases.length > seen.length) {
+    for (const phase of a.phases.slice(seen.length)) {
       console.log(
-        `${((Date.now() - started) / 1000).toFixed(0)} s: match ${m.number} ${m.phase}, ${m.scores.join(' to ')}`,
+        `${((Date.now() - started) / 1000).toFixed(0)} s: match ${phase.replace(':', ' ')}, ${m?.scores.join(' to ')}`,
       );
     }
-    // Mid-match, once someone has scored, or late in the match whatever the score.
-    if (m.phase === 'playing' && !shotLive && m.seconds < 25 && (m.scores[0] + m.scores[1] > 0 || m.seconds < 12)) {
+    seen = a.phases;
+  }
+  if (m) {
+    // The results first, as they last the shortest; then the live game, once someone has scored or late on.
+    if (m.phase === 'results' && !shotResults) {
+      await shoot('results.png');
+      shotResults = true;
+    } else if (
+      m.phase === 'playing' &&
+      !shotLive &&
+      m.seconds < 80 &&
+      (m.scores[0] + m.scores[1] > 0 || m.seconds < 60)
+    ) {
       await shoot('live.png');
       shotLive = true;
     }
-    if (m.phase === 'results' && !shotResults) {
-      await sleep(1500);
-      await shoot('results.png');
-      shotResults = true;
-    }
     const first = seen.findIndex((s) => s.endsWith(':playing'));
     const number = first >= 0 ? Number(seen[first]!.split(':')[0]) : NaN;
-    done = seen.includes(`${number}:results`) && seen.includes(`${number + 1}:warmup`);
+    done = seen.includes(`${number}:results`) && seen.includes(`${number + 1}:warmup`) && shotResults && shotLive;
   }
   await Promise.all([play(ana, a, 0.8), play(ben, b, -0.8)]);
   await sleep(120);

@@ -168,8 +168,8 @@ jobs:
       - run: dev/up.sh
         env:
           SIM_WARMUP_SECONDS: '5'
-          SIM_MATCH_SECONDS: '45'
-          SIM_RESULTS_SECONDS: '12'
+          SIM_MATCH_SECONDS: '100'
+          SIM_RESULTS_SECONDS: '45'
           SIM_KILL_LIMIT: '10'
           SIM_RAIL_SECONDS: '10'
       - run: rustup toolchain install

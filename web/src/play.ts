@@ -55,6 +55,8 @@ export interface ArenaDebug {
   /** Where your craft is drawn, in centimetres. */
   own: { x: number; z: number; heading: number } | null;
   match: { number: number; phase: string; seconds: number; scores: [number, number]; railIn: number } | null;
+  /** Each match number and phase the page has seen, as `number:phase`, oldest first. */
+  phases: string[];
   /** Every craft as drawn: centimetres. */
   crafts: { slot: number; violet: boolean; alive: boolean; x: number; z: number }[];
   /** Where a point on the floor, in centimetres, is on screen, in CSS pixels. */
@@ -85,6 +87,7 @@ async function main(): Promise<void> {
     ticks: 0,
     own: null,
     match: null,
+    phases: [],
     crafts: [],
     screenOf: () => ({ x: 0, y: 0 }),
   };
@@ -186,6 +189,8 @@ async function main(): Promise<void> {
     }
     if (mine?.alive) respawnAt = null;
     match.update(tick, arrivedMs);
+    const phase = `${match.number}:${match.phase}`;
+    if (debug.phases.at(-1) !== phase) debug.phases.push(phase);
     if (own) own.frozen = match.phase === 'results';
     own?.reconcile(tick, arrivedMs);
   };

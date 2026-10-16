@@ -27,6 +27,11 @@ export interface Smoothness {
   stalls: number;
   /** Frames where the render time ran out past every tick received, as when the network holds ticks up. */
   starved: number;
+  /**
+   * Frames in the blend after a starved one, while what was guessed through the hold-up is taken back. They are
+   * left out of the other measures, which judge the interpolator and not the network.
+   */
+  recovering: number;
   /** Frames drawn past the newest tick received. */
   extrapolated: number;
   minDelayMs: number;
@@ -34,6 +39,8 @@ export interface Smoothness {
 }
 
 const FRAME_MS = 1000 / 60;
+/** The interpolator's blend after a guess, and a frame. */
+const RECOVER_MS = 100 + FRAME_MS;
 
 /**
  * Play `arrivals` through an {@link Interpolator} at 60 frames a second, leaving out each arrival `lose` picks, and
@@ -50,6 +57,7 @@ export function measure(arrivals: Arrival[], lose: (index: number) => boolean, t
     maxJump: 0,
     stalls: 0,
     starved: 0,
+    recovering: 0,
     extrapolated: 0,
     minDelayMs: Infinity,
     maxDelayMs: 0,
@@ -59,6 +67,7 @@ export function measure(arrivals: Arrival[], lose: (index: number) => boolean, t
   let previous: { r: number; at: Map<number, [number, number]>; truth: Map<number, [number, number]> } | null = null;
   // A second in, so the clock has settled, until the last arrival.
   const start = kept[0]!.arrivedMs + 1000;
+  let starvedAt = -Infinity;
   for (let now = kept[0]!.arrivedMs; now <= kept.at(-1)!.arrivedMs; now += FRAME_MS) {
     while (next < kept.length && kept[next]!.arrivedMs <= now) {
       interpolator.push(kept[next]!.snapshot, kept[next]!.arrivedMs);
@@ -70,6 +79,13 @@ export function measure(arrivals: Arrival[], lose: (index: number) => boolean, t
     out.minDelayMs = Math.min(out.minDelayMs, view.delayMs);
     out.maxDelayMs = Math.max(out.maxDelayMs, view.delayMs);
     if (view.extrapolating) out.extrapolated++;
+    const starved = view.renderTick - interpolator.newest!.tick >= 2;
+    if (starved) {
+      out.starved++;
+      starvedAt = now;
+    }
+    const recovering = !starved && now - starvedAt <= RECOVER_MS;
+    if (recovering) out.recovering++;
     const at = new Map<number, [number, number]>();
     const real = new Map<number, [number, number]>();
     for (const craft of view.crafts) {
@@ -77,11 +93,11 @@ export function measure(arrivals: Arrival[], lose: (index: number) => boolean, t
       if (!craft.alive || !expected) continue;
       at.set(craft.slot, [craft.x, craft.z]);
       real.set(craft.slot, expected);
-      out.maxError = Math.max(out.maxError, Math.hypot(craft.x - expected[0], craft.z - expected[1]));
+      if (!starved && !recovering) {
+        out.maxError = Math.max(out.maxError, Math.hypot(craft.x - expected[0], craft.z - expected[1]));
+      }
     }
-    const starved = view.renderTick - interpolator.newest!.tick >= 2;
-    if (starved) out.starved++;
-    if (previous && !starved) {
+    if (previous && !starved && !recovering) {
       if (view.renderTick - previous.r < (0.5 * FRAME_MS) / TICK_MS) out.stalls++;
       for (const [slot, [x, z]] of at) {
         const [px, pz] = previous.at.get(slot) ?? [x, z];
