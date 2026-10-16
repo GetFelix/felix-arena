@@ -80,10 +80,11 @@ const HALF: [Obstacle; 10] = [
 
 /// Every obstacle, in a fixed order: the centre crystal, then each side.
 pub const OBSTACLES: [Obstacle; 21] = {
+    // The centre is the crystal's plinth, 2.3 m across at its foot.
     let mut all = [Obstacle::Round {
         x: 0,
         z: 0,
-        radius: 90,
+        radius: 230,
     }; 21];
     let mut i = 0;
     while i < HALF.len() {

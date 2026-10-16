@@ -6,7 +6,7 @@ use anyhow::Result;
 use tokio::time::{Instant, MissedTickBehavior};
 use tracing::{info, warn};
 
-use felix_arena_core::{Timing, World};
+use felix_arena_core::{Rules, Timing, World};
 
 use crate::inputs::{Inbox, Players};
 use crate::latency::Window;
@@ -25,14 +25,19 @@ const COMMIT_TIMEOUT: Duration = Duration::from_secs(1);
 /// A commit finishes before the next tick starts, so ticks land in order. A
 /// tick that is due while a commit is still running is skipped rather than
 /// made up later, so a slow commit never causes a burst of ticks.
-pub(crate) async fn run<C, F>(arena: String, epoch: u16, inbox: Arc<Mutex<Inbox>>, mut commit: C)
-where
+pub(crate) async fn run<C, F>(
+    arena: String,
+    epoch: u16,
+    rules: Rules,
+    inbox: Arc<Mutex<Inbox>>,
+    mut commit: C,
+) where
     C: FnMut(Vec<u8>) -> F,
     F: Future<Output = Result<u64>>,
 {
     let mut timer = tokio::time::interval(TICK);
     timer.set_missed_tick_behavior(MissedTickBehavior::Skip);
-    let mut world = World::new(0);
+    let mut world = World::with_rules(0, rules);
     let mut players = Players::default();
     let mut last_due: Option<Instant> = None;
     let mut previous_commit: Option<Duration> = None;
@@ -166,7 +171,7 @@ mod tests {
 
     use tokio::time::Instant;
 
-    use felix_arena_core::{Tick, Timing};
+    use felix_arena_core::{Rules, Tick, Timing};
 
     use super::{TICK, run};
 
@@ -200,6 +205,7 @@ mod tests {
         let arena = tokio::spawn(run(
             "a".into(),
             1,
+            Rules::default(),
             Arc::default(),
             move |record: Vec<u8>| {
                 let header = header(&record);
