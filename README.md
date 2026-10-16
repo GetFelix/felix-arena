@@ -68,6 +68,19 @@ cd prototype && python3 -m http.server 8000
 Drag to orbit the camera. Add `?t=1.2` to the URL to freeze the action at that
 moment.
 
+## Development stack
+
+`dev/up.sh` starts Felix (a control plane and one broker), a stand-in identity
+provider, felix-gateway on `ws://127.0.0.1:8787` and the sim, with two arenas,
+`alpha` and `bravo`, from Docker or Podman (`CONTAINER_ENGINE` picks one). The
+broker batches deliveries with a short delay and keeps the default `drop_new`
+subscriber queues. Watch the sim's tick rate and commit latency with:
+
+```bash
+dev/up.sh
+docker compose -f dev/compose.yml logs -f sim   # or podman compose
+```
+
 ## How it works
 
 Three processes will sit around Felix: the browser client, a stateless
