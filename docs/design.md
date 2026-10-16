@@ -623,7 +623,7 @@ excluded from the occlusion pass so they never darken what they light.
 - Repeated props are `InstancedMesh`.
 - Crafts are at most 8 small models of a few hundred triangles each.
 - Bolts are one `InstancedMesh` of up to 64, and their glow halos another.
-- Sparks are one pooled `Points` system; bursts and debris come from fixed pools, so nothing allocates during a match.
+- Every effect comes from one kit (`web/src/effects.ts`) with fixed pools, which the style frame's scripted fight and the live match both draw through: 16 hits, each with its own sparks, ground ring and flash, and their debris as one instanced mesh; 24 flares for muzzle flashes and destroyed crafts; 6 rail beams. Nothing allocates during a match: a caller fills in a pooled record instead of passing numbers, and the kit draws the records when the frame ends.
 - Point lights are a fixed pool of 3 whose intensity changes, never their number, because a change in light count recompiles shaders.
 
 **Budget at 1080p on a laptop iGPU (Intel Iris Xe, Apple M1), 16.7 ms a frame:**
@@ -639,11 +639,32 @@ excluded from the occlusion pass so they never darken what they light.
 
 Draw calls stay under 150 and triangles under 300,000.
 
+CI holds the effects to their share of the JavaScript budget. `web/fx-bench.html`
+puts 40 bolts and 8 hits on screen with their flashes and lights, and
+`web/scripts/fx-bench.mjs` times each frame's update and `renderer.render` call
+(under 2 ms at the 95th percentile) and samples every allocation while the
+effects update (none allowed). CI renders on the CPU with SwiftShader, so it
+times the page's own work and the issuing of draw calls, not the GPU.
+
 **Quality tiers.** High is the style frame. Medium drops ambient occlusion,
 halves the shadow map and renders bloom at quarter resolution. Low keeps only
 tone mapping and an unshadowed key light, with baked contact shadows under
-crafts. The client measures the first 3 seconds of frame times and steps down a
-tier while the 95th percentile is over 16.7 ms. The player can override it.
+crafts. The client starts at High, measures 3 seconds of frame intervals and
+steps down a tier while their 95th percentile is over 20 ms, judging each new
+tier on its own 3 seconds. The line is 20 ms rather than 16.7 because a display
+at 60 Hz spaces frames that hold the rate around 16.7 ms with jitter either
+side, and a missed frame shows as 33 ms. It never steps back up, so the look
+does not change mid-match. The player can override it: `?quality=high`,
+`medium`, `low` or `auto` in the URL, or the Quality setting on the HUD, which
+is saved in the browser (`web/src/quality.ts`).
+
+The frame-time target is checked with `play.html?offline&bench`: a two-minute
+offline match against three bots, with your craft flying circles and firing,
+drawn at 1920x1080 whatever the window size. It reports the tier, the 50th,
+95th and 99th percentile frame intervals, the share of frames over 20 ms, the
+page's own work per frame and the GPU, on screen and as `window.arena.bench`.
+`&quality=` forces a tier (the saved setting is ignored here) and `&seconds=`
+changes the length.
 
 **Asset loading.** Models are small GLB files from the Kenney Space Kit, 10 to
 40 KB each; the HDRI is 1.5 MB and the largest single download. The arena and

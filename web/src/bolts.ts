@@ -3,50 +3,45 @@ import {
   AdditiveBlending,
   CapsuleGeometry,
   InstancedMesh,
-  Matrix4,
   MeshBasicMaterial,
   type Object3D,
   PlaneGeometry,
-  Quaternion,
   type Texture,
-  Vector3,
 } from 'three';
-import { GUN_HEIGHT } from './fleet';
 import { hdr } from './materials';
 import { palette } from './palette';
 
 /** At most this many bolts of each team are drawn. */
-const MAX = 64;
+export const MAX_BOLTS = 64;
 
-/** A bolt to draw: centimetres, a heading in 65536ths of a turn, and 0 to 1 of its full size. */
-export interface BoltView {
-  violet: boolean;
+/** A bolt to draw this frame: metres, turned `yaw` radians about y from +x, at `size` of its full size. */
+export interface Bolt {
   x: number;
+  y: number;
   z: number;
-  heading: number;
-  size?: number;
+  yaw: number;
+  size: number;
 }
 
 interface Team {
   core: InstancedMesh;
   halo: InstancedMesh;
+  bolts: Bolt[];
+  count: number;
 }
 
 /** The bolts in flight, drawn the way the style frame draws one. */
 export class Bolts {
   private readonly teams: [Team, Team];
-  private readonly m = new Matrix4();
-  private readonly q = new Quaternion();
-  private readonly p = new Vector3();
-  private readonly s = new Vector3();
-  private readonly up = new Vector3(0, 1, 0);
+  /** Filled in and never drawn when a team asks for more than {@link MAX_BOLTS}. */
+  private readonly spare: Bolt = bolt();
 
   constructor(fx: Object3D, glow: Texture) {
     const core = new CapsuleGeometry(0.09, 0.9, 4, 8).rotateZ(Math.PI / 2);
     const halo = new PlaneGeometry(3.2, 0.7).rotateX(-Math.PI / 2).translate(-0.9, 0, 0);
     const team = (colour: string): Team => {
       const t = {
-        core: new InstancedMesh(core, new MeshBasicMaterial({ color: hdr(colour, 6) }), MAX),
+        core: new InstancedMesh(core, new MeshBasicMaterial({ color: hdr(colour, 6) }), MAX_BOLTS),
         halo: new InstancedMesh(
           halo,
           new MeshBasicMaterial({
@@ -56,8 +51,10 @@ export class Bolts {
             blending: AdditiveBlending,
             depthWrite: false,
           }),
-          MAX,
+          MAX_BOLTS,
         ),
+        bolts: Array.from({ length: MAX_BOLTS }, bolt),
+        count: 0,
       };
       for (const mesh of [t.core, t.halo]) {
         mesh.count = 0;
@@ -69,26 +66,48 @@ export class Bolts {
     this.teams = [team(palette.coral), team(palette.violet)];
   }
 
-  /** Draws exactly `bolts`. */
-  update(bolts: BoltView[]): void {
-    const counts = [0, 0];
-    for (const bolt of bolts) {
-      const side = bolt.violet ? 1 : 0;
-      const i = counts[side]!;
-      if (i >= MAX) continue;
-      counts[side] = i + 1;
-      this.q.setFromAxisAngle(this.up, -(bolt.heading / 65536) * 2 * Math.PI);
-      this.p.set(bolt.x / 100, GUN_HEIGHT, bolt.z / 100);
-      this.s.setScalar(bolt.size ?? 1);
-      this.m.compose(this.p, this.q, this.s);
-      this.teams[side].core.setMatrixAt(i, this.m);
-      this.teams[side].halo.setMatrixAt(i, this.m);
-    }
-    this.teams.forEach((t, side) => {
-      for (const mesh of [t.core, t.halo]) {
-        mesh.count = counts[side]!;
-        mesh.instanceMatrix.needsUpdate = true;
-      }
-    });
+  /** A bolt of `violet`'s team for this frame, to fill in. */
+  add(violet: boolean): Bolt {
+    const team = this.teams[violet ? 1 : 0];
+    return team.bolts[team.count++] ?? this.spare;
   }
+
+  /** Draws the bolts added since the last commit, and starts the next frame empty. */
+  commit(): void {
+    for (const team of this.teams) {
+      const n = Math.min(team.count, MAX_BOLTS);
+      const core = team.core.instanceMatrix.array as Float32Array;
+      const halo = team.halo.instanceMatrix.array as Float32Array;
+      for (let i = 0; i < n; i++) {
+        const b = team.bolts[i]!;
+        // Turned about y and scaled evenly, as Matrix4.compose would make it, written straight into both buffers.
+        const c = Math.cos(b.yaw) * b.size;
+        const s = Math.sin(b.yaw) * b.size;
+        const o = i * 16;
+        core[o] = halo[o] = c;
+        core[o + 1] = halo[o + 1] = 0;
+        core[o + 2] = halo[o + 2] = -s;
+        core[o + 3] = halo[o + 3] = 0;
+        core[o + 4] = halo[o + 4] = 0;
+        core[o + 5] = halo[o + 5] = b.size;
+        core[o + 6] = halo[o + 6] = 0;
+        core[o + 7] = halo[o + 7] = 0;
+        core[o + 8] = halo[o + 8] = s;
+        core[o + 9] = halo[o + 9] = 0;
+        core[o + 10] = halo[o + 10] = c;
+        core[o + 11] = halo[o + 11] = 0;
+        core[o + 12] = halo[o + 12] = b.x;
+        core[o + 13] = halo[o + 13] = b.y;
+        core[o + 14] = halo[o + 14] = b.z;
+        core[o + 15] = halo[o + 15] = 1;
+      }
+      team.core.count = team.halo.count = n;
+      team.core.instanceMatrix.needsUpdate = team.halo.instanceMatrix.needsUpdate = true;
+      team.count = 0;
+    }
+  }
+}
+
+function bolt(): Bolt {
+  return { x: 0, y: 0, z: 0, yaw: 0, size: 0 };
 }

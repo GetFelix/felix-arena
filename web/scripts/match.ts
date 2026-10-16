@@ -131,7 +131,7 @@ const open = async (user: string, quality: string, width: number, height: number
 };
 // Ana's page draws at full quality and full size for the screenshots, slowly on a runner's software renderer; her
 // inputs still go out on the page's timer. Ben's draws lean, to spare the CPU.
-const ana = await open('ana', '', 1920, 1080);
+const ana = await open('ana', '&quality=high', 1920, 1080);
 const ben = await open('ben', '&quality=low', 480, 270);
 for (const page of [ana, ben]) await page.waitForSelector('#loading', { state: 'detached', timeout: 180_000 });
 const stopBots = await Promise.all(['dan', 'eve'].map(bot));

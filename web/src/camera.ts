@@ -60,10 +60,10 @@ export class ArenaCamera {
     this.fit();
   }
 
-  /** Fits the arena to the viewport. */
-  fit(): void {
+  /** Fits the arena to a view `width` by `height`, the window by default. */
+  fit(width = innerWidth, height = innerHeight): void {
     const { camera } = this;
-    camera.aspect = innerWidth / innerHeight;
+    camera.aspect = width / height;
     const { radius, yaw } = framing(camera.aspect, camera.fov, this.fixed);
     this.radius = radius;
     this.yawBase = yaw;
