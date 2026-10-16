@@ -119,7 +119,10 @@ WebAssembly build decodes keyframes to the state hashes the sim logged, a
 replay slot reads the same records while the live one keeps going, and it
 prints each leg's latency. It also drives two players, `ana` and `ben`, in
 arena `bravo`: each moves only its own craft, a forged input naming the other
-player is refused, and `cleo` cannot publish inputs.
+player is refused, and `cleo` cannot publish inputs. And it has `ana` fly
+circles in arena `alpha` while `cleo` watches, then plays `cleo`'s ticks
+through the interpolator with one in twenty thrown away, checking that the
+craft moves smoothly.
 
 ## How it works
 

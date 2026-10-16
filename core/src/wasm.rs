@@ -70,6 +70,58 @@ pub fn player_key(principal: &str) -> String {
     format!("{:016x}", crate::player_key(principal))
 }
 
+/// Bolt speed in centimetres a second.
+#[wasm_bindgen(js_name = boltSpeed)]
+pub fn bolt_speed() -> i32 {
+    crate::world::BOLT_SPEED
+}
+
+/// The sim's world, stepped here so the page's tests can make real ticks
+/// without a sim.
+#[wasm_bindgen(js_name = World)]
+pub struct JsWorld(crate::World);
+
+#[wasm_bindgen(js_class = World)]
+impl JsWorld {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self(crate::World::new(0))
+    }
+
+    /// Join the player with Felix principal `principal`: its slot, or
+    /// `undefined` when the arena is full.
+    pub fn join(&mut self, principal: &str) -> Option<u8> {
+        self.0.join(crate::player_key(principal))
+    }
+
+    /// Advance one tick. `controls` holds six numbers per slot, in slot
+    /// order: 1 to apply an input or 0 to coast, then its sequence number,
+    /// move x, move z, aim and buttons.
+    pub fn step(&mut self, controls: &[i32]) {
+        self.0.step(|slot| {
+            let c = controls.get(usize::from(slot) * 6..usize::from(slot) * 6 + 6)?;
+            (c[0] != 0).then(|| crate::Input {
+                seq: c[1] as u16,
+                move_x: c[2] as i8,
+                move_z: c[3] as i8,
+                aim: c[4] as u16,
+                buttons: c[5] as u8,
+            })
+        });
+    }
+
+    /// The current state as an untimed tick record of epoch 0.
+    pub fn record(&self) -> Vec<u8> {
+        self.0.snapshot(0).encode(None)
+    }
+}
+
+impl Default for JsWorld {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// The arena in centimetres, for drawing it: half its length and width, then
 /// each obstacle in [`crate::arena::OBSTACLES`] order as five numbers, a kind
 /// (0 a box, 1 a round prop), x, z, then half x and half z for a box or the
@@ -123,9 +175,9 @@ impl JsTick {
     pub fn crafts(&self) -> Vec<JsCraft> {
         self.tick.crafts.iter().copied().map(JsCraft).collect()
     }
-    #[wasm_bindgen(getter, js_name = boltCount)]
-    pub fn bolt_count(&self) -> usize {
-        self.tick.bolts.len()
+    #[wasm_bindgen(getter)]
+    pub fn bolts(&self) -> Vec<JsBolt> {
+        self.tick.bolts.iter().copied().map(JsBolt).collect()
     }
     #[wasm_bindgen(getter, js_name = eventCount)]
     pub fn event_count(&self) -> usize {
@@ -209,6 +261,35 @@ impl JsCraft {
     #[wasm_bindgen(getter, js_name = lastInput)]
     pub fn last_input(&self) -> u16 {
         self.0.last_input
+    }
+}
+
+/// A bolt in flight. Position in centimetres, heading in 65536ths of a turn.
+#[wasm_bindgen(js_name = Bolt)]
+pub struct JsBolt(crate::Bolt);
+
+#[wasm_bindgen(js_class = Bolt)]
+impl JsBolt {
+    #[wasm_bindgen(getter)]
+    pub fn id(&self) -> u16 {
+        self.0.id
+    }
+    /// The slot that fired it.
+    #[wasm_bindgen(getter)]
+    pub fn owner(&self) -> u8 {
+        self.0.owner
+    }
+    #[wasm_bindgen(getter)]
+    pub fn x(&self) -> i16 {
+        self.0.x
+    }
+    #[wasm_bindgen(getter)]
+    pub fn z(&self) -> i16 {
+        self.0.z
+    }
+    #[wasm_bindgen(getter)]
+    pub fn heading(&self) -> u16 {
+        self.0.heading
     }
 }
 
