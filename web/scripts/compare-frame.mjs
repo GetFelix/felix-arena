@@ -36,11 +36,14 @@ async function shoot(url, file, patch) {
   page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
   if (patch) {
     await page.addInitScript(SEEDED);
-    await page.route((u) => u.pathname.endsWith('.html'), async (route) => {
-      const res = await route.fetch();
-      const body = (await res.text()).replaceAll('Math.random()', 'window.__seeded()');
-      await route.fulfill({ response: res, body });
-    });
+    await page.route(
+      (u) => u.pathname.endsWith('.html'),
+      async (route) => {
+        const res = await route.fetch();
+        const body = (await res.text()).replaceAll('Math.random()', 'window.__seeded()');
+        await route.fulfill({ response: res, body });
+      },
+    );
   }
   await page.goto(url, { waitUntil: 'load', timeout: 120_000 });
   await page.waitForSelector('#loading', { state: 'detached', timeout: 180_000 });

@@ -71,12 +71,7 @@ export interface Arena {
 }
 
 /** Builds the arena from core's layout: floor, walls, cover, props and the centre crystal. */
-export function buildArena(
-  scene: Scene,
-  layout: ArenaLayout,
-  models: ModelLibrary,
-  anisotropy: number,
-): Arena {
+export function buildArena(scene: Scene, layout: ArenaLayout, models: ModelLibrary, anisotropy: number): Arena {
   const { halfX, halfZ } = layout;
   const place = (p: Prop, x: number, z: number) => {
     const g = models.spawn(p.model, { scale: p.scale });
@@ -151,7 +146,9 @@ export function buildArena(
   if (centre?.kind !== 'round') throw new Error('core has no centre obstacle');
   const rounds = rest.filter((o) => o.kind === 'round');
   if (rounds.length !== ROUND_PROPS.length) {
-    throw new Error(`core has ${rounds.length} round obstacles besides the centre, the arena dresses ${ROUND_PROPS.length}`);
+    throw new Error(
+      `core has ${rounds.length} round obstacles besides the centre, the arena dresses ${ROUND_PROPS.length}`,
+    );
   }
   for (const o of rest) if (o.kind === 'box') cover(o);
   rounds.forEach((o, i) => place(ROUND_PROPS[i]!, o.x, o.z));

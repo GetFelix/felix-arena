@@ -160,7 +160,7 @@ export class Combat {
     for (const s of this.shooters) {
       const p = this.crafts[s.from];
       const q = this.crafts[TARGETS[s.from]];
-      const local = ((((t - s.at) % LOOP) + LOOP) % LOOP);
+      const local = (((t - s.at) % LOOP) + LOOP) % LOOP;
       tmp.set(Math.sin(p.aim) * 1.3, 0.55, Math.cos(p.aim) * 1.3).add(p.g.position);
       end.copy(q.g.position).setY(q.g.position.y + 0.45);
       const flight = tmp.distanceTo(end) / SPEED;
