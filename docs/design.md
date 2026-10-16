@@ -258,14 +258,14 @@ than a plain publish:
 
 1. **The answer carries the offset.** `CommitOk { offset }` comes back on every commit. A plain acked publish returns its offset only when the whole broker runs with ack-on-commit ([felix#956](https://github.com/GetFelix/felix/issues/956)); the sim needs the offset of every tick for the kill cam, without making every stream on the broker pay for it.
 2. **A keyframe and its pointer land together.** Every 30th tick is a keyframe, and its commit also writes the stream state key `keyframe`. A reader of that key gets the keyframe's offset as the value's version, and on a `Quorum` stream a state read never reflects a commit a failover could take back.
-3. **Order.** The sim waits for each commit's answer before sending the next, so ticks land in tick order. A commit takes a few milliseconds in-region, well inside the 33 ms tick.
+3. **Order.** The sim waits for each commit's answer before sending the next, so ticks land in tick order. A commit takes a few milliseconds in-region, well inside the 33 ms tick. A tick that falls due while a commit is still running is skipped, not made up later, so a slow commit never sends a burst of ticks.
 
 A tick record holds the whole dynamic state, so any single tick can be drawn
 without the ones before it:
 
 | Part | Contents | Size |
 |---|---|---|
-| Header | Epoch, match number, tick number, keyframe flag | 12 bytes |
+| Header | Epoch (2 bytes), flags with the keyframe bit (1), reserved (1), match number (4), tick number (4), little-endian | 12 bytes |
 | Crafts | Per craft: slot, position and velocity (centimetres, 16-bit), heading, health, flags, last input sequence applied | 16 bytes each |
 | Projectiles | Per live bolt: id, owner, position, heading | 9 bytes each |
 | Events | Hits, kills, spawns, pickups, with whatever each needs | Varies |

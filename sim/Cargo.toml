@@ -1,0 +1,26 @@
+[package]
+name = "felix-arena-sim"
+description = "The authority for each arena: steps it at 30 Hz and commits every tick to Felix"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "sim"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "=1.0.104"
+felix-client = "=0.6.0-preview.7"
+tokio = { version = "=1.53.1", features = ["rt-multi-thread", "macros", "net", "time"] }
+tracing = "=0.1.44"
+tracing-subscriber = { version = "=0.3.23", features = ["env-filter"] }
+
+[dev-dependencies]
+tokio = { version = "=1.53.1", features = ["test-util"] }
+
+[lints]
+workspace = true

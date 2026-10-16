@@ -49,6 +49,12 @@ craft from Kenney's Space Kit, bolts, hits, the centre crystal, the lighting
 and the post processing. It is the reference every later milestone is built
 against.
 
+The simulation in `sim/` connects to Felix and commits an empty tick to each
+configured arena's tick stream at 30 Hz, waiting for each commit before the
+next. Every five seconds it logs, per arena, the ticks committed, the rate and
+the commit latency (p50, p99, max). Its settings are the `SIM_*` variables
+documented in [sim/src/config.rs](sim/src/config.rs).
+
 ## Quick start
 
 The style frame loads Three.js from jsDelivr, so it needs a network connection
