@@ -6,7 +6,7 @@ import { hdriUrl, modelUrls } from './assets';
 import { Bolts, type BoltView } from './bolts';
 import { ArenaCamera } from './camera';
 import { Controls } from './controls';
-import { arenaLayout, decodeTick, Inputs, loadCore, playerKey, type Tick } from './core';
+import { arenaLayout, boltReach, decodeTick, Inputs, loadCore, playerKey, type Tick } from './core';
 import { Effects } from './effects';
 import { type CraftView, Fleet } from './fleet';
 import { Gateway } from './gateway';
@@ -104,7 +104,7 @@ async function main(): Promise<void> {
   };
 
   const interpolator = new Interpolator();
-  const pacer = new Pacer();
+  let pacer = new Pacer();
   const inputs = new Inputs(Math.floor(Math.random() * 65536));
   let own: Own | null = null;
   /** Events waiting for the render time to reach their tick, oldest first. */
@@ -116,10 +116,17 @@ async function main(): Promise<void> {
     const me = players.find((p) => p.key === key)?.slot;
     for (const p of players) p.free();
     if (me !== undefined && own?.slot !== me) {
+      own?.dispose();
       own = new Own(me);
       debug.slot = me;
     }
     const s = snapshot(tick);
+    // A restarted sim counts ticks again from its keyframe; what was waiting on the old count never comes due.
+    const newest = interpolator.newest;
+    if (newest && s.epoch > newest.epoch) {
+      due.length = 0;
+      pacer = new Pacer();
+    }
     interpolator.push(s, arrivedMs);
     const mine = own && s.crafts.find((c) => c.slot === own!.slot);
     pacer.tick(s.tick, arrivedMs, mine ? mine.lastInput : null);
@@ -147,7 +154,8 @@ async function main(): Promise<void> {
   const playing = !gateway.missing.includes('input');
   setInterval(() => {
     const now = performance.now();
-    if (!playing || !pacer.due(now)) return;
+    // A hidden page draws no frames, so its controls are stale: send none, and the sim lets the craft coast.
+    if (!playing || document.hidden || !pacer.due(now)) return;
     gateway.send('input', inputs.next(live.moveX, live.moveZ, live.aim, live.buttons));
     if (own?.ready) own.send(inputs.seq, live, now);
   }, 4);
@@ -182,7 +190,10 @@ async function main(): Promise<void> {
     }
     if (own) {
       const mine = violet.get(own.slot) ?? false;
-      for (const shot of own.drawShots(now, (id) => byId.get(id) ?? null)) {
+      const reach = boltReach();
+      const hits = (x: number, z: number) =>
+        crafts.some((c) => c.alive && c.violet !== mine && Math.hypot(c.x - x, c.z - z) < reach);
+      for (const shot of own.drawShots(now, (id) => byId.has(id), hits)) {
         drawn.push({ violet: mine, x: shot.x, z: shot.z, heading: shot.heading, size: shot.opacity });
       }
       for (const fired of own.firedSince(shown ?? now)) effects.fired(mine, fired.x, fired.z, t);

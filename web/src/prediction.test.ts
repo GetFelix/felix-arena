@@ -26,11 +26,13 @@ interface Run {
   /** Corrections too large to blend, shown at once. */
   snaps: number;
   shots: number;
+  /** Shots matched to the sim's bolt. */
+  matched: number;
   /** Shots whose drawn position jumped more than a frame of bolt flight plus 10 cm. */
   shotJumps: number;
   /** Frames until the first input showed on screen. */
   firstInputFrames: number;
-  /** Ticks after the first two seconds where the sim applied no new input of ana's, or skipped one. */
+  /** Ticks in a row, after the first two seconds, where the sim applied no new input of ana's, or skipped one. */
   uneven: number;
 }
 
@@ -39,7 +41,7 @@ interface Run {
  * 10 ms of jitter, and ben ramming her now and then, so the sim pushes her about in ways she cannot predict. The sim takes
  * inputs as sim/src/inputs.rs does: the newest one each tick with the buttons of any it skipped, held 100 ms.
  */
-function play(latencyMs: number, seconds = 20, seed = 1): Run {
+function play(latencyMs: number, seconds = 20, seed = 1, lose = 0): Run {
   const random = seeded(seed);
   const world = new World();
   world.join('ana');
@@ -52,11 +54,13 @@ function play(latencyMs: number, seconds = 20, seed = 1): Run {
     maxStep: 0,
     snaps: 0,
     shots: 0,
+    matched: 0,
     shotJumps: 0,
     firstInputFrames: -1,
     uneven: 0,
   };
   let lastApplied: number | null = null;
+  let lastTick: number | null = null;
 
   const toSim: Flight<Control & { seq: number }>[] = [];
   const toPage: Flight<Uint8Array>[] = [];
@@ -80,8 +84,10 @@ function play(latencyMs: number, seconds = 20, seed = 1): Run {
 
   let seq = 0;
   const pacer = new Pacer();
-  let reconciled = false;
-  let previous: { x: number; z: number; c: [number, number] } | null = null;
+  let previous: { t: number; c: [number, number] } | null = null;
+  // The bolts of the last few ticks the page took; the interpolated view draws the one two ticks back.
+  const recent: Map<number, { x: number; z: number }>[] = [];
+  const claimed = new Set<number>();
   let shotsBefore = new Map<number, { x: number; z: number }>();
   let inputAt: number | null = null;
   let startedFrame = -1;
@@ -114,7 +120,7 @@ function play(latencyMs: number, seconds = 20, seed = 1): Run {
       crafts.free();
       world.step(controls);
       lastToPage = Math.max(lastToPage, now + latencyMs + random() * 10);
-      toPage.push({ at: lastToPage, what: world.record() });
+      if (random() >= lose) toPage.push({ at: lastToPage, what: world.record() });
     }
 
     // The page: an input every 33 ms on its own clock, a little faster than the sim's.
@@ -128,11 +134,19 @@ function play(latencyMs: number, seconds = 20, seed = 1): Run {
     }
     while (toPage[0] && toPage[0].at <= now) {
       const tick: Tick = decodeTick(toPage.shift()!.what);
+      const bolts = tick.bolts;
+      recent.push(new Map(bolts.map((b) => [b.id, { x: b.x, z: b.z }])));
+      if (recent.length > 3) recent.shift();
+      for (const b of bolts) b.free();
       const crafts = tick.crafts;
       const before: [number, number] = own.ready ? own.correction(now) : [0, 0];
       const lastInput = crafts[0]!.lastInput;
-      if (own.ready && lastApplied !== null && now > 2000 && ((lastInput - lastApplied) & 0xffff) !== 1) run.uneven++;
+      const inRow = lastTick === tick.tick - 1;
+      if (own.ready && inRow && lastApplied !== null && now > 2000 && ((lastInput - lastApplied) & 0xffff) !== 1) {
+        run.uneven++;
+      }
       if (own.ready) lastApplied = lastInput;
+      lastTick = tick.tick;
       pacer.tick(tick.tick, now, own.ready ? lastInput : null);
       for (const c of crafts) c.free();
       own.reconcile(tick, now);
@@ -140,12 +154,15 @@ function play(latencyMs: number, seconds = 20, seed = 1): Run {
       run.maxError = Math.max(run.maxError, Math.hypot(after[0] - before[0], after[1] - before[1]));
       if (after[0] === 0 && after[1] === 0 && Math.hypot(...before) > 1) run.snaps++;
       run.reconciles++;
-      reconciled = true;
+      for (const id of own.claimed) claimed.add(id);
       tick.free();
+      // A correction is taken in without moving the craft, so the last frame's correction is measured afresh.
+      if (previous) previous.c = own.correction(previous.t);
     }
 
     if (now % FRAME_MS < 1 && own.ready) {
       // A key goes down a little after a frame, five seconds in: how many frames until it shows?
+      const unchanged = own.draw(now)!;
       if (startedFrame < 0 && now >= 5000) {
         startedFrame = run.frames;
         inputAt = now;
@@ -153,12 +170,22 @@ function play(latencyMs: number, seconds = 20, seed = 1): Run {
       }
       const drawn = own.draw(now)!;
       const c = own.correction(now);
-      if (previous && !reconciled)
-        run.maxStep = Math.max(run.maxStep, Math.hypot(c[0] - previous.c[0], c[1] - previous.c[1]));
-      if (inputAt !== null && run.firstInputFrames < 0 && drawn.heading === 30000) {
+      if (previous) run.maxStep = Math.max(run.maxStep, Math.hypot(c[0] - previous.c[0], c[1] - previous.c[1]));
+      // Both the aim and the move must show.
+      const moved = Math.hypot(drawn.x - unchanged.x, drawn.z - unchanged.z) > 0;
+      if (inputAt !== null && run.firstInputFrames < 0 && drawn.heading === 30000 && moved) {
         run.firstInputFrames = run.frames - startedFrame + 1;
       }
-      const shots = new Map(own.drawShots(now, () => null).map((s) => [s.seq, s]));
+      const shown = recent.length >= 3 ? recent[0]! : new Map<number, { x: number; z: number }>();
+      const shots = new Map(
+        own
+          .drawShots(
+            now,
+            (id) => shown.has(id),
+            () => false,
+          )
+          .map((s) => [s.seq, s]),
+      );
       for (const [s, shot] of shots) {
         const was = shotsBefore.get(s);
         if (!was) {
@@ -168,11 +195,11 @@ function play(latencyMs: number, seconds = 20, seed = 1): Run {
         if (Math.hypot(shot.x - was.x, shot.z - was.z) > (3000 / 60) * 1.0 + 10) run.shotJumps++;
       }
       shotsBefore = shots;
-      previous = { x: drawn.x, z: drawn.z, c: own.correction(now) };
-      reconciled = false;
+      previous = { t: now, c };
       run.frames++;
     }
   }
+  run.matched = claimed.size;
   return run;
 }
 
@@ -195,7 +222,17 @@ describe('prediction', () => {
     // Paced by the sim's own clock, the sim applies each input once.
     expect(run.uneven).toBeLessThanOrEqual(2);
     expect(run.shots).toBeGreaterThan(20);
+    expect(run.matched).toBeGreaterThan(run.shots * 0.9);
     expect(run.shotJumps).toBe(0);
+  });
+
+  it('still matches its shots to the sim’s bolts when ticks are lost', () => {
+    const run = play(100, 20, 2, 0.05);
+    console.log('100 ms each way, 5% of ticks lost:', run);
+    expect(run.uneven).toBeLessThanOrEqual(2);
+    expect(run.matched).toBeGreaterThan(run.shots * 0.9);
+    expect(run.shotJumps).toBe(0);
+    expect(run.maxStep).toBeLessThan(10);
   });
 
   it('keeps corrections small without added latency too', () => {

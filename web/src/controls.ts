@@ -38,8 +38,9 @@ export class Controls {
   scoreboard = false;
 
   constructor(element: HTMLElement) {
+    // The earliest change since the last frame, which waited longest for it.
     const changed = (event: Event) => {
-      this.changedAt = event.timeStamp;
+      this.changedAt ??= event.timeStamp;
     };
     addEventListener('keydown', (event) => {
       if (event.code === 'Tab') {

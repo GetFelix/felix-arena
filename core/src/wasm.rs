@@ -157,6 +157,12 @@ impl JsShot {
     }
 }
 
+/// How close a bolt's centre comes to a craft's to hit it, in centimetres.
+#[wasm_bindgen(js_name = boltReach)]
+pub fn bolt_reach() -> i32 {
+    crate::CRAFT_RADIUS + crate::world::BOLT_RADIUS
+}
+
 /// Bolt speed in centimetres a second.
 #[wasm_bindgen(js_name = boltSpeed)]
 pub fn bolt_speed() -> i32 {

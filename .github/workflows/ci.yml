@@ -148,7 +148,7 @@ jobs:
           npm ci
           npm run core
           npm run smoke
-      - name: The live page draws an input within a frame
+      - name: The live page puts each input into the next frame's scene, timed
         working-directory: web
         run: |
           npm run build

@@ -40,9 +40,10 @@ export interface OwnShot {
 export const BLEND_MS = 100;
 /** A correction larger than this is a respawn or a teleport, shown at once. */
 const SNAP_CM = 300;
-/** How long a shot the sim refused takes to fade, and a predicted bolt to slide onto the sim's. */
+/** How long a shot the sim refused takes to fade. */
 const FADE_MS = 150;
-const SWAP_MS = 200;
+/** A shot is forgotten after this, whatever became of it: longer than any bolt flies plus a round trip. */
+const GIVE_UP_MS = 3000;
 /** Inputs kept for replay: three seconds, far more than any round trip. */
 const KEEP = 90;
 /** How far apart the input that fired a shot here and the one the sim fired it with may be. */
@@ -62,8 +63,10 @@ interface Shot {
   ticks: number;
   /** The sim's bolt, once its `fired` event has arrived. */
   bolt: number | null;
-  /** When the sim's bolt was first drawn, and the predicted one began to slide onto it. */
-  swapMs: number | null;
+  /** When the interpolated view first drew the sim's bolt. */
+  seenMs: number | null;
+  /** It met a craft as drawn. */
+  ended: boolean;
   fadeMs: number | null;
 }
 
@@ -81,6 +84,7 @@ export class Own {
   private blendFrom = -Infinity;
   private live: Control = { moveX: 0, moveZ: 0, aim: 0, buttons: 0 };
   private shots: Shot[] = [];
+  private confirmed = false;
 
   constructor(readonly slot: number) {}
 
@@ -105,7 +109,8 @@ export class Own {
         firedMs: nowMs,
         ticks: shot.ticks,
         bolt: null,
-        swapMs: null,
+        seenMs: null,
+        ended: false,
         fadeMs: null,
       });
       shot.free();
@@ -126,7 +131,9 @@ export class Own {
     }
     const before = this.state ? this.draw(nowMs) : null;
     const lastInput = craft.lastInput;
-    this.pending = this.pending.filter((input) => after(input.seq, lastInput));
+    // Until the sim has applied one of ours, the craft's last input is someone else's count, as for a fresh craft.
+    this.confirmed ||= this.pending.some((input) => input.seq === lastInput);
+    if (this.confirmed) this.pending = this.pending.filter((input) => after(input.seq, lastInput));
     const next = new Prediction(craft);
     next.among(tick);
     for (const input of this.pending) next.step(input.seq, input.moveX, input.moveZ, input.aim, input.buttons)?.free();
@@ -143,21 +150,43 @@ export class Own {
       this.blendFrom = -Infinity;
     }
 
+    const gap = (a: number, b: number) => Math.abs(((a - b + 32768) & 0xffff) - 32768);
+    const taken = this.claimed;
     const events = tick.events;
     for (const event of events) {
-      if (event.kind !== 'fired' || event.slot !== this.slot) continue;
-      const shot = this.shots.find(
-        (s) => s.bolt === null && Math.abs(((event.seq - s.seq + 32768) & 0xffff) - 32768) <= MATCH,
-      );
-      if (shot) shot.bolt = event.bolt;
+      if (event.kind !== 'fired' || event.slot !== this.slot || taken.has(event.bolt)) continue;
+      const near = this.shots
+        .filter((s) => s.bolt === null && gap(event.seq, s.seq) <= MATCH)
+        .sort((a, b) => gap(event.seq, a.seq) - gap(event.seq, b.seq))[0];
+      if (near) {
+        near.bolt = event.bolt;
+        taken.add(event.bolt);
+      }
     }
     for (const event of events) event.free();
+    // A tick lost on the way takes its `fired` event with it; the sim's bolt is then known by flying our heading.
+    const bolts = tick.bolts;
+    for (const bolt of bolts) {
+      if (bolt.owner !== this.slot || taken.has(bolt.id)) continue;
+      const shot = this.shots.find((s) => s.bolt === null && s.heading === bolt.heading);
+      if (shot) {
+        shot.bolt = bolt.id;
+        taken.add(bolt.id);
+      }
+    }
+    for (const bolt of bolts) bolt.free();
     for (const shot of this.shots) {
       // The sim has applied inputs well past this shot's and fired nothing for it: it refused the shot.
       if (shot.bolt === null && shot.fadeMs === null && after(lastInput, (shot.seq + MATCH) & 0xffff)) {
         shot.fadeMs = nowMs;
       }
     }
+  }
+
+  /** Free the prediction's WebAssembly memory. */
+  dispose(): void {
+    this.state?.free();
+    this.state = null;
   }
 
   /** The controls as sampled this frame, which the craft is drawn moving under until the next input is sent. */
@@ -180,33 +209,33 @@ export class Own {
   }
 
   /**
-   * Your shots to draw at `nowMs`. `simBolt` answers where the interpolated view draws one of the sim's bolts, or
-   * `null` when it does not draw it. A predicted shot slides onto the sim's bolt once that is drawn, and ends when
-   * the sim's bolt ends.
+   * Your shots to draw at `nowMs`. Each flies its own path ahead of the sim's bolt, which is later in time by the
+   * round trip and the render delay, and ends where the arena stops it, where `hits` says it meets a craft as
+   * drawn, or when the sim's bolt ends. `drawn` says whether the interpolated view draws one of the sim's bolts.
    */
-  drawShots(nowMs: number, simBolt: (id: number) => { x: number; z: number } | null): OwnShot[] {
+  drawShots(nowMs: number, drawn: (id: number) => boolean, hits: (x: number, z: number) => boolean): OwnShot[] {
     const out: OwnShot[] = [];
     const cmPerMs = boltSpeed() / 1000;
     this.shots = this.shots.filter((shot) => {
       const flown = nowMs - shot.firedMs;
-      const angle = (shot.heading / 65536) * 2 * Math.PI;
-      let x = shot.x + Math.cos(angle) * cmPerMs * flown;
-      let z = shot.z + Math.sin(angle) * cmPerMs * flown;
+      if (shot.bolt !== null && drawn(shot.bolt)) shot.seenMs ??= nowMs;
+      else if (shot.seenMs !== null) return false;
       let opacity = 1;
-      const real = shot.bolt === null ? null : simBolt(shot.bolt);
-      if (real) {
-        shot.swapMs ??= nowMs;
-        const k = Math.min(1, (nowMs - shot.swapMs) / SWAP_MS);
-        x += (real.x - x) * k;
-        z += (real.z - z) * k;
-      } else if (shot.swapMs !== null) {
-        return false;
-      } else if (shot.fadeMs !== null) {
+      if (shot.fadeMs !== null) {
         opacity = 1 - (nowMs - shot.fadeMs) / FADE_MS;
         if (opacity <= 0) return false;
       }
-      // Gone at the arena's walls and cover, which core knows; and after two seconds whatever happened.
-      if (!real && (flown > (shot.ticks + 0.5) * TICK_MS || flown > 2000)) return false;
+      if (flown > GIVE_UP_MS) return false;
+      // A shot that has ended is not drawn, but is kept until the sim's bolt for it has come and gone, so that bolt
+      // is never drawn a second time.
+      if (shot.ended || flown > (shot.ticks + 0.5) * TICK_MS) return true;
+      const angle = (shot.heading / 65536) * 2 * Math.PI;
+      const x = shot.x + Math.cos(angle) * cmPerMs * flown;
+      const z = shot.z + Math.sin(angle) * cmPerMs * flown;
+      if (hits(x, z)) {
+        shot.ended = true;
+        return true;
+      }
       out.push({ seq: shot.seq, x, z, heading: shot.heading, opacity });
       return true;
     });
@@ -254,7 +283,9 @@ export class Own {
 const PACE_WINDOW = 60;
 /** Ticks the pacer counts misses over, and how many it takes to move. */
 const MISS_WINDOW = 30;
-const MISSES = 2;
+const MISSES = 3;
+/** Ticks after a move whose misses are the move's own, two round trips at 200 ms, and are not counted. */
+const SETTLE = 12;
 
 /**
  * When to send each input: once a sim tick, in step with the sim's clock as the ticks show it, so the sim applies
@@ -266,7 +297,9 @@ export class Pacer {
   private phase = 0;
   private sent: number | null = null;
   private lastApplied: number | null = null;
+  private lastTick: number | null = null;
   private misses: number[] = [];
+  private settleUntil = -Infinity;
   private fallback = 0;
 
   /** Learn from the tick `tick` that arrived at `arrivedMs`, whose own craft had applied input `lastInput`. */
@@ -275,12 +308,17 @@ export class Pacer {
     if (this.arrivals.length > PACE_WINDOW) this.arrivals.shift();
     if (lastInput === null) return;
     // The sim applying no new input, or two at once, means inputs reach it on the edge of its tick: move half a tick.
-    if (this.lastApplied !== null && ((lastInput - this.lastApplied) & 0xffff) !== 1) this.misses.push(tick);
+    // Only ticks in a row say anything: across a lost tick the sim rightly applied two inputs.
+    const missed =
+      this.lastApplied !== null && this.lastTick === tick - 1 && ((lastInput - this.lastApplied) & 0xffff) !== 1;
+    if (missed && tick > this.settleUntil) this.misses.push(tick);
     this.lastApplied = lastInput;
+    this.lastTick = tick;
     this.misses = this.misses.filter((t) => t > tick - MISS_WINDOW);
     if (this.misses.length >= MISSES) {
       this.phase = (this.phase + TICK_MS / 2) % TICK_MS;
       this.misses = [];
+      this.settleUntil = tick + SETTLE;
     }
   }
 

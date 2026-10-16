@@ -9,7 +9,7 @@ import { chromium } from 'playwright';
 
 const url = process.argv[2];
 if (!url) throw new Error('usage: input-to-pixel.mjs <play page url>');
-/** The page's own part, the JavaScript budget for decode, interpolate, update and effects in docs/design.md. */
+/** The page's own part of a frame: interpolating, predicting and updating the scene, before it renders. */
 const LIMIT_MS = 2;
 
 const browser = await chromium.launch({
