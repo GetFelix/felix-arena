@@ -619,7 +619,7 @@ excluded from the occlusion pass so they never darken what they light.
 - Repeated props are `InstancedMesh`.
 - Crafts are at most 8 small models of a few hundred triangles each.
 - Bolts are one `InstancedMesh` of up to 64, and their glow halos another.
-- Sparks are one pooled `Points` system; bursts and debris come from fixed pools, so nothing allocates during a match.
+- Every effect comes from one kit (`web/src/effects.ts`) with fixed pools, which the style frame's scripted fight and the live match both draw through: 16 hits, each with its own sparks, ground ring and flash, and their debris as one instanced mesh; 24 flares for muzzle flashes and destroyed crafts; 6 rail beams. Nothing allocates during a match: a caller fills in a pooled record instead of passing numbers, and the kit draws the records when the frame ends.
 - Point lights are a fixed pool of 3 whose intensity changes, never their number, because a change in light count recompiles shaders.
 
 **Budget at 1080p on a laptop iGPU (Intel Iris Xe, Apple M1), 16.7 ms a frame:**
@@ -634,6 +634,13 @@ excluded from the occlusion pass so they never darken what they light.
 | Headroom | 2.7 ms |
 
 Draw calls stay under 150 and triangles under 300,000.
+
+CI holds the effects to their share of the JavaScript budget. `web/fx-bench.html`
+puts 40 bolts and 8 hits on screen with their flashes and lights, and
+`web/scripts/fx-bench.mjs` times each frame's update and `renderer.render` call
+(under 2 ms at the 95th percentile) and samples every allocation while the
+effects update (none allowed). CI renders on the CPU with SwiftShader, so it
+times the page's own work and the issuing of draw calls, not the GPU.
 
 **Quality tiers.** High is the style frame. Medium drops ambient occlusion,
 halves the shadow map and renders bloom at quarter resolution. Low keeps only
