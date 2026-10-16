@@ -167,9 +167,31 @@ describe('interpolation', () => {
     interpolator.push(truth[9]!, 1);
     interpolator.push({ ...truth[20]!, epoch: 0 }, 2);
     expect(interpolator.newest?.tick).toBe(truth[20]!.tick);
-    interpolator.push({ ...truth[3]!, epoch: 1 }, 3);
-    expect(interpolator.newest).toMatchObject({ epoch: 1, tick: truth[3]!.tick });
-    expect(interpolator.sample(3)!.crafts).toEqual(truth[3]!.crafts);
+    const later = (i: number) => ({ ...truth[i]!, epoch: 1 });
+    interpolator.push(later(3), 1000);
+    interpolator.push(later(4), 1000 + TICK_MS);
+    expect(interpolator.newest).toMatchObject({ epoch: 1, tick: truth[4]!.tick });
+    // Only epoch 1's ticks are left, so the render time is among them and not near tick 21.
+    const view = interpolator.sample(1000 + TICK_MS + MIN_DELAY_MS)!;
+    expect(view.renderTick).toBeCloseTo(truth[4]!.tick, 6);
+  });
+
+  it('moves bolts along the committed ones', () => {
+    let compared = 0;
+    play(truth.slice(0, 300), new Set(), (view) => {
+      const t = Math.floor(view.renderTick);
+      const [a, b] = [truth[t - 1], truth[t]];
+      if (!a || !b || t < 3) return;
+      for (const bolt of view.bolts) {
+        const [from, to] = [a.bolts.find((x) => x.id === bolt.id), b.bolts.find((x) => x.id === bolt.id)];
+        if (!from || !to) continue;
+        const f = view.renderTick - t;
+        expect(bolt.x).toBeCloseTo(from.x + (to.x - from.x) * f, 6);
+        expect(bolt.z).toBeCloseTo(from.z + (to.z - from.z) * f, 6);
+        compared++;
+      }
+    });
+    expect(compared).toBeGreaterThan(100);
   });
 
   it('turns the short way round', () => {

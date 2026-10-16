@@ -145,7 +145,7 @@ export class Interpolator {
     const target = nowMs - Math.min(...this.arrivals) - this.delay;
     const dt = this.lastSampleMs === null ? 0 : Math.max(0, nowMs - this.lastSampleMs);
     this.lastSampleMs = nowMs;
-    if (this.renderMs === null || Math.abs(target - this.renderMs) > RESYNC_MS) {
+    if (this.renderMs === null || Math.abs(target - this.renderMs - dt) > RESYNC_MS) {
       this.renderMs = target;
       this.offsets.clear();
     } else {
@@ -237,11 +237,12 @@ function lateness(arrivals: number[]): number {
 }
 
 function between(a: Snapshot, b: Snapshot, f: number): CraftState[] {
-  return b.crafts.map((to) => {
-    const from = a.crafts.find((c) => c.slot === to.slot);
-    if (!from) return to;
+  // A craft that left is drawn until the tick that drops it; one that joined appears at its first tick.
+  return a.crafts.map((from) => {
+    const to = b.crafts.find((c) => c.slot === from.slot);
+    if (!to) return from;
     // A death, a respawn or a teleport is shown at the tick it happened, not slid into.
-    if (from.alive !== to.alive || Math.hypot(to.x - from.x, to.z - from.z) > TELEPORT_CM) return f < 1 ? from : to;
+    if (from.alive !== to.alive || Math.hypot(to.x - from.x, to.z - from.z) > TELEPORT_CM) return from;
     return {
       ...to,
       x: from.x + (to.x - from.x) * f,

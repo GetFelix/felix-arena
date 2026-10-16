@@ -520,8 +520,9 @@ most 10% faster or slower than real time, so a change in the delay never shows
 as a jump.
 
 One missing tick is bridged inside the two-tick delay by interpolating across
-it. With two missing, the tick after them arrives a tick too late, so for up
-to one tick the crafts carry on at the pace they last moved, and that guess is
+it. With two missing, the tick after them arrives a tick too late for a
+two-tick delay, so for up to one tick (at most two, past the newest tick) the
+crafts carry on at the pace they last moved, and that guess is
 blended into the real ticks over 100 ms. A death, a respawn or a move of more
 than 3 m is shown at the tick it happened, not slid into.
 

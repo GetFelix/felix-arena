@@ -116,6 +116,7 @@ function position(byTick: Map<number, Snapshot>, slot: number, r: number): [numb
 
 /** Picks one index in twenty of `count` to lose, at random but repeatably, in runs of one or two. */
 export function oneInTwenty(count: number, seed = 11): (index: number) => boolean {
+  if (count < 200) throw new Error(`${count} ticks are too few to lose one in twenty of`);
   const random = seeded(seed);
   const lost = new Set<number>();
   const target = Math.floor(count / 20);
