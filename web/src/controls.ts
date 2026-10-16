@@ -84,7 +84,7 @@ export class Controls {
     });
     element.addEventListener('pointermove', (event) => {
       this.pointer.set((event.clientX / innerWidth) * 2 - 1, -(event.clientY / innerHeight) * 2 + 1);
-      this.pointerAt = { x: event.clientX, y: event.clientY };
+      this.pointerAt = document.hasFocus() ? { x: event.clientX, y: event.clientY } : null;
       changed(event);
     });
     element.addEventListener('pointerleave', () => {

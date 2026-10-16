@@ -138,8 +138,8 @@ flies `ana`'s craft and `as=ben` in a second window flies the other. W, A, S
 and D move your craft up, left, down and right on the screen, wherever it is in
 the arena. The mouse aims: a reticle replaces the pointer over the game, and a
 faint line runs from your craft's nose to it, at the height your bolts fly. The
-left button fires and Space boosts. Your craft
-is predicted through `core` and everyone else is interpolated from ticks.
+left button fires and Space boosts. Your craft is predicted through `core` and
+everyone else is interpolated from ticks.
 `&quality=low` draws without post processing or shadows. The page runs the
 match loop the sim decides: warmup, play, results and the next match, with the
 score, clock, kill feed and your hull, boost and rail on the HUD, and Tab for
