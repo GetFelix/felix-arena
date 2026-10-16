@@ -19,7 +19,11 @@ export function qualitySetting(
     saveTier(picked);
     pick(picked);
     show(picked === null);
-    // Keys go to the game, not to the menu: WASD would otherwise pick options by their first letter.
+    select.blur();
+  });
+  // Keys go to the game even while the menu has focus: WASD and Space would otherwise pick options or open it.
+  select.addEventListener('keydown', (event) => {
+    event.preventDefault();
     select.blur();
   });
   show(auto);

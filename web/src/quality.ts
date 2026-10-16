@@ -16,8 +16,6 @@ export const WINDOW_S = 3;
  * still jitters around 16.7 ms and a missed frame shows as 33 ms, so the line sits between them.
  */
 export const SLOW_MS = 20;
-/** A gap between frames longer than this is a pause, not a slow frame. */
-const PAUSE_MS = 1000;
 /** Frames ignored while a tier settles: the first draws compile shaders and fill caches. */
 const SETTLE_FRAMES = 10;
 
@@ -52,6 +50,12 @@ export function requestedTier(params: URLSearchParams): Tier | null {
   return isTier(asked) ? asked : savedTier();
 }
 
+/** The tier `?quality=` names, or null. */
+export function urlTier(params: URLSearchParams): Tier | null {
+  const asked = params.get('quality');
+  return isTier(asked) ? asked : null;
+}
+
 /** The `p`th percentile of `values`, which it sorts. */
 export function percentile(values: number[], p: number): number {
   values.sort((a, b) => a - b);
@@ -75,18 +79,18 @@ export class TierChooser {
     private readonly onChange: (tier: Tier) => void,
   ) {}
 
+  /** Starts the window again, for when the page was hidden: the gap is not the tier's speed. */
+  pause(): void {
+    this.intervals = [];
+    this.last = this.start = null;
+  }
+
   /** Counts a frame that started at `now`, in milliseconds. */
   frame(now: number): void {
     if (this.done) return;
     const last = this.last;
     this.last = now;
     if (last === null || this.skipped++ < SETTLE_FRAMES) return;
-    // A long gap is a hidden page or a stall, not the tier's speed: judge from the next frame on.
-    if (now - last > PAUSE_MS) {
-      this.intervals = [];
-      this.start = null;
-      return;
-    }
     this.start ??= now;
     this.intervals.push(now - last);
     if (now - this.start < WINDOW_S * 1000) return;

@@ -39,8 +39,9 @@ describe('TierChooser', () => {
 
   it('does not count a hidden page as a slow frame', () => {
     const chooser = new TierChooser('high', () => {});
-    let now = run(chooser, 16.7, 1);
-    now = run(chooser, 16.7, 2.5, now + 5000);
+    const now = run(chooser, 16.7, 1);
+    chooser.pause();
+    run(chooser, 16.7, 2.5, now + 5000);
     expect(chooser.tier).toBe('high');
   });
 });

@@ -32,7 +32,7 @@ import { palette, setCssColours } from './palette';
 import { Pickup } from './pickup';
 import { Own, Pacer } from './prediction';
 import { seeded } from './random';
-import { requestedTier, TierChooser } from './quality';
+import { requestedTier, TierChooser, urlTier } from './quality';
 import { createRenderer, Pipeline } from './renderer';
 import { qualitySetting } from './settings';
 import { blobTexture, flareTexture, glowTexture } from './textures';
@@ -42,10 +42,10 @@ const ARENA = params.get('arena') ?? 'alpha';
 const USER = params.get('as') ?? 'ana';
 const GATEWAY = params.get('gateway') ?? 'ws://127.0.0.1:8787/ws';
 const IDP = params.get('idp') ?? 'http://127.0.0.1:9400';
-/** A tier the URL or the saved setting asks for, or null to choose one from the first frames. */
-const ASKED = requestedTier(params);
 /** The frame-time benchmark: an offline match, `&seconds=` long (120 by default), drawn at 1920x1080. */
 const BENCH = params.has('bench');
+/** A tier the URL or the saved setting asks for, or null to choose. The benchmark heeds only the URL. */
+const ASKED = BENCH ? urlTier(params) : requestedTier(params);
 /** Play against bots with the sim in the page, without the dev stack: `?offline`, with `&warmup=`, `&length=` and `&results=` in seconds. */
 const OFFLINE = params.has('offline') || BENCH;
 
@@ -162,6 +162,7 @@ async function main(): Promise<void> {
   fitView();
   const controls = new Controls(renderer.domElement);
   addEventListener('resize', fitView);
+  document.addEventListener('visibilitychange', () => chooser?.pause());
 
   const status = document.getElementById('loading')!;
   status.textContent = `Joining ${ARENA}`;

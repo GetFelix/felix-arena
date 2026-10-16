@@ -11,7 +11,7 @@ import { addLights, loadEnvironment } from './lighting';
 import { ModelLibrary } from './models';
 import { palette, setCssColours } from './palette';
 import { seeded } from './random';
-import { requestedTier, TierChooser } from './quality';
+import { requestedTier, TierChooser, urlTier } from './quality';
 import { createRenderer, Pipeline } from './renderer';
 import { blobTexture, flareTexture, glowTexture } from './textures';
 
@@ -43,9 +43,10 @@ async function main(): Promise<void> {
   const random = seeded(1);
   const crafts = spawnCrafts(scene, fx, models, { glow, blob: blobTexture() }, random);
   const combat = new Combat(scene, fx, { glow, flare: flareTexture() }, crafts, random);
-  const asked = frozen === null || params.has('quality') ? requestedTier(params) : 'high';
+  const asked = frozen === null ? requestedTier(params) : (urlTier(params) ?? 'high');
   const pipeline = new Pipeline(renderer, scene, view.camera, fx, key, asked ?? 'high');
   const chooser = asked ? null : new TierChooser('high', (tier) => pipeline.setTier(tier));
+  document.addEventListener('visibilitychange', () => chooser?.pause());
 
   addEventListener('resize', () => {
     view.fit();

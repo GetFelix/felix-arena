@@ -659,7 +659,8 @@ offline match against three bots, with your craft flying circles and firing,
 drawn at 1920x1080 whatever the window size. It reports the tier, the 50th,
 95th and 99th percentile frame intervals, the share of frames over 20 ms, the
 page's own work per frame and the GPU, on screen and as `window.arena.bench`.
-`&quality=` forces a tier and `&seconds=` changes the length.
+`&quality=` forces a tier (the saved setting is ignored here) and `&seconds=`
+changes the length.
 
 **Asset loading.** Models are small GLB files from the Kenney Space Kit, 10 to
 40 KB each; the HDRI is 1.5 MB and the largest single download. The arena and
