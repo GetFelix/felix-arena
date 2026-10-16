@@ -206,10 +206,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "felix-arena-core"
+version = "0.0.0"
+dependencies = [
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "felix-arena-sim"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "felix-arena-core",
  "felix-client",
  "tokio",
  "tracing",

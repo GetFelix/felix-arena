@@ -16,12 +16,19 @@ jobs:
         working-directory: web
     steps:
       - uses: actions/checkout@v4
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@0.2.129
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: npm ci
+      # core/ in WebAssembly, and ticks from a native run for the tests to decode.
+      - run: npm run core
       - run: npm run format:check
       - run: npm run typecheck
       - run: npm test
@@ -42,6 +49,7 @@ jobs:
       - run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo clippy -p felix-arena-core --lib --target wasm32-unknown-unknown --locked -- -D warnings
 
   rust-test:
     name: rust test
@@ -80,15 +88,21 @@ jobs:
           done
           echo "the sim did not report 30 Hz for both arenas" >&2
           exit 1
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@0.2.129
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - name: Ticks reach a WebSocket client through the gateway
+      - name: Ticks reach a WebSocket client through the gateway, and decode to the sim's state hashes
         working-directory: web
         run: |
           npm ci
+          npm run core
           npm run smoke
       - if: failure()
         run: docker compose -f dev/compose.yml logs --no-color
