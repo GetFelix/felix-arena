@@ -26,8 +26,7 @@ async function signIn(user: string): Promise<string> {
 }
 
 /** Offset and tick number of each frame. */
-const ticks = (frames: EventFrame[]) =>
-  frames.map((frame) => [frame.offset, decodeTick(frame.payload).tick] as const);
+const ticks = (frames: EventFrame[]) => frames.map((frame) => [frame.offset, decodeTick(frame.payload).tick] as const);
 
 /** The state hash the sim logged for each keyframe it committed in `arena`, by epoch and tick. */
 function loggedHashes(arena: string): Map<string, string> {
