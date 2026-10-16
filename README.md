@@ -153,7 +153,8 @@ sim, with three bots, so the game can be seen and played anywhere.
 `npm run smoke` checks the same path from Node: ticks arrive at 30 Hz, the
 WebAssembly build decodes keyframes to the state hashes the sim logged, a
 replay slot reads the same records while the live one keeps going, and it
-prints each leg's latency. It also drives two players, `ana` and `ben`, in
+prints each leg's latency. The `keyframe` state key's version is the newest
+keyframe's offset, and a subscription from it starts at that keyframe. It also drives two players, `ana` and `ben`, in
 arena `bravo`: each moves only its own craft, a forged input naming the other
 player is refused, and `cleo` cannot publish inputs. And it has `ana` fly
 circles in arena `alpha` while `cleo` watches, then plays `cleo`'s ticks
@@ -188,7 +189,8 @@ that is the single authority for each arena, stepping it at 30 Hz. The client
 and the simulation are this project's own. The gateway is
 [felix-gateway](https://github.com/GetFelix/felix-gateway), whose
 `binary_events` and `slots` features carry the game's ticks as binary frames
-and let a replay run beside the live view. It will ship in this project's own
+and let a replay run beside the live view, and whose `state` feature reads the
+keyframe pointer. It will ship in this project's own
 image, which also serves the web client. The game rules live in one Rust crate, linked by the simulation and
 compiled to WebAssembly for the browser's prediction, so the two cannot
 disagree about the rules.

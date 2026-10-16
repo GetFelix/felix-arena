@@ -59,7 +59,7 @@ async fn main() -> Result<()> {
             EPOCH,
             config.rules,
             inbox,
-            move |record| {
+            move |record, keys: Vec<(String, Vec<u8>)>| {
                 let (client, tenant, namespace, stream) = (
                     Arc::clone(&client),
                     tenant.clone(),
@@ -67,7 +67,11 @@ async fn main() -> Result<()> {
                     stream.clone(),
                 );
                 async move {
-                    let ops = vec![CommitOp::publish(stream.as_str(), record)];
+                    let mut ops = vec![CommitOp::publish(stream.as_str(), record)];
+                    ops.extend(
+                        keys.into_iter()
+                            .map(|(key, value)| CommitOp::put(stream.as_str(), key, value)),
+                    );
                     let receipt = client
                         .commit(&tenant, &namespace, stream.as_bytes(), ops)
                         .await?;
