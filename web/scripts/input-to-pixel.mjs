@@ -1,12 +1,16 @@
-// Plays the live page in headless Chromium against the dev stack, moves the mouse and presses keys, and measures
-// how long each input takes to reach the screen: from the input event to the end of the first frame that drew it.
+// Plays the live page in headless Chromium against the dev stack, moves the mouse and presses keys, and times each
+// input to the screen in three parts: the wait for the next frame, the page putting the input into that frame's
+// scene, and the frame rendering. Prediction means the first frame after an input draws it, so on a 60 Hz display
+// the wait is under a frame; the page's own part is what this holds to a limit. Headless Chromium renders on the
+// CPU (SwiftShader), so here the render, and the wait behind it, are the software rasterizer's and are reported only.
 // Usage: node scripts/input-to-pixel.mjs <play page url>. The page and the dev stack must already be up.
 import { appendFileSync } from 'node:fs';
 import { chromium } from 'playwright';
 
 const url = process.argv[2];
 if (!url) throw new Error('usage: input-to-pixel.mjs <play page url>');
-const LIMIT_MS = 16;
+/** The page's own part, the JavaScript budget for decode, interpolate, update and effects in docs/design.md. */
+const LIMIT_MS = 2;
 
 const browser = await chromium.launch({
   args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'],
@@ -49,26 +53,43 @@ const frames = await page.evaluate(
 );
 await browser.close();
 
-const sorted = [...samples].sort((a, b) => a - b);
-const at = (q) => sorted[Math.min(sorted.length - 1, Math.floor(q * (sorted.length - 1)))];
+const p = (values, q) => {
+  const sorted = [...values].sort((x, y) => x - y);
+  return Number(sorted[Math.min(sorted.length - 1, Math.floor(q * (sorted.length - 1)))].toFixed(2));
+};
 const intervals = frames.slice(1).map((t, i) => t - frames[i]);
+const part = (name) => ({
+  p50: p(
+    samples.map((s) => s[name]),
+    0.5,
+  ),
+  p95: p(
+    samples.map((s) => s[name]),
+    0.95,
+  ),
+});
 const result = {
   samples: samples.length,
-  p50: Number(at(0.5).toFixed(2)),
-  p95: Number(at(0.95).toFixed(2)),
-  max: Number(sorted.at(-1).toFixed(2)),
+  update: part('update'),
+  wait: part('wait'),
+  render: part('render'),
   frameMs: Number((intervals.reduce((a, b) => a + b, 0) / intervals.length).toFixed(2)),
   movedCm: Math.round(moved),
 };
-console.log('input to own pixel, ms:', result);
+console.log('input to own pixel, ms:', JSON.stringify(result));
 if (process.env.GITHUB_STEP_SUMMARY) {
   appendFileSync(
     process.env.GITHUB_STEP_SUMMARY,
-    `### Input to own pixel\n\n${result.samples} inputs: p50 ${result.p50} ms, p95 ${result.p95} ms, ` +
-      `max ${result.max} ms, at ${result.frameMs} ms a frame. Holding D for a second moved the craft ${result.movedCm} cm.\n`,
+    `### Input to own pixel\n\n${result.samples} inputs, each drawn by the next frame. The page put each into the ` +
+      `scene in p50 ${result.update.p50} ms, p95 ${result.update.p95} ms. On SwiftShader a frame took ` +
+      `${result.frameMs} ms, so the wait for it (p50 ${result.wait.p50} ms) and its render ` +
+      `(p50 ${result.render.p50} ms) are the software rasterizer's. Holding D for a second moved the craft ` +
+      `${result.movedCm} cm.\n`,
   );
 }
 if (errors.length) throw new Error(errors.join('\n'));
 if (samples.length < 20) throw new Error(`only ${samples.length} inputs were drawn`);
 if (moved < 200) throw new Error(`holding D moved the craft only ${Math.round(moved)} cm`);
-if (result.p95 >= LIMIT_MS) throw new Error(`input to own pixel p95 is ${result.p95} ms, over ${LIMIT_MS} ms`);
+if (result.update.p95 >= LIMIT_MS) {
+  throw new Error(`the page took ${result.update.p95} ms (p95) to put an input on screen, over ${LIMIT_MS} ms`);
+}

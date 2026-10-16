@@ -523,8 +523,12 @@ or two at once twice in a second, it moves its sends half a tick.
 100 ms each way and jitter, while a second craft rams the player: the sim
 applies every input exactly once, no correction moves the craft more than
 10 cm in a frame, about four pixels at 1080p, and nothing snaps. CI's dev
-stack job drives the live page in headless Chromium and checks that an input
-reaches the screen within a frame.
+stack job drives the live page in headless Chromium against the dev stack and
+times each input in three parts: the wait for the next frame, the page putting
+it into that frame's scene, and the render. The first frame after an input
+draws it, so on a 60 Hz display the wait is under a frame, and the page's own
+part is held under 2 ms. CI renders on the CPU, so its waits and renders are
+the software rasterizer's and are only reported.
 
 **Your own shots are predicted too.** A bolt appears from your nose when the
 input that fires it is sent, and flies until core says the arena stops it.

@@ -28,8 +28,11 @@ const LOW = params.get('quality') === 'low';
 
 /** What the page exposes for tests and the dev console. */
 export interface ArenaDebug {
-  /** Milliseconds from each input event to the end of the first frame that drew it. */
-  inputToPixel: number[];
+  /**
+   * For each input event, in milliseconds: how long it waited for the next frame to start, how long the page took in
+   * that frame to put it into the scene, and how long the frame then took to render.
+   */
+  inputToPixel: { wait: number; update: number; render: number }[];
   slot: number | null;
   ticks: number;
   /** Where your craft is drawn, in centimetres. */
@@ -155,6 +158,7 @@ async function main(): Promise<void> {
   let shown: number | null = null;
   renderer.setAnimationLoop(() => {
     const now = performance.now();
+    const frameStart = now;
     const t = clock.getElapsedTime();
     const frame = interpolator.sample(now);
     const ownDrawn = own?.draw(now) ?? null;
@@ -201,11 +205,17 @@ async function main(): Promise<void> {
     arena.crystal.rotation.y = t * 0.2;
     arena.crystalLight.intensity = 9 + Math.sin(t * 1.7) * 1.5;
     view.update(t);
+    const updated = performance.now();
     if (post) post.render(t);
     else renderer.render(scene, view.camera);
     shown = now;
     if (controls.changedAt !== null) {
-      debug.inputToPixel.push(performance.now() - controls.changedAt);
+      const rendered = performance.now();
+      debug.inputToPixel.push({
+        wait: frameStart - controls.changedAt,
+        update: updated - frameStart,
+        render: rendered - updated,
+      });
       if (debug.inputToPixel.length > 1000) debug.inputToPixel.shift();
       controls.changedAt = null;
     }
