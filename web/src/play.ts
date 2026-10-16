@@ -1,6 +1,7 @@
 // The live game. `?arena=` picks the arena and `?as=` the dev IdP user to play as; `?quality=low` draws without
 // post processing or shadows. The style frame at / stays the frozen scene it was ported as.
 import { Clock, Color, Fog, Group, Scene, Vector3 } from 'three';
+import { Aim } from './aim';
 import { buildArena } from './arena';
 import { hdriUrl, modelUrls } from './assets';
 import { Bolts, type BoltView } from './bolts';
@@ -19,7 +20,7 @@ import {
   type Tick,
 } from './core';
 import { Effects } from './effects';
-import { type CraftView, Fleet } from './fleet';
+import { type CraftView, Fleet, GUN_HEIGHT } from './fleet';
 import { Gateway } from './gateway';
 import { type Link, Offline, OFFLINE_PRINCIPAL } from './offline';
 import { Hud } from './hud';
@@ -119,11 +120,12 @@ async function main(): Promise<void> {
   const hud = new Hud();
   const match = new Match();
   debug.screenOf = (x, z) => {
-    const p = new Vector3(x / 100, 0.6, z / 100).project(view.camera);
+    const p = new Vector3(x / 100, GUN_HEIGHT, z / 100).project(view.camera);
     return { x: ((p.x + 1) / 2) * innerWidth, y: ((1 - p.y) / 2) * innerHeight };
   };
   const post = LOW ? null : new Post(renderer, scene, view.camera, fx);
   const controls = new Controls(renderer.domElement);
+  const aim = new Aim(fx, document.getElementById('reticle')!);
   addEventListener('resize', () => {
     view.fit();
     if (post) post.setSize(renderer, innerWidth, innerHeight);
@@ -307,6 +309,18 @@ async function main(): Promise<void> {
         : null,
       controls.scoreboard,
       now,
+    );
+    const ownCraft = own && crafts.find((c) => c.slot === own!.slot);
+    // The cursor comes back for the results, which are read rather than played.
+    aim.update(
+      {
+        pointer: playing && own && match.phase !== 'results' ? controls.pointerAt : null,
+        craft: ownCraft?.alive ? { x: ownCraft.x / 100, z: ownCraft.z / 100 } : null,
+        violet: ownCraft?.violet ?? false,
+        target: controls.target,
+        firing: controls.firing,
+      },
+      view.camera,
     );
     view.update(t);
     const updated = performance.now();

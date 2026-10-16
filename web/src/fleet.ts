@@ -13,6 +13,9 @@ const MODELS: [string, number][] = [
   ['craft_speederD', 1.1],
 ];
 
+/** How high a craft's guns are, in metres: the height bolts fly at and the mouse aims at. */
+export const GUN_HEIGHT = 0.8;
+
 /** A craft to draw: centimetres, and a heading in 65536ths of a turn. */
 export interface CraftView {
   slot: number;

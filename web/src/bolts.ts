@@ -11,13 +11,12 @@ import {
   type Texture,
   Vector3,
 } from 'three';
+import { GUN_HEIGHT } from './fleet';
 import { hdr } from './materials';
 import { palette } from './palette';
 
 /** At most this many bolts of each team are drawn. */
 const MAX = 64;
-/** Bolts fly at muzzle height. */
-const HEIGHT = 0.6;
 
 /** A bolt to draw: centimetres, a heading in 65536ths of a turn, and 0 to 1 of its full size. */
 export interface BoltView {
@@ -79,7 +78,7 @@ export class Bolts {
       if (i >= MAX) continue;
       counts[side] = i + 1;
       this.q.setFromAxisAngle(this.up, -(bolt.heading / 65536) * 2 * Math.PI);
-      this.p.set(bolt.x / 100, HEIGHT, bolt.z / 100);
+      this.p.set(bolt.x / 100, GUN_HEIGHT, bolt.z / 100);
       this.s.setScalar(bolt.size ?? 1);
       this.m.compose(this.p, this.q, this.s);
       this.teams[side].core.setMatrixAt(i, this.m);

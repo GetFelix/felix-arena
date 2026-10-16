@@ -5,6 +5,28 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 const ELEVATION = 0.98;
 
 /**
+ * How far from the centre the camera sits and its angle about y, to fit the arena to a viewport of `aspect`. In
+ * portrait the long axis runs up the screen. The `fixed` play camera sits square to the arena, so the keys' up, left,
+ * down and right line up with its walls; the style frame's camera looks in from an angle.
+ */
+export function framing(aspect: number, fov: number, fixed: boolean): { radius: number; yaw: number } {
+  const k = 2 * Math.tan(MathUtils.degToRad(fov / 2));
+  const [w, h] = aspect >= 1 ? [46, 34] : [24, 46];
+  const base = fixed ? 0 : 0.35;
+  return { radius: Math.max(h / k, w / (k * aspect)), yaw: aspect >= 1 ? base : base + Math.PI / 2 };
+}
+
+/** Puts `camera` `radius` from the arena's centre at `yaw` about y, looking at the centre. */
+export function placeCamera(camera: PerspectiveCamera, radius: number, yaw: number): void {
+  camera.position.set(
+    Math.sin(yaw) * Math.cos(ELEVATION) * radius,
+    Math.sin(ELEVATION) * radius,
+    Math.cos(yaw) * Math.cos(ELEVATION) * radius,
+  );
+  camera.lookAt(0, 0, 0);
+}
+
+/**
  * The board-game camera: a narrow lens looking down on the arena, fitted to the viewport and swaying slowly until the
  * player drags it.
  */
@@ -12,7 +34,7 @@ export class ArenaCamera {
   readonly camera: PerspectiveCamera;
   private readonly controls: OrbitControls;
   private radius = 63;
-  private yawBase = 0.35;
+  private yawBase = 0;
   private userMoved = false;
 
   /** A `fixed` camera holds still and ignores the mouse, which aims in the game. */
@@ -38,15 +60,13 @@ export class ArenaCamera {
     this.fit();
   }
 
-  /** Fits the arena to the viewport. In portrait the long axis runs up the screen. */
+  /** Fits the arena to the viewport. */
   fit(): void {
     const { camera } = this;
     camera.aspect = innerWidth / innerHeight;
-    const a = camera.aspect;
-    const k = 2 * Math.tan(MathUtils.degToRad(camera.fov / 2));
-    const [w, h] = a >= 1 ? [46, 34] : [24, 46];
-    this.radius = Math.max(h / k, w / (k * a));
-    this.yawBase = a >= 1 ? 0.35 : 0.35 + Math.PI / 2;
+    const { radius, yaw } = framing(camera.aspect, camera.fov, this.fixed);
+    this.radius = radius;
+    this.yawBase = yaw;
     this.fog.near = this.radius * 0.7;
     this.fog.far = this.radius * 1.45;
     camera.far = this.radius * 3;
@@ -56,14 +76,7 @@ export class ArenaCamera {
   /** Moves the camera to time `t` unless the player has taken it. */
   update(t: number): void {
     if (!this.userMoved) {
-      const yaw = this.yawBase + (this.fixed ? 0 : Math.sin(t * 0.07) * 0.45);
-      const r = this.radius;
-      this.camera.position.set(
-        Math.sin(yaw) * Math.cos(ELEVATION) * r,
-        Math.sin(ELEVATION) * r,
-        Math.cos(yaw) * Math.cos(ELEVATION) * r,
-      );
-      this.camera.lookAt(this.controls.target);
+      placeCamera(this.camera, this.radius, this.yawBase + (this.fixed ? 0 : Math.sin(t * 0.07) * 0.45));
     }
     this.controls.update();
   }

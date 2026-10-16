@@ -13,6 +13,7 @@ import {
   Vector3,
 } from 'three';
 import { type Burst, burst, type CombatTextures, flash } from './combat';
+import { GUN_HEIGHT } from './fleet';
 import { hdr } from './materials';
 import { palette } from './palette';
 
@@ -25,8 +26,6 @@ const BEAMS = 3;
 const BEAM_S = 0.45;
 const BLASTS = 3;
 const BLAST_S = 0.5;
-/** Beams fly at muzzle height. */
-const BEAM_Y = 0.6;
 
 interface Shown<T> {
   item: T;
@@ -93,8 +92,8 @@ export class Effects {
   railed(violet: boolean, x0: number, z0: number, x1: number, z1: number, t: number): void {
     const slot = oldest(this.teams[violet ? 1 : 0].beams);
     slot.at = t;
-    slot.item.from.set(x0 / 100, BEAM_Y, z0 / 100);
-    slot.where.set(x1 / 100, BEAM_Y, z1 / 100);
+    slot.item.from.set(x0 / 100, GUN_HEIGHT, z0 / 100);
+    slot.where.set(x1 / 100, GUN_HEIGHT, z1 / 100);
   }
 
   /** A craft of `violet`'s team destroyed at `(x, z)` in centimetres, at time `t`. */
@@ -108,7 +107,7 @@ export class Effects {
   fired(violet: boolean, x: number, z: number, t: number): void {
     const slot = oldest(this.teams[violet ? 1 : 0].flashes);
     slot.at = t;
-    slot.where.set(x / 100, 0.6, z / 100);
+    slot.where.set(x / 100, GUN_HEIGHT, z / 100);
   }
 
   /** A hit on whatever is at `(x, z)` in centimetres, by a shot of `violet`'s team, at time `t`. */
