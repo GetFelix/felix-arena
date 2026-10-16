@@ -4,9 +4,9 @@ import { palette } from './palette';
 
 /**
  * One warm key that casts every shadow, a cool sky fill, and a cyan rim from behind so silhouettes separate from the
- * dark floor.
+ * dark floor. Returns the key light, whose shadow map the quality tier sizes.
  */
-export function addLights(scene: Scene): void {
+export function addLights(scene: Scene): DirectionalLight {
   scene.add(new HemisphereLight(palette.skyFill, palette.groundFill, 0.32));
   const key = new DirectionalLight(palette.keyLight, 3.6);
   key.position.set(-16, 30, 14);
@@ -20,6 +20,7 @@ export function addLights(scene: Scene): void {
   const rim = new DirectionalLight(palette.accentGlow, 0.9);
   rim.position.set(18, 10, -22);
   scene.add(rim);
+  return key;
 }
 
 /** Loads the studio HDRI at `url` as the scene's environment, for soft reflections. */

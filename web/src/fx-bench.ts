@@ -37,7 +37,9 @@ document.body.prepend(renderer.domElement);
 const scene = new Scene();
 scene.background = new Color(palette.void);
 scene.fog = new Fog(palette.void, 42, 90);
-addLights(scene);
+// CI rasterizes on the CPU, so the shadow map is small to keep the rasterizer from taking the CPU this times; the
+// draw calls, and the work of issuing them, are the same at any size.
+addLights(scene).shadow.mapSize.set(256, 256);
 const fx = new Group();
 scene.add(fx);
 const camera = new PerspectiveCamera(30, innerWidth / innerHeight, 1, 200);
