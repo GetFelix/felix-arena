@@ -13,3 +13,7 @@ actions = ["subscribe"]
 alias = "input"
 name = "arena.input.{scope}"
 actions = ["publish"]
+# The sim learns who sent each input from the gateway's stamp.
+stamp_sender = true
+# A spectator has no publish right here and still joins.
+optional = true

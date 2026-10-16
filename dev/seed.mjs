@@ -15,8 +15,9 @@ const STATE = env("ARENA_STATE_DIR", "/state");
 const TENANT = env("ARENA_TENANT", "arena");
 const NAMESPACE = env("ARENA_NAMESPACE", "default");
 const ARENAS = env("ARENA_ARENAS", "alpha bravo").split(/[\s,]+/).filter(Boolean);
-// Who may play in every arena. Anyone else signed in may watch.
+// Who may play in every arena, and who may only watch.
 const PLAYERS = env("ARENA_PLAYERS", "ana,ben").split(",").filter(Boolean);
+const WATCHERS = env("ARENA_WATCHERS", "cleo").split(",").filter(Boolean);
 const AUDIENCE = "felix-arena";
 const RETENTION_SECONDS = 7 * 24 * 60 * 60;
 // Felix only promotes a replica it knows holds every acknowledged record when
@@ -129,12 +130,17 @@ for (const arena of ARENAS) {
   await grant(play, "stream", input, "stream.publish");
   await grant(play, "stream", ticks, "stream.subscribe");
   await grant(watch, "stream", ticks, "stream.subscribe");
-  console.log(`${play} for ${PLAYERS.join(", ") || "nobody"}`);
-  for (const name of PLAYERS) {
-    await request("POST", `${CONTROL_PLANE}/v1/tenants/${TENANT}/rbac/groupings`, {
-      token: admin,
-      body: { user: principal(name), role: play },
-    });
+  for (const [role, names] of [
+    [play, PLAYERS],
+    [watch, WATCHERS],
+  ]) {
+    console.log(`${role} for ${names.join(", ") || "nobody"}`);
+    for (const name of names) {
+      await request("POST", `${CONTROL_PLANE}/v1/tenants/${TENANT}/rbac/groupings`, {
+        token: admin,
+        body: { user: principal(name), role },
+      });
+    }
   }
 }
 
