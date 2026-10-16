@@ -6,8 +6,24 @@ describe('parseTickHeader', () => {
   it('reads what the sim writes', () => {
     // sim/src/tick.rs `round_trips`.
     const bytes = new Uint8Array([7, 0, 1, 0, 3, 0, 0, 0, 4, 3, 2, 1]);
-    expect(parseTickHeader(bytes)).toEqual({ epoch: 7, keyframe: true, match: 3, tick: 0x01020304 });
+    expect(parseTickHeader(bytes)).toEqual({ epoch: 7, keyframe: true, match: 3, tick: 0x01020304, timing: null });
     expect(parseTickHeader(bytes.subarray(0, 11))).toBeNull();
+  });
+
+  it('reads the timing block after the header', () => {
+    // sim/src/tick.rs `a_timed_record_carries_its_timing_after_the_header`.
+    const bytes = new Uint8Array(28);
+    const view = new DataView(bytes.buffer);
+    view.setUint8(2, 2);
+    view.setUint32(8, 9, true);
+    view.setBigUint64(12, 1_700_000_000_000_000n, true);
+    view.setUint32(20, 40, true);
+    view.setUint32(24, 2_500, true);
+    expect(parseTickHeader(bytes)?.timing).toEqual({
+      commitStartUs: 1_700_000_000_000_000,
+      stepUs: 40,
+      previousCommitUs: 2_500,
+    });
   });
 });
 
@@ -27,13 +43,14 @@ describe('parseFrame', () => {
   };
 
   it('splits the header from the payload', () => {
-    const parsed = parseFrame(frame(40, 42n))!;
+    const parsed = parseFrame(frame(40, 42n), 1_400)!;
     expect(parsed).toMatchObject({
       sub: 9,
       offset: 42,
       skippedBefore: 2,
       gatewayReceivedUs: 1000,
       gatewaySentUs: 1250,
+      receivedUs: 1400,
     });
     expect([...parsed.payload]).toEqual([0xaa, 0xbb]);
   });

@@ -82,7 +82,8 @@ docker compose -f dev/compose.yml logs -f sim   # or podman compose
 ```
 
 The ticks page follows one arena's tick stream through the gateway, showing
-each tick's offset and number as it arrives:
+each tick's offset and number as it arrives, and the p50 and p99 of each leg
+of its trip from the sim:
 
 ```bash
 cd web && npm install && npm run dev
@@ -90,8 +91,9 @@ cd web && npm install && npm run dev
 ```
 
 `?as=` picks the dev user to sign in as (default `cleo`, who may only watch).
-`npm run smoke` checks the same path from Node: ticks arrive at 30 Hz, and a
-replay slot reads the same records while the live one keeps going.
+`npm run smoke` checks the same path from Node: ticks arrive at 30 Hz, a
+replay slot reads the same records while the live one keeps going, and it
+prints each leg's latency.
 
 ## How it works
 

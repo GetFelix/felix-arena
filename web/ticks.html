@@ -25,6 +25,16 @@
         margin: 0;
         font-size: 18px;
       }
+      h2 {
+        margin: 8px 0 0;
+        font-size: 14px;
+        color: var(--hull-dark);
+      }
+      .note {
+        margin: 0;
+        font-size: 12px;
+        color: var(--hull-dark);
+      }
       .status {
         color: var(--hull-dark);
       }
@@ -101,6 +111,22 @@
           <dd id="dropped">0</dd>
         </div>
       </dl>
+      <h2>Per-hop latency, last 10 s</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>leg</th>
+            <th>p50 ms</th>
+            <th>p99 ms</th>
+          </tr>
+        </thead>
+        <tbody id="legs"></tbody>
+      </table>
+      <p class="note">
+        Legs between processes compare their clocks: exact when the stack and this page share one Linux host, off by
+        the VM's clock drift under Docker Desktop or Podman on macOS.
+      </p>
+      <h2>Recent ticks</h2>
       <table>
         <thead>
           <tr>
