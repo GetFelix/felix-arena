@@ -23,6 +23,7 @@ import {
   Vector3,
 } from 'three';
 import { type Bolt, Bolts, MAX_BOLTS } from './bolts';
+import { GUN_HEIGHT } from './fleet';
 import { hdr, materials } from './materials';
 import { palette } from './palette';
 
@@ -422,8 +423,6 @@ const BLAST_S = 0.5;
 const FIRED = 12;
 const HITS = 10;
 const BLASTS = BURSTS - HITS;
-/** Beams fly at muzzle height. */
-const BEAM_Y = 0.6;
 
 /** A live effect: when it started, where, for which team, and how brightly it lights the scene this frame. */
 interface Shown {
@@ -471,7 +470,7 @@ export class Effects {
   bolt(violet: boolean, x: number, z: number, heading: number, size = 1): void {
     const b = this.kit.bolt(violet);
     b.x = x / 100;
-    b.y = BEAM_Y;
+    b.y = GUN_HEIGHT;
     b.z = z / 100;
     b.yaw = -(heading / 65536) * 2 * Math.PI;
     b.size = size;
@@ -480,8 +479,8 @@ export class Effects {
   /** A rail beam of `violet`'s team from `(x0, z0)` to `(x1, z1)` in centimetres, at time `t`. */
   railed(violet: boolean, x0: number, z0: number, x1: number, z1: number, t: number): void {
     const s = start(this.beams, violet, t);
-    s.where.set(x1 / 100, BEAM_Y, z1 / 100);
-    s.from.set(x0 / 100, BEAM_Y, z0 / 100);
+    s.where.set(x1 / 100, GUN_HEIGHT, z1 / 100);
+    s.from.set(x0 / 100, GUN_HEIGHT, z0 / 100);
   }
 
   /** A craft of `violet`'s team destroyed at `(x, z)` in centimetres, at time `t`. */
@@ -491,7 +490,7 @@ export class Effects {
 
   /** A muzzle flash at `(x, z)` in centimetres, at time `t`. */
   fired(violet: boolean, x: number, z: number, t: number): void {
-    start(this.fires, violet, t).where.set(x / 100, 0.6, z / 100);
+    start(this.fires, violet, t).where.set(x / 100, GUN_HEIGHT, z / 100);
   }
 
   /** A hit on whatever is at `(x, z)` in centimetres, by a shot of `violet`'s team, at time `t`. */

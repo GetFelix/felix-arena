@@ -48,6 +48,8 @@ export function craft(
   phase: number,
 ): Craft {
   const g = new Group();
+  // Kenney's crafts point their noses down -z; turned half a turn, a craft faces +z like the rest of the scene.
+  body.rotation.y = Math.PI;
   g.add(body);
   g.position.set(x, 0, z);
   scene.add(g);

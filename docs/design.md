@@ -64,7 +64,11 @@ along its aim to the first enemy craft whose edge is within 0.6 m of it, or the
 first wall or cover. Dying loses the rail.
 
 **Controls.** WASD or the left stick moves; the craft strafes, so it always
-faces where you aim. The mouse or the right stick aims. Left click or the right
+faces where you aim. The keys move the craft up, left, down and right on the
+screen, worked out at the craft's own place in the view, and the game camera
+sits square to the arena so those match its walls. The mouse or the right stick
+aims, at the height bolts fly, so a bolt passes under the reticle that replaces
+the pointer during play. Left click or the right
 trigger fires. Space or the left trigger boosts: a short dash with a 3 second
 cooldown. Tab shows the scoreboard. During a kill cam, 1, 2 and 3 switch between
 the victim, killer and orbit views, and Space skips to the respawn.

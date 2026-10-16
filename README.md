@@ -134,12 +134,14 @@ page decodes ticks with. It needs the `wasm32-unknown-unknown` target, which
 `?as=` picks the dev user to sign in as (default `cleo`, who may only watch).
 
 The live game is `play.html`: `http://localhost:5173/play.html?arena=alpha&as=ana`
-flies `ana`'s craft (WASD to move, the mouse to aim, the left button to fire,
-Space to boost) and `as=ben` in a second window flies the other. Your craft
-is predicted through `core` and everyone else is interpolated from ticks.
-The quality tier (High, Medium or Low) is chosen
-from the first seconds of frame times; the Quality setting on the HUD or
-`&quality=high|medium|low|auto` overrides it. The page runs the
+flies `ana`'s craft and `as=ben` in a second window flies the other. W, A, S
+and D move your craft up, left, down and right on the screen, wherever it is in
+the arena. The mouse aims: a reticle replaces the pointer over the game, and a
+faint line runs from your craft's nose to it, at the height your bolts fly. The
+left button fires and Space boosts. Your craft is predicted through `core` and
+everyone else is interpolated from ticks. The quality tier (High, Medium or Low)
+is chosen from the first seconds of frame times; the Quality setting on the HUD
+or `&quality=high|medium|low|auto` overrides it. The page runs the
 match loop the sim decides: warmup, play, results and the next match, with the
 score, clock, kill feed and your hull, boost and rail on the HUD, and Tab for
 the scoreboard. `dev/compose.yml` lets `ana`, `ben`, `dan` and `eve` play.

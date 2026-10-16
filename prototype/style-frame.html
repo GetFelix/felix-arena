@@ -385,6 +385,8 @@ const coralMat = teamMaterial(C.coral);
 const violetMat = teamMaterial(C.violet);
 function craft(name, color, mat, x, z, scale) {
   const body = normalise(restyle(models[name].clone(true), mat), scale);
+  // Kenney's crafts point their noses down -z; turned half a turn, a craft faces +z like the rest of the scene.
+  body.rotation.y = Math.PI;
   const g = new THREE.Group();
   g.add(body);
   g.position.set(x, 0, z);
