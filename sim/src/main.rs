@@ -70,8 +70,23 @@ async fn main() -> Result<()> {
 }
 
 /// Connect to Felix, retrying until a broker answers: in a fresh deployment
-/// the sim can start before the brokers do.
+/// the sim can start before the brokers do, or before the broker has written
+/// the certificate it is checked against.
 async fn connect(config: &Config) -> Result<ClusterClient> {
+    let mut attempt = 0u32;
+    loop {
+        match try_connect(config).await {
+            Ok(client) => return Ok(client),
+            Err(err) => {
+                attempt += 1;
+                warn!(error = %format!("{err:#}"), attempt, "Felix is not reachable yet");
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            }
+        }
+    }
+}
+
+async fn try_connect(config: &Config) -> Result<ClusterClient> {
     let token = std::fs::read_to_string(&config.token_file)
         .with_context(|| format!("read {}", config.token_file.display()))?;
     let roots = config
@@ -80,33 +95,12 @@ async fn connect(config: &Config) -> Result<ClusterClient> {
         .map(felix_client::root_store_from_pem_file)
         .transpose()?
         .map(Arc::new);
-    let mut attempt = 0u32;
-    loop {
-        let mut client_config = ClientConfig::optimized_defaults(felix_client::quic_client_config(
-            roots.clone(),
-            true,
-        )?);
-        client_config.auth_tenant_id = Some(config.tenant.clone());
-        client_config.auth_token = Some(token.trim().to_owned());
-        // The defaults open many connections per pool, sized for throughput.
-        // The sim sends 30 small commits a second per arena.
-        client_config.publish_conn_pool = 1;
-        client_config.event_conn_pool = 1;
-        client_config.cache_conn_pool = 1;
-        let result = match resolve(&config.brokers).await {
-            Ok(seeds) => ClusterClient::connect(&seeds, &config.server_name, client_config).await,
-            Err(err) => Err(err),
-        };
-        match result {
-            Ok(client) => return Ok(client),
-            Err(err) if attempt < 60 => {
-                attempt += 1;
-                warn!(error = %format!("{err:#}"), attempt, "Felix is not reachable yet");
-                tokio::time::sleep(Duration::from_secs(2)).await;
-            }
-            Err(err) => return Err(err).context("connect to Felix"),
-        }
-    }
+    let mut client_config =
+        ClientConfig::optimized_defaults(felix_client::quic_client_config(roots, true)?);
+    client_config.auth_tenant_id = Some(config.tenant.clone());
+    client_config.auth_token = Some(token.trim().to_owned());
+    let seeds = resolve(&config.brokers).await?;
+    ClusterClient::connect(&seeds, &config.server_name, client_config).await
 }
 
 async fn resolve(brokers: &[String]) -> Result<Vec<SocketAddr>> {

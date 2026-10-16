@@ -13,6 +13,9 @@ pub(crate) const TICK: Duration = Duration::from_nanos(1_000_000_000 / 30);
 /// Every 30th tick is a keyframe.
 const KEYFRAME_EVERY: u32 = 30;
 const REPORT_EVERY: Duration = Duration::from_secs(5);
+/// A commit still unanswered after this is counted as failed, so a hung
+/// broker cannot stop the arena's clock or its reports.
+const COMMIT_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// Step `arena` on a 30 Hz timer forever, handing each tick's record to
 /// `commit`, which answers with the tick's log offset.
@@ -45,7 +48,10 @@ where
             tick,
         };
         let started = Instant::now();
-        match commit(header.encode().to_vec()).await {
+        let answer = tokio::time::timeout(COMMIT_TIMEOUT, commit(header.encode().to_vec()))
+            .await
+            .unwrap_or_else(|_| Err(anyhow::anyhow!("no answer within {COMMIT_TIMEOUT:?}")));
+        match answer {
             Ok(offset) => {
                 report.latency.record(started.elapsed());
                 report.offset = Some(offset);
@@ -89,8 +95,8 @@ impl Report {
     fn log(&mut self, arena: &str, now: Instant) {
         let seconds = now.duration_since(self.since).as_secs_f64();
         let committed = self.latency.len();
-        let hz = format!("{:.1}", committed as f64 / seconds);
-        let ms = |d: Duration| format!("{:.2}", d.as_secs_f64() * 1e3);
+        let hz = (committed as f64 / seconds * 10.0).round() / 10.0;
+        let ms = |d: Duration| (d.as_secs_f64() * 1e5).round() / 100.0;
         match self.latency.take_summary() {
             Some(summary) => info!(
                 arena,
@@ -176,6 +182,15 @@ mod tests {
         for pair in starts[late + 1..].windows(2) {
             assert!(pair[1] - pair[0] >= TICK - Duration::from_millis(1));
         }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn hung_commit_times_out_and_the_clock_goes_on() {
+        let seen = commits(Duration::from_secs(3), |tick| {
+            Duration::from_secs(if tick == 0 { 3600 } else { 0 })
+        })
+        .await;
+        assert!(seen.len() > 30, "{} commits", seen.len());
     }
 
     #[tokio::test(start_paused = true)]
