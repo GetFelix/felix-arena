@@ -12,3 +12,6 @@ for (const [path, url] of Object.entries(found)) {
   if (name in modelUrls) throw new Error(`two models are named ${name}`);
   modelUrls[name] = url;
 }
+
+/** The studio HDRI the scene's reflections come from. */
+export { default as hdriUrl } from '../../prototype/assets/hdri/studio_small_09_1k.hdr?url';
