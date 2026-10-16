@@ -70,6 +70,28 @@ pub fn player_key(principal: &str) -> String {
     format!("{:016x}", crate::player_key(principal))
 }
 
+/// The arena in centimetres, for drawing it: half its length and width, then
+/// each obstacle in [`crate::arena::OBSTACLES`] order as five numbers, a kind
+/// (0 a box, 1 a round prop), x, z, then half x and half z for a box or the
+/// radius and 0 for a round prop.
+#[wasm_bindgen]
+pub fn arena() -> Vec<i32> {
+    use crate::arena::{HALF_X, HALF_Z, OBSTACLES, Obstacle};
+    let mut out = vec![HALF_X, HALF_Z];
+    for obstacle in OBSTACLES {
+        out.extend(match obstacle {
+            Obstacle::Box {
+                x,
+                z,
+                half_x,
+                half_z,
+            } => [0, x, z, half_x, half_z],
+            Obstacle::Round { x, z, radius } => [1, x, z, radius, 0],
+        });
+    }
+    out
+}
+
 #[wasm_bindgen(js_class = Tick)]
 impl JsTick {
     #[wasm_bindgen(getter)]

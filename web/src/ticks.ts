@@ -4,7 +4,7 @@
 // arena and `?as=` the dev IdP user to sign in as.
 import { Gateway, type EventFrame } from './gateway';
 import { LEGS, Legs } from './legs';
-import { palette } from './palette';
+import { setCssColours } from './palette';
 import { decodeTick, loadCore, type Tick } from './core';
 
 const params = new URLSearchParams(location.search);
@@ -14,9 +14,7 @@ const GATEWAY = params.get('gateway') ?? 'ws://127.0.0.1:8787/ws';
 const IDP = params.get('idp') ?? 'http://127.0.0.1:9400';
 const RECENT = 15;
 
-for (const [name, colour] of Object.entries(palette)) {
-  document.documentElement.style.setProperty(`--${name.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`, colour);
-}
+setCssColours();
 
 const element = (id: string) => document.getElementById(id)!;
 element('arena').textContent = arena;

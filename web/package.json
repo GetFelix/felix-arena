@@ -6,11 +6,14 @@
   "scripts": {
     "core": "../core/wasm.sh src/core",
     "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "smoke": "vitest run --config vitest.smoke.config.ts"
+    "smoke": "vitest run --config vitest.smoke.config.ts",
+    "frame": "node scripts/compare-frame.mjs"
   },
   "dependencies": {
     "three": "0.170.0"

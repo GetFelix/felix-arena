@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { decodeTick, loadCore, playerKey } from './core';
+import { arenaLayout, decodeTick, loadCore, playerKey } from './core';
 
 const built = (name: string) => readFileSync(new URL(`./core/${name}`, import.meta.url));
 
@@ -31,5 +31,16 @@ describe('core in WebAssembly', () => {
     const record = bytes(fixture[0]!.record);
     expect(() => decodeTick(record.subarray(0, record.length - 1))).toThrow('not a tick record');
     expect(() => decodeTick(new Uint8Array([...record, 0]))).toThrow('not a tick record');
+  });
+
+  it('hands over the arena in metres, point-symmetric about the centre', () => {
+    const { halfX, halfZ, obstacles } = arenaLayout();
+    expect([halfX, halfZ]).toEqual([20, 14]);
+    expect(obstacles[0]).toEqual({ kind: 'round', x: 0, z: 0, radius: 0.9 });
+    expect(obstacles[1]).toEqual({ kind: 'box', x: 12.5, z: -1.5, halfX: 0.5, halfZ: 3 });
+    for (let i = 1; i < obstacles.length; i += 2) {
+      const [a, b] = [obstacles[i]!, obstacles[i + 1]!];
+      expect({ ...b, x: 0 - b.x, z: 0 - b.z }).toEqual(a);
+    }
   });
 });
