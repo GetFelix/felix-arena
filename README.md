@@ -99,7 +99,9 @@ page decodes ticks with. It needs the `wasm32-unknown-unknown` target, which
 `npm run smoke` checks the same path from Node: ticks arrive at 30 Hz, the
 WebAssembly build decodes keyframes to the state hashes the sim logged, a
 replay slot reads the same records while the live one keeps going, and it
-prints each leg's latency.
+prints each leg's latency. It also drives two players, `ana` and `ben`, in
+arena `bravo`: each moves only its own craft, a forged input naming the other
+player is refused, and `cleo` cannot publish inputs.
 
 ## How it works
 

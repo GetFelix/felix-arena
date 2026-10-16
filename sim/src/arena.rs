@@ -1,4 +1,5 @@
 use std::future::Future;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::Result;
@@ -7,6 +8,7 @@ use tracing::{info, warn};
 
 use felix_arena_core::{Timing, World};
 
+use crate::inputs::{Inbox, Players};
 use crate::latency::Window;
 
 /// 30 Hz.
@@ -16,13 +18,14 @@ const REPORT_EVERY: Duration = Duration::from_secs(5);
 /// broker cannot stop the arena's clock or its reports.
 const COMMIT_TIMEOUT: Duration = Duration::from_secs(1);
 
-/// Step `arena`'s world on a 30 Hz timer forever, handing each tick's record
-/// to `commit`, which answers with the tick's log offset.
+/// Step `arena`'s world on a 30 Hz timer forever with the inputs arriving in
+/// `inbox`, handing each tick's record to `commit`, which answers with the
+/// tick's log offset.
 ///
 /// A commit finishes before the next tick starts, so ticks land in order. A
 /// tick that is due while a commit is still running is skipped rather than
 /// made up later, so a slow commit never causes a burst of ticks.
-pub(crate) async fn run<C, F>(arena: String, epoch: u16, mut commit: C)
+pub(crate) async fn run<C, F>(arena: String, epoch: u16, inbox: Arc<Mutex<Inbox>>, mut commit: C)
 where
     C: FnMut(Vec<u8>) -> F,
     F: Future<Output = Result<u64>>,
@@ -30,6 +33,7 @@ where
     let mut timer = tokio::time::interval(TICK);
     timer.set_missed_tick_behavior(MissedTickBehavior::Skip);
     let mut world = World::new(0);
+    let mut players = Players::default();
     let mut last_due: Option<Instant> = None;
     let mut previous_commit: Option<Duration> = None;
     let mut report = Report::new(Instant::now());
@@ -41,7 +45,16 @@ where
         }
         last_due = Some(due);
 
-        world.step(|_| None);
+        let received = {
+            let mut inbox = inbox
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            report.refused += std::mem::take(&mut inbox.refused);
+            std::mem::take(&mut inbox.received)
+        };
+        report.inputs += received.len() as u64;
+        let controls = players.update(&mut world, received, Instant::now());
+        world.step(|slot| controls[usize::from(slot)]);
         let tick = world.snapshot(epoch);
         let started = Instant::now();
         let timing = Timing {
@@ -98,6 +111,8 @@ struct Report {
     missed: u64,
     failed: u64,
     offset: Option<u64>,
+    inputs: u64,
+    refused: u64,
 }
 
 impl Report {
@@ -108,6 +123,8 @@ impl Report {
             missed: 0,
             failed: 0,
             offset: None,
+            inputs: 0,
+            refused: 0,
         }
     }
 
@@ -127,6 +144,8 @@ impl Report {
                 missed = self.missed,
                 failed = self.failed,
                 offset = self.offset,
+                inputs = self.inputs,
+                inputs_refused = self.refused,
                 "ticks committed"
             ),
             None => warn!(
@@ -178,16 +197,21 @@ mod tests {
     ) -> Vec<(Header, Instant)> {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let log = Arc::clone(&seen);
-        let arena = tokio::spawn(run("a".into(), 1, move |record: Vec<u8>| {
-            let header = header(&record);
-            assert_eq!(Timing::of(&record).is_some(), header.timed);
-            log.lock().unwrap().push((header, Instant::now()));
-            let wait = latency(header.tick);
-            async move {
-                tokio::time::sleep(wait).await;
-                Ok(u64::from(header.tick))
-            }
-        }));
+        let arena = tokio::spawn(run(
+            "a".into(),
+            1,
+            Arc::default(),
+            move |record: Vec<u8>| {
+                let header = header(&record);
+                assert_eq!(Timing::of(&record).is_some(), header.timed);
+                log.lock().unwrap().push((header, Instant::now()));
+                let wait = latency(header.tick);
+                async move {
+                    tokio::time::sleep(wait).await;
+                    Ok(u64::from(header.tick))
+                }
+            },
+        ));
         tokio::time::sleep(length).await;
         arena.abort();
         seen.lock().unwrap().clone()

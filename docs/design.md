@@ -246,18 +246,36 @@ the move vector, the aim angle and the buttons. Because the stream is at most
 once, each record also repeats the previous two inputs, so a lost record is
 almost always covered by the next.
 
-**The gateway stamps the sender.** A Felix event does not say who published it
-(`Event` in `crates/sdk/felix-client/src/subscribe.rs:156` carries the stream,
-payload, offset and skip count, nothing about the publisher). So the gateway
-prefixes each input with the session's Felix principal, which it learned from
+**The gateway stamps the sender.** A Felix event did not say who published it
+when this was designed. So the gateway (`stamp_sender` on the input stream in
+`dev/scope.toml`) prefixes each input with the session's Felix principal, which it learned from
 the token exchange, and passes the rest through unread. Browsers never hold a
 Felix token and cannot reach the brokers, so only a gateway can publish to the
 input stream, and a client cannot speak for another player. This moves one
-trust decision into the gateway, which felix-canvas avoided; it is listed as a
-Felix gap below, and the fix belongs in the broker.
+trust decision into the gateway, which felix-canvas avoided. Felix has since
+added the broker-side answer, which the sim checks the stamp against.
+
+The record is 18 bytes: a kind byte, the newest sequence number, then three
+inputs, newest first, each the move stick (2 bytes, -127 to 127 an axis), the
+aim heading (2) and the buttons (1: fire and boost). `core` encodes it, and the
+page builds each record with core's `Inputs`.
+
+The sim takes a record only when two witnesses agree. The gateway's stamp
+names the sender, and Felix's own `publisher` on the delivered event
+(`ClientConfig::publishers`, in Felix since 0.6.0-preview.3) names the
+principal the broker accepted the publish from. A record without both, or
+with a stamp the broker does not vouch for, is refused and counted in the
+sim's report as `inputs_refused`. A stamp a client writes into its own payload
+lands behind the gateway's and fails to parse, so a client cannot speak for
+someone else even through a gateway.
 
 The sim keeps the newest input per player and applies it at each tick. A
-player whose inputs stop is held on the last one for 100 ms, then coasts.
+player whose inputs stop is held on the last one for 100 ms, then coasts. When
+a record arrives after one was lost, the buttons of every input it covers that
+the sim has not applied are merged into the newest, so a press is not lost
+with its record. A player's first input joins it to the arena, on the smaller
+team, and ten seconds without one removes it. The `join` input and the member
+keys arrive in M3.
 
 ### Ticks are commits
 
@@ -693,7 +711,7 @@ about Felix.
 **Felix gaps this design runs into.** Some are filed; the rest are new and
 listed here until they are.
 
-1. **An event does not carry its publisher.** The gateway stamps the sender on inputs, which moves a trust decision out of the broker. A broker-stamped, authenticated principal on each delivered event would remove it.
+1. **An event did not carry its publisher; now it does.** Felix 0.6.0-preview.3 added a broker-vouched `publisher` to delivered events. The sim requires it to match the gateway's stamp, so the stamp is now a second witness rather than the only one.
 2. **No conditional append or writer fencing.** Felix has no way to say "append only if I still own this stream", so a stale sim is fenced by readers comparing epochs. An expected-offset publish or a writer lease would fence it at the broker.
 3. **Bounded range read, now in Felix.** A kill cam wants ticks `a` to `b`. Felix 0.6.0-preview.3 added `Client::read` with an end offset, which makes that one request; the gateway would need to expose it. Until then the kill cam subscribes from `a`, receives live ticks too, and closes.
 4. **A commit is not idempotent.** Documented in Felix's `docs/atomic-commit.md`. A retried tick can land twice; readers dedupe on `(epoch, tick)`.

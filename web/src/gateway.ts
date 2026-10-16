@@ -44,6 +44,12 @@ export function parseFrame(data: ArrayBuffer, receivedUs = nowUs()): EventFrame 
   };
 }
 
+function base64(bytes: Uint8Array): string {
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
 /** Microseconds since the Unix epoch on this host's clock. */
 export function nowUs(): number {
   return Math.round((performance.timeOrigin + performance.now()) * 1000);
@@ -83,11 +89,18 @@ export class Gateway {
   private readonly slots = new Map<string, number>();
   /** Subscribes waiting for an answer, oldest first, by `stream/slot`. */
   private readonly pending = new Map<string, Pending[]>();
+  /** Publishes waiting for an `ack`, by id. */
+  private readonly publishes = new Map<number, { resolve: () => void; reject: (err: Error) => void }>();
+  private nextId = 1;
   private closing = false;
   /** Called with errors that answer no pending request, such as `subscription_ended`. */
   onError: (err: GatewayError) => void = () => {};
 
-  private constructor(private readonly socket: WebSocket) {
+  private constructor(
+    private readonly socket: WebSocket,
+    /** Aliases of optional resources this sign-in does not reach, from `hello`. */
+    readonly missing: readonly string[],
+  ) {
     socket.addEventListener('message', (message) => this.receive(message));
     socket.addEventListener('close', () => {
       if (!this.closing) this.onError(new GatewayError('closed', 'the gateway closed the session'));
@@ -117,7 +130,7 @@ export class Gateway {
           const features = hello.features as string[];
           const missing = FEATURES.filter((feature) => !features.includes(feature));
           if (missing.length > 0) return fail(new Error(`the gateway lacks ${missing.join(', ')}`));
-          resolve(new Gateway(socket));
+          resolve(new Gateway(socket, (hello.missing as string[] | undefined) ?? []));
         },
         { once: true },
       );
@@ -141,6 +154,25 @@ export class Gateway {
       queue.push({ onEvent, resolve, reject });
       this.pending.set(key, queue);
       this.socket.send(JSON.stringify({ type: 'subscribe', stream, slot, from }));
+    });
+  }
+
+  /**
+   * Publish `payload` to `stream`, fire and forget: a refusal arrives at
+   * {@link onError}. Inputs go this way, since the next one supersedes a lost one.
+   */
+  send(stream: string, payload: Uint8Array): void {
+    this.socket.send(
+      JSON.stringify({ type: 'publish', stream, payload: base64(payload), ack: false, id: this.nextId++ }),
+    );
+  }
+
+  /** Publish `payload` to `stream` and wait for Felix to take it. */
+  publish(stream: string, payload: Uint8Array): Promise<void> {
+    const id = this.nextId++;
+    return new Promise((resolve, reject) => {
+      this.publishes.set(id, { resolve, reject });
+      this.socket.send(JSON.stringify({ type: 'publish', stream, payload: base64(payload), ack: true, id }));
     });
   }
 
@@ -192,10 +224,20 @@ export class Gateway {
         startOffset: json.start_offset as number | null,
         liveOffset: json.live_offset as number | null,
       });
+    } else if (json.type === 'ack') {
+      const id = json.id as number;
+      this.publishes.get(id)?.resolve();
+      this.publishes.delete(id);
     } else if (json.type === 'error') {
       const err = new GatewayError(String(json.code), String(json.message));
-      // `subscription_ended` follows a `subscribed`, so it answers no request.
-      const answer = json.code === 'subscription_ended' ? null : this.answered(json);
+      const publish = typeof json.id === 'number' ? this.publishes.get(json.id) : undefined;
+      if (publish) {
+        this.publishes.delete(json.id as number);
+        return publish.reject(err);
+      }
+      // `subscription_ended` follows a `subscribed`, and an error with an id
+      // answers a publish, so neither answers a subscribe.
+      const answer = json.code === 'subscription_ended' || json.id !== undefined ? null : this.answered(json);
       if (answer) answer.request.reject(err);
       else this.onError(err);
     }

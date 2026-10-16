@@ -1,9 +1,10 @@
-//! The simulation: the authority for each arena. It steps each arena's world
-//! through `felix-arena-core` at 30 Hz, commits every tick to the arena's
-//! tick stream and logs how long the commits take.
+//! The simulation: the authority for each arena. It reads each arena's input
+//! stream, steps its world through `felix-arena-core` at 30 Hz, commits every
+//! tick to the arena's tick stream and logs how long the commits take.
 
 mod arena;
 mod config;
+mod inputs;
 mod latency;
 
 use std::net::SocketAddr;
@@ -45,7 +46,15 @@ async fn main() -> Result<()> {
             config.tenant.clone(),
             config.namespace.clone(),
         );
-        arenas.spawn(arena::run(arena.clone(), EPOCH, move |record| {
+        let inbox = Arc::default();
+        tokio::spawn(inputs::follow(
+            Arc::clone(&client),
+            config.tenant.clone(),
+            config.namespace.clone(),
+            format!("arena.input.{arena}"),
+            Arc::clone(&inbox),
+        ));
+        arenas.spawn(arena::run(arena.clone(), EPOCH, inbox, move |record| {
             let (client, tenant, namespace, stream) = (
                 Arc::clone(&client),
                 tenant.clone(),
@@ -98,6 +107,8 @@ async fn try_connect(config: &Config) -> Result<ClusterClient> {
         ClientConfig::optimized_defaults(felix_client::quic_client_config(roots, true)?);
     client_config.auth_tenant_id = Some(config.tenant.clone());
     client_config.auth_token = Some(token.trim().to_owned());
+    // Who published each input, which must match the gateway's stamp.
+    client_config.publishers = true;
     let seeds = resolve(&config.brokers).await?;
     ClusterClient::connect(&seeds, &config.server_name, client_config).await
 }
