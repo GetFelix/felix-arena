@@ -51,3 +51,34 @@ jobs:
       - run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace --locked
+
+  dev-stack:
+    name: dev stack
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: dev/up.sh
+      - name: The sim commits ticks at 30 Hz in both arenas
+        run: |
+          # Each arena reports every 5 s. The first report includes startup, so
+          # judge the rate on a later one.
+          for _ in $(seq 1 45); do
+            logs="$(docker compose -f dev/compose.yml logs --no-color sim 2>&1)"
+            ok=0
+            for arena in alpha bravo; do
+              hz="$(grep 'ticks committed' <<<"$logs" | grep -E "arena=\"?$arena\"? " \
+                | tail -n +2 | tail -1 | grep -oE 'hz=[0-9.]+' | cut -d= -f2 || true)"
+              if [[ -n "$hz" ]] && awk -v hz="$hz" 'BEGIN { exit !(hz >= 28 && hz <= 31) }'; then
+                ok=$((ok + 1))
+              fi
+            done
+            if [[ $ok -eq 2 ]]; then
+              grep 'ticks committed' <<<"$logs"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "the sim did not report 30 Hz for both arenas" >&2
+          exit 1
+      - if: failure()
+        run: docker compose -f dev/compose.yml logs --no-color
