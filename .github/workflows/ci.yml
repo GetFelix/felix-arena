@@ -62,11 +62,15 @@ jobs:
           npx vite preview --host 127.0.0.1 --port 4173 --strictPort &
           python3 -m http.server 4174 --bind 127.0.0.1 --directory ../prototype &
           for port in 4173 4174; do
-            for _ in $(seq 1 30); do curl -sf "http://127.0.0.1:$port/" >/dev/null && break; sleep 1; done
+            up=0
+            for _ in $(seq 1 30); do curl -sf "http://127.0.0.1:$port/" >/dev/null && up=1 && break; sleep 1; done
+            [[ $up -eq 1 ]] || { echo "nothing is serving on port $port" >&2; exit 1; }
           done
           npm run frame -- http://127.0.0.1:4173/ http://127.0.0.1:4174/style-frame.html frames
+          # A second moment, with different shots and hits in flight.
+          FRAME_T=0.4 npm run frame -- http://127.0.0.1:4173/ http://127.0.0.1:4174/style-frame.html frames/t-0.4
         env:
-          FRAME_MAX_DIFFERING_PERCENT: '0.1'
+          FRAME_MAX_DIFFERING_PERCENT: '0.01'
       - if: always()
         uses: actions/upload-artifact@v4
         with:

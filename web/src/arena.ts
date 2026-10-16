@@ -27,25 +27,26 @@ interface Prop {
 
 /**
  * What stands on each of core's round obstacles after the centre crystal, in core's order: each prop on one side, then
- * its point-symmetric twin. Core decides where they are; this decides how they look.
+ * its point-symmetric twin. Core decides where they are; this decides how they look. `radius` is core's footprint
+ * for the prop, checked so a reordered core layout cannot put a prop on another one's footprint.
  */
-const ROUND_PROPS: Prop[] = [
-  { model: 'structure_closed', scale: 2.0, rot: Math.PI / 4 },
-  { model: 'structure_closed', scale: 2.0, rot: Math.PI / 4 },
-  { model: 'barrels', scale: 2.6, rot: 0.6 },
-  { model: 'barrels', scale: 2.6, rot: -0.6 },
-  { model: 'machine_barrelLarge', scale: 2.2 },
-  { model: 'machine_barrelLarge', scale: 2.2 },
-  { model: 'machine_barrelLarge', scale: 1.7 },
-  { model: 'machine_barrelLarge', scale: 1.7 },
-  { model: 'rock_largeA', scale: 3.2, rot: 1.2 },
-  { model: 'rock_largeA', scale: 3.2, rot: 1.2 },
-  { model: 'rock_largeB', scale: 2.8, rot: 0.4 },
-  { model: 'rock_largeB', scale: 2.8, rot: 0.4 },
-  { model: 'machine_generator', scale: 2.4 },
-  { model: 'machine_generator', scale: 2.4, rot: Math.PI },
-  { model: 'turret_single', scale: 2.0, rot: 0.7 },
-  { model: 'turret_single', scale: 2.0, rot: 0.7 + Math.PI },
+const ROUND_PROPS: (Prop & { radius: number })[] = [
+  { model: 'structure_closed', scale: 2.0, rot: Math.PI / 4, radius: 1.2 },
+  { model: 'structure_closed', scale: 2.0, rot: Math.PI / 4, radius: 1.2 },
+  { model: 'barrels', scale: 2.6, rot: 0.6, radius: 0.8 },
+  { model: 'barrels', scale: 2.6, rot: -0.6, radius: 0.8 },
+  { model: 'machine_barrelLarge', scale: 2.2, radius: 0.8 },
+  { model: 'machine_barrelLarge', scale: 2.2, radius: 0.8 },
+  { model: 'machine_barrelLarge', scale: 1.7, radius: 0.6 },
+  { model: 'machine_barrelLarge', scale: 1.7, radius: 0.6 },
+  { model: 'rock_largeA', scale: 3.2, rot: 1.2, radius: 1.4 },
+  { model: 'rock_largeA', scale: 3.2, rot: 1.2, radius: 1.4 },
+  { model: 'rock_largeB', scale: 2.8, rot: 0.4, radius: 1.2 },
+  { model: 'rock_largeB', scale: 2.8, rot: 0.4, radius: 1.2 },
+  { model: 'machine_generator', scale: 2.4, radius: 1.0 },
+  { model: 'machine_generator', scale: 2.4, rot: Math.PI, radius: 1.0 },
+  { model: 'turret_single', scale: 2.0, rot: 0.7, radius: 0.6 },
+  { model: 'turret_single', scale: 2.0, rot: 0.7 + Math.PI, radius: 0.6 },
 ];
 
 /** Silhouettes outside the walls that fall away into the fog. They block nothing. */
@@ -151,7 +152,13 @@ export function buildArena(scene: Scene, layout: ArenaLayout, models: ModelLibra
     );
   }
   for (const o of rest) if (o.kind === 'box') cover(o);
-  rounds.forEach((o, i) => place(ROUND_PROPS[i]!, o.x, o.z));
+  rounds.forEach((o, i) => {
+    const prop = ROUND_PROPS[i]!;
+    if (o.kind !== 'round' || Math.abs(o.radius - prop.radius) > 1e-9) {
+      throw new Error(`core's round obstacle ${i} at (${o.x}, ${o.z}) does not fit ${prop.model}`);
+    }
+    place(prop, o.x, o.z);
+  });
 
   // The centre landmark: a crystal on a plinth.
   const plinth = new Mesh(new CylinderGeometry(2.0, 2.3, 0.35, 32), materials.wall);

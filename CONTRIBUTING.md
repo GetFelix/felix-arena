@@ -31,7 +31,8 @@ is what is being built, and [docs/art.md](docs/art.md) is how it must look.
   after screenshot of the same frozen moment (`?t=` on the style frame or the
   app), and a frame time on an iGPU.
 - The `style frame` CI job holds the app to the style frame: it screenshots
-  both at `?t=1.2` and fails when more than 0.1% of pixels differ. A change to
+  both at `?t=1.2` and `?t=0.4` and fails when more than 0.01% of pixels
+  differ. A change to
   the look changes both. The job's `frames` artifact has the two screenshots
   and the diff.
 
