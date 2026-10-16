@@ -8,6 +8,7 @@ import {
   Color,
   CylinderGeometry,
   DoubleSide,
+  InstancedMesh,
   Mesh,
   MeshBasicMaterial,
   type Object3D,
@@ -81,8 +82,10 @@ export interface Glow {
   where: Vector3;
 }
 
+/** Pieces of debris a hit throws. */
+const DEBRIS = 7;
+
 interface Debris {
-  m: Mesh;
   v: Vector3;
   spin: Vector3;
 }
@@ -101,7 +104,7 @@ interface Burst {
 }
 
 /** One hit's sparks, ground ring, debris and flash. */
-function burst(scene: Object3D, fx: Object3D, tex: EffectTextures, random: () => number): Burst {
+function burst(fx: Object3D, tex: EffectTextures, random: () => number): Burst {
   const n = 70;
   const vel: Vector3[] = [];
   for (let i = 0; i < n; i++) {
@@ -117,16 +120,11 @@ function burst(scene: Object3D, fx: Object3D, tex: EffectTextures, random: () =>
   const ring = new Mesh(new RingGeometry(0.8, 1.0, 48), new MeshBasicMaterial({ ...additive, side: DoubleSide }));
   ring.rotation.x = -Math.PI / 2;
   const debris: Debris[] = [];
-  for (let i = 0; i < 7; i++) {
-    const m = new Mesh(new BoxGeometry(0.22, 0.08, 0.16), materials.hullDark);
-    m.castShadow = true;
-    m.visible = false;
+  for (let i = 0; i < DEBRIS; i++) {
     const a = random() * Math.PI * 2;
     const v = new Vector3(Math.cos(a) * (2 + random() * 3), 4 + random() * 3, Math.sin(a) * (2 + random() * 3));
     const spin = new Vector3(random() * 9, random() * 9, random() * 9);
-    debris.push({ m, v, spin });
-    // Debris lives outside the effects group so ambient occlusion still sees it.
-    scene.add(m);
+    debris.push({ v, spin });
   }
   const flash = flareSprite(fx, tex, 4.5);
   sparks.visible = ring.visible = false;
@@ -156,6 +154,7 @@ function beam(fx: Object3D, tex: EffectTextures): Beam {
     new MeshBasicMaterial({ map: tex.glow, ...additive }),
   );
   core.visible = glow.visible = false;
+  core.matrixAutoUpdate = glow.matrixAutoUpdate = false;
   fx.add(core, glow);
   return {
     core,
@@ -171,10 +170,10 @@ function beam(fx: Object3D, tex: EffectTextures): Beam {
 
 function hideBurst(b: Burst): void {
   b.sparks.visible = b.ring.visible = b.flash.visible = false;
-  for (const d of b.debris) d.m.visible = false;
 }
 
-function drawBurst(b: Burst, tint: Tint): void {
+/** Draws a hit, its debris as instances `first` onward of `debris`. */
+function drawBurst(b: Burst, tint: Tint, debris: Float32Array, first: number): void {
   const { where, h } = b;
   b.sparks.visible = b.ring.visible = true;
   b.flash.visible = h < 0.12;
@@ -189,23 +188,52 @@ function drawBurst(b: Burst, tint: Tint): void {
   position.needsUpdate = true;
   b.sparks.material.color.copy(tint.sparks);
   b.sparks.material.opacity = Math.max(0, 1 - h / BURST_S);
-  b.ring.position.set(where.x, 0.06, where.z);
-  b.ring.scale.setScalar(0.3 + h * 3.2);
+  // Fields rather than set() and setScalar(): a float passed to a call that is not inlined is boxed.
+  b.ring.position.x = where.x;
+  b.ring.position.y = 0.06;
+  b.ring.position.z = where.z;
+  b.ring.scale.x = b.ring.scale.y = b.ring.scale.z = 0.3 + h * 3.2;
   b.ring.material.color.copy(tint.ring);
   b.ring.material.opacity = Math.max(0, 1 - h / 0.5);
   b.flash.position.copy(where);
   b.flash.material.color.copy(tint.flare);
   b.flash.material.opacity = 1 - h / 0.12;
-  for (const d of b.debris) {
-    d.m.visible = true;
-    d.m.position.set(where.x + d.v.x * h, Math.max(0.05, where.y + d.v.y * h - 12 * h * h), where.z + d.v.z * h);
-    d.m.rotation.set(d.spin.x * h, d.spin.y * h, d.spin.z * h);
+  for (let i = 0; i < DEBRIS; i++) {
+    const { v, spin } = b.debris[i]!;
+    // Turned by the Euler angles `spin * h` in XYZ order, as Matrix4.makeRotationFromEuler would, then placed.
+    const a = Math.cos(spin.x * h);
+    const s1 = Math.sin(spin.x * h);
+    const c = Math.cos(spin.y * h);
+    const d = Math.sin(spin.y * h);
+    const e = Math.cos(spin.z * h);
+    const f = Math.sin(spin.z * h);
+    const ae = a * e;
+    const af = a * f;
+    const be = s1 * e;
+    const bf = s1 * f;
+    const o = (first + i) * 16;
+    debris[o] = c * e;
+    debris[o + 1] = af + be * d;
+    debris[o + 2] = bf - ae * d;
+    debris[o + 3] = 0;
+    debris[o + 4] = -c * f;
+    debris[o + 5] = ae - bf * d;
+    debris[o + 6] = be + af * d;
+    debris[o + 7] = 0;
+    debris[o + 8] = d;
+    debris[o + 9] = -s1 * c;
+    debris[o + 10] = a * c;
+    debris[o + 11] = 0;
+    debris[o + 12] = where.x + v.x * h;
+    debris[o + 13] = Math.max(0.05, where.y + v.y * h - 12 * h * h);
+    debris[o + 14] = where.z + v.z * h;
+    debris[o + 15] = 1;
   }
 }
 
 function drawFlare(s: Sprite, f: Flare, tint: Tint): void {
   s.position.copy(f.where);
-  s.scale.setScalar(f.size);
+  s.scale.x = s.scale.y = s.scale.z = f.size;
   s.material.color.copy(tint.flare);
   s.material.opacity = f.opacity;
   s.material.rotation = f.rotation;
@@ -214,16 +242,39 @@ function drawFlare(s: Sprite, f: Flare, tint: Tint): void {
 function drawBeam(b: Beam, tint: Tint): void {
   const { core, glow, end, from, to, h, fade } = b;
   core.visible = glow.visible = end.visible = true;
-  const length = Math.max(0.01, from.distanceTo(to));
-  const angle = Math.atan2(to.z - from.z, to.x - from.x);
-  core.position.copy(from).lerp(to, 0.5);
-  core.rotation.set(0, -angle, 0);
-  core.scale.set(length, 1 + h * 2, 1 + h * 2);
+  const dx = to.x - from.x;
+  const dz = to.z - from.z;
+  const length = Math.max(0.01, Math.sqrt(dx * dx + (to.y - from.y) ** 2 + dz * dz));
+  // Turned about y to point from `from` to `to`, stretched to the length, written straight into each matrix: setting
+  // rotation and scale through their methods would box the floats.
+  const flat = Math.sqrt(dx * dx + dz * dz);
+  const cos = flat > 0 ? dx / flat : 1;
+  const sin = flat > 0 ? dz / flat : 0;
+  const thick = 1 + h * 2;
+  for (let i = 0; i < 2; i++) {
+    const m = (i === 0 ? core : glow).matrix.elements;
+    const sy = i === 0 ? thick : 1;
+    const sz = i === 0 ? thick : 1;
+    m[0] = cos * length;
+    m[1] = 0;
+    m[2] = sin * length;
+    m[3] = 0;
+    m[4] = 0;
+    m[5] = sy;
+    m[6] = 0;
+    m[7] = 0;
+    m[8] = -sin * sz;
+    m[9] = 0;
+    m[10] = cos * sz;
+    m[11] = 0;
+    m[12] = (from.x + to.x) / 2;
+    m[13] = (from.y + to.y) / 2;
+    m[14] = (from.z + to.z) / 2;
+    m[15] = 1;
+  }
+  core.matrixWorldNeedsUpdate = glow.matrixWorldNeedsUpdate = true;
   core.material.color.copy(tint.beam);
   core.material.opacity = fade;
-  glow.position.copy(core.position);
-  glow.rotation.set(0, -angle, 0);
-  glow.scale.set(length, 1, 1);
   glow.material.color.copy(tint.beamGlow);
   glow.material.opacity = fade * fade;
   end.position.copy(to);
@@ -271,6 +322,8 @@ export class EffectsKit {
   private readonly flareSprites: Sprite[];
   private readonly flares: Flare[];
   private readonly bursts: Burst[];
+  /** Every hit's debris, one draw call for all of them. */
+  private readonly debris: InstancedMesh;
   private readonly beams: Beam[];
   /** Filled in and never drawn when a frame asks for more flares or beams than there are. */
   private readonly spareFlare: Flare;
@@ -288,7 +341,13 @@ export class EffectsKit {
       this.lights.push(light);
     }
     this.bolts = new Bolts(fx, tex.glow);
-    this.bursts = Array.from({ length: BURSTS }, () => burst(scene, fx, tex, random));
+    this.bursts = Array.from({ length: BURSTS }, () => burst(fx, tex, random));
+    this.debris = new InstancedMesh(new BoxGeometry(0.22, 0.08, 0.16), materials.hullDark, BURSTS * DEBRIS);
+    this.debris.castShadow = true;
+    this.debris.frustumCulled = false;
+    this.debris.count = 0;
+    // Debris lives outside the effects group so ambient occlusion still sees it.
+    scene.add(this.debris);
     this.flareSprites = Array.from({ length: FLARES }, () => flareSprite(fx, tex, 2.2));
     const flare = (): Flare => ({ violet: false, where: new Vector3(), size: 0, opacity: 0, rotation: 0 });
     this.flares = Array.from({ length: FLARES }, flare);
@@ -339,12 +398,18 @@ export class EffectsKit {
       if (i < this.beamCount) drawBeam(b, this.tints[b.violet ? 1 : 0]);
       else b.core.visible = b.glow.visible = b.end.visible = false;
     }
+    const debris = this.debris.instanceMatrix.array as Float32Array;
+    let pieces = 0;
     for (let i = 0; i < BURSTS; i++) {
       const b = this.bursts[i]!;
-      if (b.shown) drawBurst(b, this.tints[b.violet ? 1 : 0]);
-      else hideBurst(b);
+      if (b.shown) {
+        drawBurst(b, this.tints[b.violet ? 1 : 0], debris, pieces);
+        pieces += DEBRIS;
+      } else hideBurst(b);
       b.shown = false;
     }
+    this.debris.count = pieces;
+    this.debris.instanceMatrix.needsUpdate = true;
     this.flareCount = this.beamCount = 0;
   }
 }

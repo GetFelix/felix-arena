@@ -619,7 +619,7 @@ excluded from the occlusion pass so they never darken what they light.
 - Repeated props are `InstancedMesh`.
 - Crafts are at most 8 small models of a few hundred triangles each.
 - Bolts are one `InstancedMesh` of up to 64, and their glow halos another.
-- Every effect comes from one kit (`web/src/effects.ts`) with fixed pools, which the style frame's scripted fight and the live match both draw through: 16 hits, each with its own sparks, ground ring, flash and debris; 24 flares for muzzle flashes and destroyed crafts; 6 rail beams. Nothing allocates during a match: a caller fills in a pooled record instead of passing numbers, and the kit draws the records when the frame ends.
+- Every effect comes from one kit (`web/src/effects.ts`) with fixed pools, which the style frame's scripted fight and the live match both draw through: 16 hits, each with its own sparks, ground ring and flash, and their debris as one instanced mesh; 24 flares for muzzle flashes and destroyed crafts; 6 rail beams. Nothing allocates during a match: a caller fills in a pooled record instead of passing numbers, and the kit draws the records when the frame ends.
 - Point lights are a fixed pool of 3 whose intensity changes, never their number, because a change in light count recompiles shaders.
 
 **Budget at 1080p on a laptop iGPU (Intel Iris Xe, Apple M1), 16.7 ms a frame:**
