@@ -1,0 +1,38 @@
+name: shots
+on:
+  push:
+    branches: [shots/controls]
+permissions:
+  contents: read
+jobs:
+  shots:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@0.2.129
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm run core
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: |
+          npx vite preview --host 127.0.0.1 --port 4173 --strictPort &
+          python3 -m http.server 4174 --bind 127.0.0.1 --directory ../prototype &
+          sleep 5
+          node scripts/offline-shots.mjs http://127.0.0.1:4173/play.html http://127.0.0.1:4174/style-frame.html shots
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shots
+          path: web/shots
