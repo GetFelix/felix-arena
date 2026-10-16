@@ -11,5 +11,5 @@ Models used from Space Kit: `craft_speederA`, `craft_speederB`, `craft_speederD`
 `craft_racer`, `barrels`, `machine_barrelLarge`, `machine_generator`,
 `rock_largeA`, `rock_largeB`, `rock_crystalsLargeA`, `structure_closed`,
 `turret_single`, `hangar_roundA` and `satelliteDish_large`. They are the GLB
-files from the pack's `Models/GLTF format` folder, unmodified. The style frame
-recolours them at load time by material name.
+files from the pack's `Models/GLTF format` folder, unmodified. The style frame and
+the game (`web/src/models.ts`) recolour them at load time by material name.
