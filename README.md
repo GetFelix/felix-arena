@@ -49,6 +49,13 @@ craft from Kenney's Space Kit, bolts, hits, the centre crystal, the lighting
 and the post processing. It is the reference every later milestone is built
 against.
 
+`web/` is that page rebuilt as the game's renderer: TypeScript and Three.js,
+built with Vite, with every model restyled through `web/src/models.ts`, every
+colour from `web/src/palette.ts`, and the walls, cover and prop positions taken
+from the collision layout in `core/`. CI screenshots the app and the style
+frame at the same frozen moment in headless Chromium and fails when they
+differ.
+
 The simulation in `sim/` connects to Felix and commits an empty tick to each
 configured arena's tick stream at 30 Hz, waiting for each commit before the
 next. Every five seconds it logs, per arena, the ticks committed, the rate and
@@ -67,6 +74,17 @@ cd prototype && python3 -m http.server 8000
 
 Drag to orbit the camera. Add `?t=1.2` to the URL to freeze the action at that
 moment.
+
+The app renders the same moment, and takes the same `?t=`:
+
+```bash
+cd web && npm install && npm run core && npm run dev
+# open http://localhost:5173/?t=1.2
+```
+
+`npm run frame -- <app url> <style frame url> <out dir>` screenshots both at
+1920x1080 and writes `style-frame.png`, `app.png`, `diff.png` and `diff.json`;
+the `style frame` CI job runs it and uploads them as the `frames` artifact.
 
 ## Development stack
 
@@ -136,13 +154,14 @@ compares this with the usual way of building a session-based game.
 ## Status
 
 The design and art direction are written and the style frame is done. M0,
-locking the look in a real app, is next. Each milestone is a
+locking the look in a real app, is in progress: the style frame is ported to
+`web/`. Each milestone is a
 [GitHub milestone](https://github.com/GetFelix/felix-arena/milestones) with an
 issue per piece of work.
 
 | M | Milestone | Status |
 |---|---|---|
-| [0](https://github.com/GetFelix/felix-arena/milestone/1) | The look, locked | Next |
+| [0](https://github.com/GetFelix/felix-arena/milestone/1) | The look, locked | In progress |
 | [1](https://github.com/GetFelix/felix-arena/milestone/2) | A browser reaches Felix | Planned |
 | [2](https://github.com/GetFelix/felix-arena/milestone/3) | One authority | Planned |
 | [3](https://github.com/GetFelix/felix-arena/milestone/4) | Join mid-match | Planned |

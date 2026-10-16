@@ -66,7 +66,7 @@ jobs:
           done
           npm run frame -- http://127.0.0.1:4173/ http://127.0.0.1:4174/style-frame.html frames
         env:
-          FRAME_MAX_DIFFERING_PERCENT: '100'
+          FRAME_MAX_DIFFERING_PERCENT: '0.1'
       - if: always()
         uses: actions/upload-artifact@v4
         with:
