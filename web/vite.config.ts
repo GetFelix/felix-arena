@@ -1,7 +1,8 @@
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 
 export default defineConfig({
   // The models and HDRI live in ../prototype/assets, shared with the style frame.
   server: { fs: { allow: ['..'] } },
-  test: { environment: 'node' },
+  // smoke/ needs the dev stack; `npm run smoke` runs it.
+  test: { environment: 'node', exclude: [...configDefaults.exclude, 'smoke/**'] },
 });

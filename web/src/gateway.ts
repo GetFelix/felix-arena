@@ -1,0 +1,170 @@
+// The browser end of felix-gateway's protocol, as much of it as the game uses:
+// join, and subscriptions in named slots whose events arrive as binary frames.
+// felix-gateway's docs/protocol.md is the reference.
+
+/** The optional protocol features the game needs. */
+export const FEATURES = ['binary_events', 'slots'] as const;
+
+/** One event frame from the gateway. Times are µs since the Unix epoch. */
+export interface EventFrame {
+  /** The subscription, as its `subscribed` numbered it. */
+  sub: number;
+  /** The log offset, or `null` on a stream with no log. */
+  offset: number | null;
+  skippedBefore: number;
+  /** When the gateway received the event from Felix, on its clock. */
+  gatewayReceivedUs: number;
+  /** When the gateway handed the frame to the WebSocket, on its clock. */
+  gatewaySentUs: number;
+  payload: Uint8Array;
+}
+
+const EVENT_KIND = 1;
+const NO_OFFSET = 0xffff_ffff_ffff_ffffn;
+const MIN_HEADER = 40;
+
+/** Parse one binary frame, or `null` for a kind this client does not know. */
+export function parseFrame(data: ArrayBuffer): EventFrame | null {
+  const view = new DataView(data);
+  if (data.byteLength < 2 || view.getUint8(0) !== EVENT_KIND) return null;
+  // The header may grow; the payload starts where its length byte says.
+  const headerLen = view.getUint8(1);
+  if (headerLen < MIN_HEADER || data.byteLength < headerLen) return null;
+  const offset = view.getBigUint64(8, true);
+  return {
+    sub: view.getUint32(4, true),
+    offset: offset === NO_OFFSET ? null : Number(offset),
+    skippedBefore: view.getUint32(16, true),
+    gatewayReceivedUs: Number(view.getBigUint64(24, true)),
+    gatewaySentUs: Number(view.getBigUint64(32, true)),
+    payload: new Uint8Array(data, headerLen),
+  };
+}
+
+/** What `subscribed` reports. */
+export interface Subscribed {
+  sub: number;
+  startOffset: number | null;
+  liveOffset: number | null;
+}
+
+/** An error the gateway answered with. */
+export class GatewayError extends Error {
+  override name = 'GatewayError';
+  constructor(
+    readonly code: string,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+type Json = Record<string, unknown>;
+
+interface Pending {
+  onEvent: (frame: EventFrame) => void;
+  resolve: (subscribed: Subscribed) => void;
+  reject: (err: Error) => void;
+}
+
+/** One joined session on the gateway. */
+export class Gateway {
+  /** Frame handlers by subscription number. */
+  private readonly handlers = new Map<number, (frame: EventFrame) => void>();
+  /** The current subscription number of each `stream/slot`. */
+  private readonly slots = new Map<string, number>();
+  /** Subscriptions waiting for `subscribed`, by `stream/slot`. */
+  private readonly pending = new Map<string, Pending>();
+  /** Called with errors that answer no pending request, such as `subscription_ended`. */
+  onError: (err: GatewayError) => void = () => {};
+
+  private constructor(private readonly socket: WebSocket) {
+    socket.addEventListener('message', (message) => this.receive(message));
+    socket.addEventListener('close', () => this.onError(new GatewayError('closed', 'the gateway closed the session')));
+  }
+
+  /** Open a session on `arena` with an ID token, asking for {@link FEATURES}. */
+  static connect(url: string, arena: string, token: string): Promise<Gateway> {
+    const socket = new WebSocket(url);
+    socket.binaryType = 'arraybuffer';
+    return new Promise((resolve, reject) => {
+      const fail = (err: Error) => {
+        socket.close();
+        reject(err);
+      };
+      socket.addEventListener('error', () => fail(new Error(`cannot reach ${url}`)), { once: true });
+      socket.addEventListener('open', () =>
+        socket.send(JSON.stringify({ type: 'join', protocol: 1, features: FEATURES, arena, token })),
+      );
+      socket.addEventListener(
+        'message',
+        (message) => {
+          const hello = JSON.parse(String(message.data)) as Json;
+          if (hello.type !== 'hello') {
+            return fail(new GatewayError(String(hello.code), String(hello.message)));
+          }
+          const features = hello.features as string[];
+          const missing = FEATURES.filter((feature) => !features.includes(feature));
+          if (missing.length > 0) return fail(new Error(`the gateway lacks ${missing.join(', ')}`));
+          resolve(new Gateway(socket));
+        },
+        { once: true },
+      );
+    });
+  }
+
+  /**
+   * Subscribe to `stream` in `slot`, from `"live"` or a log offset. Replaces
+   * any earlier subscription in the same slot; frames of the old one stop
+   * reaching their handler.
+   */
+  subscribe(
+    stream: string,
+    slot: string,
+    from: number | 'live',
+    onEvent: (frame: EventFrame) => void,
+  ): Promise<Subscribed> {
+    const key = `${stream}/${slot}`;
+    return new Promise((resolve, reject) => {
+      this.pending.get(key)?.reject(new Error('replaced'));
+      this.pending.set(key, { onEvent, resolve, reject });
+      this.socket.send(JSON.stringify({ type: 'subscribe', stream, slot, from }));
+    });
+  }
+
+  close(): void {
+    this.socket.close();
+  }
+
+  private receive(message: MessageEvent): void {
+    if (message.data instanceof ArrayBuffer) {
+      const frame = parseFrame(message.data);
+      if (frame) this.handlers.get(frame.sub)?.(frame);
+      return;
+    }
+    const json = JSON.parse(String(message.data)) as Json;
+    const key = `${String(json.stream)}/${String(json.slot)}`;
+    const pending = this.pending.get(key);
+    if (json.type === 'subscribed' && pending) {
+      this.pending.delete(key);
+      const previous = this.slots.get(key);
+      if (previous !== undefined) this.handlers.delete(previous);
+      const sub = json.sub as number;
+      this.slots.set(key, sub);
+      this.handlers.set(sub, pending.onEvent);
+      pending.resolve({
+        sub,
+        startOffset: json.start_offset as number | null,
+        liveOffset: json.live_offset as number | null,
+      });
+    } else if (json.type === 'error') {
+      const err = new GatewayError(String(json.code), String(json.message));
+      if (pending) {
+        this.pending.delete(key);
+        pending.reject(err);
+      } else {
+        this.onError(err);
+      }
+    }
+  }
+}

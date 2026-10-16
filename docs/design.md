@@ -316,8 +316,8 @@ with a game-shaped protocol. It keeps that gateway's rules: it holds no game sta
 one Felix connection per browser session with that session's narrowed token,
 and is the place the browser's WebSocket ends. It differs in three ways:
 
-- **Binary frames for events.** Ticks go to the browser as binary WebSocket messages, an offset plus the payload. JSON with base64, as felix-canvas uses, would cost a third more bytes and a parse per tick.
-- **Two subscription slots per connection on the tick stream:** `live` and `replay`, so a kill cam never disturbs the live view.
+- **Binary frames for events.** Ticks go to the browser as binary WebSocket messages, an offset plus the payload. JSON with base64, as felix-canvas uses, would cost a third more bytes and a parse per tick. This is felix-gateway's `binary_events` feature (0.4.0).
+- **Two subscription slots per connection on the tick stream:** `live` and `replay`, so a kill cam never disturbs the live view. This is felix-gateway's `slots` feature (0.4.0).
 - **The sender stamp** on inputs, above.
 
 The [throttle](https://github.com/GetFelix/felix-gateway/blob/main/docs/protocol.md#throttle)

@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Arena ticks</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 24px 16px;
+        background: var(--void);
+        color: var(--hull);
+        font: 14px/1.5 'JetBrains Mono', ui-monospace, monospace;
+      }
+      main {
+        max-width: 720px;
+        margin: 0 auto;
+        display: grid;
+        gap: 16px;
+      }
+      h1 {
+        margin: 0;
+        font-size: 18px;
+      }
+      .status {
+        color: var(--hull-dark);
+      }
+      .status.live {
+        color: var(--accent-glow);
+      }
+      .status.down {
+        color: var(--coral);
+      }
+      dl {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+        gap: 8px;
+        margin: 0;
+      }
+      dl div {
+        background: var(--floor);
+        border-radius: 6px;
+        padding: 8px 12px;
+      }
+      dt {
+        color: var(--hull-dark);
+        font-size: 12px;
+      }
+      dd {
+        margin: 0;
+        font-size: 20px;
+        font-variant-numeric: tabular-nums;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        font-variant-numeric: tabular-nums;
+      }
+      th,
+      td {
+        text-align: right;
+        padding: 2px 8px;
+        border-bottom: 1px solid var(--seam);
+      }
+      th {
+        color: var(--hull-dark);
+        font-weight: normal;
+      }
+      th:first-child,
+      td:first-child {
+        text-align: left;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Arena <span id="arena"></span></h1>
+      <div id="status" class="status">connecting</div>
+      <dl>
+        <div><dt>offset</dt><dd id="offset">-</dd></div>
+        <div><dt>tick</dt><dd id="tick">-</dd></div>
+        <div><dt>epoch</dt><dd id="epoch">-</dd></div>
+        <div><dt>ticks/s</dt><dd id="rate">-</dd></div>
+        <div><dt>dropped</dt><dd id="dropped">0</dd></div>
+      </dl>
+      <table>
+        <thead>
+          <tr><th>offset</th><th>tick</th><th>keyframe</th></tr>
+        </thead>
+        <tbody id="recent"></tbody>
+      </table>
+    </main>
+    <script type="module" src="/src/ticks.ts"></script>
+  </body>
+</html>
