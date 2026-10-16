@@ -83,6 +83,7 @@ export class Match {
     const railed = new Set<number>();
     for (const e of events) {
       if (e.kind === 'railed' && e.target !== undefined) railed.add(e.target);
+      if (e.kind === 'joined' || e.kind === 'left') this.since.delete(e.slot);
       if (e.kind === 'joined') this.roster.set(e.slot, { slot: e.slot, violet: e.violet, kills: 0, deaths: 0 });
       if (e.kind === 'left') this.roster.delete(e.slot);
       if (e.kind !== 'killed') continue;

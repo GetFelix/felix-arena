@@ -150,6 +150,9 @@ async function shoot(name: string): Promise<void> {
 
 let seen: string[] = [];
 let shotLive = false;
+/** Every slot seen flying, and the most kills seen in a match. */
+const players = new Set<number>();
+let scored = 0;
 let shotResults = false;
 let done = false;
 const started = Date.now();
@@ -168,6 +171,11 @@ while (!done && Date.now() - started < LIMIT_MS) {
     // The results first, as they last the shortest; then the live game, once someone has scored or late on.
     if (m.phase === 'results' && !shotResults) {
       await shoot('results.png');
+      const after = await arena(ana);
+      // A slow render can outlast the results; the picture must still be of them.
+      if (after.match?.phase !== 'results' || after.match.number !== m.number) {
+        throw new Error(`the results ended before their screenshot was taken: ${after.match?.phase}`);
+      }
       shotResults = true;
     } else if (
       m.phase === 'playing' &&
@@ -182,6 +190,8 @@ while (!done && Date.now() - started < LIMIT_MS) {
     const number = first >= 0 ? Number(seen[first]!.split(':')[0]) : NaN;
     done = seen.includes(`${number}:results`) && seen.includes(`${number + 1}:warmup`) && shotResults && shotLive;
   }
+  for (const c of a.crafts) players.add(c.slot);
+  if (m) scored = Math.max(scored, m.scores[0] + m.scores[1]);
   await Promise.all([play(ana, a, 0.8), play(ben, b, -0.8)]);
   await sleep(120);
 }
@@ -198,4 +208,7 @@ console.log('last scoreboard:', board);
 if (errors.length) throw new Error(errors.join('\n'));
 if (!done) throw new Error(`the match did not run from play through results to the next warmup: ${seen.join(', ')}`);
 if (!shotLive || !shotResults) throw new Error('a screenshot is missing');
+console.log(`${players.size} crafts flew, ${scored} kills in the match`);
+if (players.size < 4) throw new Error(`only ${players.size} crafts joined; the bots should make four`);
+if (scored === 0) throw new Error('nobody was destroyed in the whole match');
 process.exit(0);

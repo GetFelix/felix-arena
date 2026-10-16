@@ -108,7 +108,9 @@ export class Own {
       return;
     }
     const shot = this.state.step(seq, control.moveX, control.moveZ, control.aim, control.buttons);
-    if (shot) {
+    // A rail is a beam the sim judges and the page draws when its tick says so; only bolts are predicted.
+    if (shot?.rail) shot.free();
+    else if (shot) {
       this.shots.push({
         seq,
         x: shot.x,

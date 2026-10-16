@@ -55,8 +55,8 @@ number. The sim's `SIM_WARMUP_SECONDS`, `SIM_MATCH_SECONDS`,
 `SIM_RESULTS_SECONDS`, `SIM_KILL_LIMIT` and `SIM_RAIL_SECONDS` set the lengths,
 for tests that cannot wait five minutes.
 
-**The rail.** The crystal stands on a plinth 2.3 m across, which crafts and
-bolts collide with. When a rail is there, the first live craft that comes
+**The rail.** The crystal stands on a plinth 4.6 m across at its foot, which
+crafts and bolts collide with. When a rail is there, the first live craft that comes
 within 40 cm of touching the plinth takes it, with three shots, and the next
 appears 30 seconds later. Firing a held rail charges it for half a second,
 during which the craft keeps moving and aiming; then a beam goes from its nose

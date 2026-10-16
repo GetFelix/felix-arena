@@ -157,6 +157,11 @@ impl JsShot {
     pub fn seq(&self) -> u16 {
         self.0.seq
     }
+    /// A rail shot: a beam the sim judges, not a bolt.
+    #[wasm_bindgen(getter)]
+    pub fn rail(&self) -> bool {
+        self.0.rail
+    }
     /// Ticks the bolt flies before the arena stops it, if it meets no craft.
     #[wasm_bindgen(getter)]
     pub fn ticks(&self) -> u32 {
