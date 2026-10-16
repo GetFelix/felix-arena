@@ -2,6 +2,53 @@
 
 use wasm_bindgen::prelude::*;
 
+/// A client's input records: each call makes the next record, numbered one
+/// after the last and carrying the two inputs before it.
+#[wasm_bindgen]
+pub struct Inputs {
+    newest: crate::Input,
+    previous: [crate::Input; 2],
+}
+
+#[wasm_bindgen]
+impl Inputs {
+    /// The first record will be numbered `first`.
+    #[wasm_bindgen(constructor)]
+    pub fn new(first: u16) -> Self {
+        let none = crate::Input {
+            seq: first.wrapping_sub(1),
+            ..Default::default()
+        };
+        Self {
+            newest: none,
+            previous: [none; 2],
+        }
+    }
+
+    /// The record for this tick's controls: the move stick from -127 to 127
+    /// on each axis, the aim heading and the buttons (1 fire, 2 boost).
+    pub fn next(&mut self, move_x: i8, move_z: i8, aim: u16, buttons: u8) -> Vec<u8> {
+        let input = crate::Input {
+            seq: self.newest.seq.wrapping_add(1),
+            move_x,
+            move_z,
+            aim,
+            buttons,
+        };
+        self.previous = [self.newest, self.previous[0]];
+        self.newest = input;
+        crate::InputRecord::new(input, self.previous)
+            .encode()
+            .to_vec()
+    }
+
+    /// The sequence number of the last record made.
+    #[wasm_bindgen(getter)]
+    pub fn seq(&self) -> u16 {
+        self.newest.seq
+    }
+}
+
 /// A decoded tick record.
 #[wasm_bindgen(js_name = Tick)]
 pub struct JsTick {
@@ -120,6 +167,14 @@ impl JsCraft {
     #[wasm_bindgen(getter)]
     pub fn z(&self) -> i16 {
         self.0.z
+    }
+    #[wasm_bindgen(getter)]
+    pub fn vx(&self) -> i16 {
+        self.0.vx
+    }
+    #[wasm_bindgen(getter)]
+    pub fn vz(&self) -> i16 {
+        self.0.vz
     }
     #[wasm_bindgen(getter)]
     pub fn heading(&self) -> u16 {

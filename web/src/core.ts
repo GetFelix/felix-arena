@@ -2,7 +2,7 @@
 // page predicts with. `npm run core` builds it into src/core/.
 import init, { initSync } from './core/felix_arena_core.js';
 
-export { decodeTick, playerKey } from './core/felix_arena_core.js';
+export { decodeTick, Inputs, playerKey } from './core/felix_arena_core.js';
 export type { Craft, Player, Tick, Timing } from './core/felix_arena_core.js';
 
 /**
