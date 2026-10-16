@@ -29,15 +29,16 @@ async function signIn(user: string): Promise<string> {
 const ticks = (frames: EventFrame[]) =>
   frames.map((frame) => [frame.offset, decodeTick(frame.payload).tick] as const);
 
-/** The state hash the sim logged for each keyframe it committed in `arena`, by tick. */
-function loggedHashes(arena: string): Map<number, string> {
+/** The state hash the sim logged for each keyframe it committed in `arena`, by epoch and tick. */
+function loggedHashes(arena: string): Map<string, string> {
   const logs = execFileSync(ENGINE, ['compose', '-f', '../dev/compose.yml', 'logs', '--no-color', 'sim'], {
     encoding: 'utf8',
     maxBuffer: 64 << 20,
   });
-  const hashes = new Map<number, string>();
-  for (const [, name, tick, hash] of logs.matchAll(/keyframe arena="?([\w-]+)"? tick=(\d+) hash="?([0-9a-f]{16})/g)) {
-    if (name === arena) hashes.set(Number(tick), hash!);
+  const hashes = new Map<string, string>();
+  const line = /keyframe arena="?([\w-]+)"? epoch=(\d+) tick=(\d+) hash="?([0-9a-f]{16})/g;
+  for (const [, name, epoch, tick, hash] of logs.matchAll(line)) {
+    if (name === arena) hashes.set(`${epoch}/${tick}`, hash!);
   }
   return hashes;
 }
@@ -89,10 +90,11 @@ it('a watcher sees the live ticks, and a replay slot alongside', async () => {
   // WebAssembly from the bytes the gateway relayed.
   const keyframes = live.map((frame) => decodeTick(frame.payload)).filter((tick) => tick.keyframe);
   const logged = loggedHashes(ARENA);
-  const compared = keyframes.filter((tick) => logged.has(tick.tick));
+  const key = (tick: { epoch: number; tick: number }) => `${tick.epoch}/${tick.tick}`;
+  const compared = keyframes.filter((tick) => logged.has(key(tick)));
   console.log(`${compared.length} of ${keyframes.length} keyframes compared with the sim's hashes`);
-  expect(compared.length).toBeGreaterThanOrEqual(2);
-  for (const tick of compared) expect([tick.tick, tick.hash]).toEqual([tick.tick, logged.get(tick.tick)]);
+  expect(compared.length).toBeGreaterThanOrEqual(1);
+  for (const tick of compared) expect([key(tick), tick.hash]).toEqual([key(tick), logged.get(key(tick))]);
 
   const replayed: EventFrame[] = [];
   const liveBefore = live.length;

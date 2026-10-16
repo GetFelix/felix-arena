@@ -61,7 +61,7 @@ where
                 previous_commit = Some(took);
                 // Readers compare this hash with their own decoding of the tick.
                 if tick.is_keyframe() {
-                    info!(arena = %arena, tick = tick.tick, hash = %format!("{:016x}", tick.hash()), offset, "keyframe");
+                    info!(arena = %arena, epoch, tick = tick.tick, hash = %format!("{:016x}", tick.hash()), offset, "keyframe");
                 }
             }
             Err(err) => {

@@ -265,25 +265,7 @@ impl World {
             i32::from(craft.x) + div_round(vx, HZ),
             i32::from(craft.z) + div_round(vz, HZ),
         );
-        for _ in 0..2 {
-            for obstacle in OBSTACLES {
-                let Some((nx, nz, ux, uz, distance, reach)) = contact(obstacle, x, z) else {
-                    continue;
-                };
-                x = nx + ux * reach / distance;
-                z = nz + uz * reach / distance;
-                (vx, vz) = slide(vx, vz, ux, uz, distance);
-            }
-            let cx = x.clamp(-HALF_X + CRAFT_RADIUS, HALF_X - CRAFT_RADIUS);
-            let cz = z.clamp(-HALF_Z + CRAFT_RADIUS, HALF_Z - CRAFT_RADIUS);
-            if cx != x {
-                vx = 0;
-            }
-            if cz != z {
-                vz = 0;
-            }
-            (x, z) = (cx, cz);
-        }
+        (x, z, vx, vz) = resolve(x, z, vx, vz);
         (craft.x, craft.z, craft.vx, craft.vz) = (x as i16, z as i16, vx as i16, vz as i16);
     }
 
@@ -292,6 +274,12 @@ impl World {
         bolts.retain_mut(|bolt| {
             let (x0, z0) = (i32::from(bolt.x), i32::from(bolt.z));
             let (dx, dz) = (fixed::cos(bolt.heading), fixed::sin(bolt.heading));
+            // Bolts pass through teammates: no friendly fire.
+            let shooter = self
+                .players
+                .iter()
+                .find(|p| p.slot == bolt.owner)
+                .map(|p| p.team);
             for step in 1..=BOLT_STEPS {
                 let travel = BOLT_SPEED * step / (HZ * BOLT_STEPS);
                 let (x, z) = (x0 + fixed::scale(dx, travel), z0 + fixed::scale(dz, travel));
@@ -302,7 +290,7 @@ impl World {
                     return false;
                 }
                 let hit = self.crafts.iter().position(|c| {
-                    c.alive && c.slot != bolt.owner && {
+                    c.alive && Some(c.team) != shooter && {
                         let (ex, ez) =
                             (i64::from(x - i32::from(c.x)), i64::from(z - i32::from(c.z)));
                         let reach = i64::from(CRAFT_RADIUS + BOLT_RADIUS);
@@ -389,14 +377,17 @@ impl World {
                     dx * (overlap / 2 + 1) / distance,
                     dz * (overlap / 2 + 1) / distance,
                 );
-                let clamp_x =
-                    |x: i32| x.clamp(-HALF_X + CRAFT_RADIUS, HALF_X - CRAFT_RADIUS) as i16;
-                let clamp_z =
-                    |z: i32| z.clamp(-HALF_Z + CRAFT_RADIUS, HALF_Z - CRAFT_RADIUS) as i16;
-                self.crafts[i].x = clamp_x(i32::from(a.x) - px);
-                self.crafts[i].z = clamp_z(i32::from(a.z) - pz);
-                self.crafts[j].x = clamp_x(i32::from(b.x) + px);
-                self.crafts[j].z = clamp_z(i32::from(b.z) + pz);
+                for (k, sign) in [(i, -1), (j, 1)] {
+                    let craft = self.crafts[k];
+                    let (x, z, vx, vz) = resolve(
+                        i32::from(craft.x) + sign * px,
+                        i32::from(craft.z) + sign * pz,
+                        i32::from(craft.vx),
+                        i32::from(craft.vz),
+                    );
+                    (self.crafts[k].x, self.crafts[k].z) = (x as i16, z as i16);
+                    (self.crafts[k].vx, self.crafts[k].vz) = (vx as i16, vz as i16);
+                }
             }
         }
     }
@@ -423,6 +414,31 @@ impl World {
             });
         }
     }
+}
+
+/// A craft at `(x, z)` moved out of any cover and walls it overlaps, with
+/// the velocity into them removed.
+fn resolve(mut x: i32, mut z: i32, mut vx: i32, mut vz: i32) -> (i32, i32, i32, i32) {
+    for _ in 0..2 {
+        for obstacle in OBSTACLES {
+            let Some((nx, nz, ux, uz, distance, reach)) = contact(obstacle, x, z) else {
+                continue;
+            };
+            x = nx + ux * reach / distance;
+            z = nz + uz * reach / distance;
+            (vx, vz) = slide(vx, vz, ux, uz, distance);
+        }
+        let cx = x.clamp(-HALF_X + CRAFT_RADIUS, HALF_X - CRAFT_RADIUS);
+        let cz = z.clamp(-HALF_Z + CRAFT_RADIUS, HALF_Z - CRAFT_RADIUS);
+        if cx != x {
+            vx = 0;
+        }
+        if cz != z {
+            vz = 0;
+        }
+        (x, z) = (cx, cz);
+    }
+    (x, z, vx, vz)
 }
 
 /// `(vx, vz)` moved toward `(tx, tz)` by at most `limit`.

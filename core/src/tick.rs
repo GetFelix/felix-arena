@@ -247,7 +247,10 @@ impl Tick {
         let mut r = Reader(bytes);
         let epoch = r.u16()?;
         let flags = r.u8()?;
-        r.u8()?;
+        // Unknown bits would mean a layout this decoder cannot read.
+        if flags & !(KEYFRAME | TIMED) != 0 || r.u8()? != 0 {
+            return None;
+        }
         let match_number = r.u32()?;
         let tick = r.u32()?;
         let timing = if flags & TIMED != 0 {
@@ -263,6 +266,9 @@ impl Tick {
             .map(|_| {
                 let slot = r.u8()?;
                 let flags = r.u8()?;
+                if flags & !(ALIVE | VIOLET | 31 << FIRE_SHIFT) != 0 {
+                    return None;
+                }
                 Some(Craft {
                     slot,
                     alive: flags & ALIVE != 0,

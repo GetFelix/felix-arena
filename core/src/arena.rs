@@ -74,7 +74,7 @@ const HALF: [Obstacle; 10] = [
     Obstacle::Round {
         x: -1840,
         z: -1220,
-        radius: 70,
+        radius: 60,
     }, // turret
 ];
 

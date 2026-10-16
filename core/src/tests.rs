@@ -342,3 +342,45 @@ fn a_step_with_eight_players_and_64_bolts_is_well_under_2_ms() {
         "mean {mean:?}, slowest {slowest:?}"
     );
 }
+
+#[test]
+fn bolts_pass_through_teammates() {
+    let mut world = World::new(0);
+    for key in 1..=3 {
+        world.join(key); // slots 0 and 2 are Coral
+    }
+    for (slot, x) in [(0, -300), (2, 300)] {
+        let mut craft = world.crafts()[slot];
+        (craft.x, craft.z) = (x, 1250);
+        world.crafts_mut()[slot] = craft;
+    }
+    let fire = Input {
+        seq: 1,
+        move_x: 0,
+        move_z: 0,
+        aim: 0,
+        buttons: FIRE,
+    };
+    for _ in 0..60 {
+        world.step(|slot| (slot == 0).then_some(fire));
+        assert!(
+            !world
+                .snapshot(0)
+                .events
+                .iter()
+                .any(|e| matches!(e, Event::Hit { .. }))
+        );
+    }
+    assert_eq!(world.crafts()[2].health, MAX_HEALTH);
+}
+
+#[test]
+fn unknown_bits_are_refused() {
+    let tick = busy(30, 2).snapshot(0);
+    let record = tick.encode(None);
+    for (at, bit) in [(2, 4), (3, 1), (14, 4)] {
+        let mut changed = record.clone();
+        changed[at] |= bit;
+        assert!(Tick::decode(&changed).is_none(), "byte {at}");
+    }
+}
