@@ -72,7 +72,7 @@ export class Effects {
         where: new Vector3(),
       })),
       blasts: Array.from({ length: BLASTS }, () => ({
-        item: { flash: flash(fx, tex, colour, 9), burst: burst(scene, fx, tex, colour, random) },
+        item: { flash: flash(fx, tex, colour, 4), burst: burst(scene, fx, tex, colour, random) },
         at: -Infinity,
         where: new Vector3(),
       })),
@@ -160,8 +160,8 @@ export class Effects {
         core.material.opacity = fade;
         glow.material.opacity = fade * fade;
         end.position.copy(b.where);
-        end.material.opacity = fade;
-        glows.push({ level: 26 * fade, where: b.where, colour });
+        end.material.opacity = fade * 0.8;
+        glows.push({ level: 18 * fade, where: b.where, colour });
       }
       for (const b of team.blasts) {
         const h = t - b.at;
@@ -173,9 +173,10 @@ export class Effects {
         showBurst(b.item.burst, b.where, h);
         b.item.flash.visible = h < BLAST_S;
         b.item.flash.position.copy(b.where);
-        b.item.flash.material.opacity = Math.max(0, 1 - h / BLAST_S);
-        b.item.flash.scale.setScalar(6 + h * 10);
-        if (h < 0.4) glows.push({ level: 40 * (1 - h / 0.4), where: b.where, colour });
+        // A little larger and longer than a hit, no brighter: the style frame's hits set the ceiling.
+        b.item.flash.material.opacity = 0.85 * Math.max(0, 1 - h / BLAST_S);
+        b.item.flash.scale.setScalar(4 + h * 4);
+        if (h < 0.4) glows.push({ level: 24 * (1 - h / 0.4), where: b.where, colour });
       }
     });
     glows.sort((a, b) => b.level - a.level);
@@ -205,7 +206,7 @@ function beam(fx: Object3D, tex: CombatTextures, colour: string): Beam {
     new PlaneGeometry(1, 1.1).rotateX(-Math.PI / 2),
     new MeshBasicMaterial({ map: tex.glow, color: hdr(colour, 1.8), ...additive }),
   );
-  const end = flash(fx, tex, colour, 3.2);
+  const end = flash(fx, tex, colour, 2.2);
   core.visible = glow.visible = false;
   fx.add(core, glow);
   return { core, glow, end, from: new Vector3() };
