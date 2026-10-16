@@ -36,7 +36,8 @@ export interface CraftTextures {
 
 const additive = { transparent: true, blending: AdditiveBlending, depthWrite: false } as const;
 
-function craft(
+/** Builds one craft around `body`, with its glow pool, contact shadow and engine light. */
+export function craft(
   scene: Object3D,
   fx: Object3D,
   tex: CraftTextures,

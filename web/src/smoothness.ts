@@ -23,8 +23,10 @@ export interface Smoothness {
    * jump on screen.
    */
   maxJump: number;
-  /** Frames where a moving craft did not move, or the render time stood still. */
+  /** Frames where a moving craft did not move, or the render time stood still, though ticks to draw had arrived. */
   stalls: number;
+  /** Frames where the render time ran out past every tick received, as when the network holds ticks up. */
+  starved: number;
   /** Frames drawn past the newest tick received. */
   extrapolated: number;
   minDelayMs: number;
@@ -47,6 +49,7 @@ export function measure(arrivals: Arrival[], lose: (index: number) => boolean, t
     maxError: 0,
     maxJump: 0,
     stalls: 0,
+    starved: 0,
     extrapolated: 0,
     minDelayMs: Infinity,
     maxDelayMs: 0,
@@ -76,7 +79,9 @@ export function measure(arrivals: Arrival[], lose: (index: number) => boolean, t
       real.set(craft.slot, expected);
       out.maxError = Math.max(out.maxError, Math.hypot(craft.x - expected[0], craft.z - expected[1]));
     }
-    if (previous) {
+    const starved = view.renderTick - interpolator.newest!.tick >= 2;
+    if (starved) out.starved++;
+    if (previous && !starved) {
       if (view.renderTick - previous.r < (0.5 * FRAME_MS) / TICK_MS) out.stalls++;
       for (const [slot, [x, z]] of at) {
         const [px, pz] = previous.at.get(slot) ?? [x, z];

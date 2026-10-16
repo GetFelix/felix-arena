@@ -43,7 +43,8 @@ const SHOTS: { from: CraftName; at: number }[] = [
 
 const additive = { transparent: true, blending: AdditiveBlending, depthWrite: false } as const;
 
-function bolt(fx: Object3D, tex: CombatTextures, color: string): Group {
+/** A bolt: a bright core and a trailing glow, hidden until placed. */
+export function bolt(fx: Object3D, tex: CombatTextures, color: string): Group {
   const g = new Group();
   const core = new Mesh(new CapsuleGeometry(0.09, 0.9, 4, 8), new MeshBasicMaterial({ color: hdr(color, 6) }));
   core.rotation.z = Math.PI / 2;
@@ -59,7 +60,7 @@ function bolt(fx: Object3D, tex: CombatTextures, color: string): Group {
   return g;
 }
 
-function flash(fx: Object3D, tex: CombatTextures, color: string, size: number): Sprite {
+export function flash(fx: Object3D, tex: CombatTextures, color: string, size: number): Sprite {
   const s = new Sprite(new SpriteMaterial({ map: tex.flare, color: hdr(color, 4), ...additive }));
   s.scale.setScalar(size);
   s.visible = false;
@@ -73,7 +74,7 @@ interface Debris {
   spin: Vector3;
 }
 
-interface Burst {
+export interface Burst {
   sparks: Points<BufferGeometry, PointsMaterial>;
   ring: Mesh<RingGeometry, MeshBasicMaterial>;
   debris: Debris[];
@@ -81,7 +82,8 @@ interface Burst {
   f: Sprite;
 }
 
-function burst(scene: Object3D, fx: Object3D, tex: CombatTextures, color: string, random: () => number): Burst {
+/** The effects of one hit: sparks, a ground ring, debris and a flash. */
+export function burst(scene: Object3D, fx: Object3D, tex: CombatTextures, color: string, random: () => number): Burst {
   const n = 70;
   const pos = new Float32Array(n * 3);
   const vel: Vector3[] = [];

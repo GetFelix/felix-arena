@@ -70,6 +70,99 @@ pub fn player_key(principal: &str) -> String {
     format!("{:016x}", crate::player_key(principal))
 }
 
+/// A client's own craft, stepped ahead of the sim through the same rules.
+#[wasm_bindgen]
+#[derive(Clone)]
+pub struct Prediction {
+    craft: crate::Craft,
+    others: Vec<crate::Craft>,
+}
+
+#[wasm_bindgen]
+impl Prediction {
+    /// Start from `craft` as a tick has it.
+    #[wasm_bindgen(constructor)]
+    pub fn new(craft: &JsCraft) -> Self {
+        Self {
+            craft: craft.0,
+            others: Vec::new(),
+        }
+    }
+
+    /// The other crafts as `tick` has them, which each step is pushed off.
+    pub fn among(&mut self, tick: &JsTick) {
+        self.others = tick.tick.crafts.clone();
+    }
+
+    /// Apply one input, as the sim would in one tick, leaving other crafts
+    /// out. Answers the shot when it fired.
+    pub fn step(
+        &mut self,
+        seq: u16,
+        move_x: i8,
+        move_z: i8,
+        aim: u16,
+        buttons: u8,
+    ) -> Option<JsShot> {
+        let input = crate::Input {
+            seq,
+            move_x,
+            move_z,
+            aim,
+            buttons,
+        };
+        let shot = crate::steer(&mut self.craft, Some(input));
+        crate::separate(&mut self.craft, &self.others);
+        shot.map(JsShot)
+    }
+
+    /// A copy to step without changing this one.
+    #[wasm_bindgen(js_name = clone)]
+    pub fn copy(&self) -> Prediction {
+        self.clone()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn craft(&self) -> JsCraft {
+        JsCraft(self.craft)
+    }
+}
+
+/// Where a shot left a craft, and the input that fired it.
+#[wasm_bindgen(js_name = Shot)]
+pub struct JsShot(crate::Shot);
+
+#[wasm_bindgen(js_class = Shot)]
+impl JsShot {
+    #[wasm_bindgen(getter)]
+    pub fn x(&self) -> i16 {
+        self.0.x
+    }
+    #[wasm_bindgen(getter)]
+    pub fn z(&self) -> i16 {
+        self.0.z
+    }
+    #[wasm_bindgen(getter)]
+    pub fn heading(&self) -> u16 {
+        self.0.heading
+    }
+    #[wasm_bindgen(getter)]
+    pub fn seq(&self) -> u16 {
+        self.0.seq
+    }
+    /// Ticks the bolt flies before the arena stops it, if it meets no craft.
+    #[wasm_bindgen(getter)]
+    pub fn ticks(&self) -> u32 {
+        crate::bolt_ticks(self.0)
+    }
+}
+
+/// How close a bolt's centre comes to a craft's to hit it, in centimetres.
+#[wasm_bindgen(js_name = boltReach)]
+pub fn bolt_reach() -> i32 {
+    crate::CRAFT_RADIUS + crate::world::BOLT_RADIUS
+}
+
 /// Bolt speed in centimetres a second.
 #[wasm_bindgen(js_name = boltSpeed)]
 pub fn bolt_speed() -> i32 {
@@ -179,9 +272,9 @@ impl JsTick {
     pub fn bolts(&self) -> Vec<JsBolt> {
         self.tick.bolts.iter().copied().map(JsBolt).collect()
     }
-    #[wasm_bindgen(getter, js_name = eventCount)]
-    pub fn event_count(&self) -> usize {
-        self.tick.events.len()
+    #[wasm_bindgen(getter)]
+    pub fn events(&self) -> Vec<JsEvent> {
+        self.tick.events.iter().copied().map(JsEvent).collect()
     }
     /// The roster, on a keyframe; empty otherwise.
     #[wasm_bindgen(getter)]
@@ -261,6 +354,90 @@ impl JsCraft {
     #[wasm_bindgen(getter, js_name = lastInput)]
     pub fn last_input(&self) -> u16 {
         self.0.last_input
+    }
+    #[wasm_bindgen(getter, js_name = fireCooldown)]
+    pub fn fire_cooldown(&self) -> u8 {
+        self.0.fire_cooldown
+    }
+    #[wasm_bindgen(getter, js_name = boostCooldown)]
+    pub fn boost_cooldown(&self) -> u8 {
+        self.0.boost_cooldown
+    }
+}
+
+/// Something that happened in a tick. `kind` names it; the other fields are
+/// those its kind has, and 0 otherwise.
+#[wasm_bindgen(js_name = Event)]
+pub struct JsEvent(crate::Event);
+
+#[wasm_bindgen(js_class = Event)]
+impl JsEvent {
+    /// `joined`, `left`, `spawned`, `fired`, `hit` or `killed`.
+    #[wasm_bindgen(getter)]
+    pub fn kind(&self) -> String {
+        use crate::Event::*;
+        match self.0 {
+            Joined { .. } => "joined",
+            Left { .. } => "left",
+            Spawned { .. } => "spawned",
+            Fired { .. } => "fired",
+            Hit { .. } => "hit",
+            Killed { .. } => "killed",
+        }
+        .into()
+    }
+    /// The slot it happened to: who joined, left, spawned or fired, the
+    /// target of a hit, the victim of a kill.
+    #[wasm_bindgen(getter)]
+    pub fn slot(&self) -> u8 {
+        use crate::Event::*;
+        match self.0 {
+            Joined { slot, .. } | Left { slot } | Spawned { slot } | Fired { slot, .. } => slot,
+            Hit { target, .. } => target,
+            Killed { victim, .. } => victim,
+        }
+    }
+    /// The attacker of a hit, the killer of a kill.
+    #[wasm_bindgen(getter)]
+    pub fn by(&self) -> u8 {
+        match self.0 {
+            crate::Event::Hit { attacker, .. } => attacker,
+            crate::Event::Killed { killer, .. } => killer,
+            _ => 0,
+        }
+    }
+    #[wasm_bindgen(getter)]
+    pub fn bolt(&self) -> u16 {
+        match self.0 {
+            crate::Event::Fired { bolt, .. } | crate::Event::Hit { bolt, .. } => bolt,
+            _ => 0,
+        }
+    }
+    /// The input that fired a shot.
+    #[wasm_bindgen(getter)]
+    pub fn seq(&self) -> u16 {
+        match self.0 {
+            crate::Event::Fired { seq, .. } => seq,
+            _ => 0,
+        }
+    }
+    #[wasm_bindgen(getter)]
+    pub fn damage(&self) -> u8 {
+        match self.0 {
+            crate::Event::Hit { damage, .. } => damage,
+            _ => 0,
+        }
+    }
+    /// The team of who joined.
+    #[wasm_bindgen(getter)]
+    pub fn violet(&self) -> bool {
+        matches!(
+            self.0,
+            crate::Event::Joined {
+                team: crate::Team::Violet,
+                ..
+            }
+        )
     }
 }
 

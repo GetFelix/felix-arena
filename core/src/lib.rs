@@ -15,7 +15,7 @@ pub mod world;
 
 pub use input::{Input, InputRecord};
 pub use tick::{Bolt, Craft, Event, Keyframe, Player, Tick, Timing, player_key};
-pub use world::{CRAFT_RADIUS, Team, World};
+pub use world::{CRAFT_RADIUS, Shot, Team, World, bolt_ticks, separate, steer};
 
 #[cfg(test)]
 mod tests;
