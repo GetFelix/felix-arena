@@ -5,6 +5,7 @@
 FROM docker.io/library/rust:1.97-bookworm AS build
 WORKDIR /src
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+COPY core core
 COPY sim sim
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \

@@ -192,6 +192,16 @@ rule: there, `model/` is shared by the browser and the snapshotter; here,
 disagree with the authority through timing, never through a second copy of the
 rules.
 
+`core` is integer arithmetic throughout: positions in centimetres, velocities
+in centimetres a second, headings in 65536ths of a turn, and sines from a table
+built at compile time. Floating-point add and multiply are deterministic in
+WebAssembly too, but `sin` and `cos` come from different libraries natively and
+in the browser, and fixed point removes the question. The world's state is held
+in exactly the types the tick carries, so a tick is the whole visible state with
+nothing rounded away. The sim logs a hash of each keyframe it commits, and CI's
+dev stack job checks that the WebAssembly build decodes the same records to the
+same hashes.
+
 ### Tick rate
 
 The sim steps and commits at **30 Hz**.
@@ -267,10 +277,14 @@ without the ones before it:
 |---|---|---|
 | Header | Epoch (2 bytes), flags with the keyframe bit (1) and the timed bit (2), reserved (1), match number (4), tick number (4), little-endian | 12 bytes |
 | Timing, with the timed bit | Commit start in µs since the Unix epoch (8), the sim step (4), the previous tick's commit in µs (4) | 16 bytes |
-| Crafts | Per craft: slot, position and velocity (centimetres, 16-bit), heading, health, flags, last input sequence applied | 16 bytes each |
-| Projectiles | Per live bolt: id, owner, position, heading | 9 bytes each |
-| Events | Hits, kills, spawns, pickups, with whatever each needs | Varies |
-| Keyframe only | Roster (names, teams), scores, match clock, pickup timers | About 200 bytes |
+| Crafts | A count (1), then per craft: slot (1), flags with alive, team and the fire cooldown (1), position and velocity in centimetres (4 × 2), heading (2), health (1), boost cooldown (1), last input sequence applied (2) | 16 bytes each |
+| Projectiles | A count (2), then per live bolt: id (2), owner (1), position (4), heading (2) | 9 bytes each |
+| Events | A count (2), then each a kind byte and its fields: joined (slot, team, player key), left, spawned, fired (slot, bolt, input sequence), hit (target, attacker, bolt, damage), killed (victim, killer) | 2 to 11 bytes each |
+| Keyframe only | Team scores (4), then the roster: per player, slot, team, player key, kills and deaths | 5 + 14 bytes a player |
+
+A player key is the FNV-1a hash of the player's Felix principal, so a client
+finds its own craft without ticks carrying principals. The match clock and
+pickup timers join the keyframe with the match loop and the rail.
 
 A busy tick with 8 crafts and 30 bolts is about 450 bytes; a typical one is
 under 300. A 5-minute match is about 3 MB of log.

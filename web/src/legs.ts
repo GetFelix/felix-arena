@@ -5,7 +5,13 @@
 // clock drift under Docker Desktop or Podman on macOS, and off by NTP's error
 // across machines.
 import type { EventFrame } from './gateway';
-import type { TickTiming } from './tick';
+
+/** When the sim stepped and committed a tick, in µs: core's `Timing`. */
+export interface TickTiming {
+  commitStartUs: number;
+  stepUs: number;
+  previousCommitUs: number;
+}
 
 /** The legs in the order a tick travels them. */
 export const LEGS = [

@@ -5,20 +5,19 @@ use anyhow::Result;
 use tokio::time::{Instant, MissedTickBehavior};
 use tracing::{info, warn};
 
+use felix_arena_core::{Timing, World};
+
 use crate::latency::Window;
-use crate::tick::{Header, Timing, record};
 
 /// 30 Hz.
 pub(crate) const TICK: Duration = Duration::from_nanos(1_000_000_000 / 30);
-/// Every 30th tick is a keyframe.
-const KEYFRAME_EVERY: u32 = 30;
 const REPORT_EVERY: Duration = Duration::from_secs(5);
 /// A commit still unanswered after this is counted as failed, so a hung
 /// broker cannot stop the arena's clock or its reports.
 const COMMIT_TIMEOUT: Duration = Duration::from_secs(1);
 
-/// Step `arena` on a 30 Hz timer forever, handing each tick's record to
-/// `commit`, which answers with the tick's log offset.
+/// Step `arena`'s world on a 30 Hz timer forever, handing each tick's record
+/// to `commit`, which answers with the tick's log offset.
 ///
 /// A commit finishes before the next tick starts, so ticks land in order. A
 /// tick that is due while a commit is still running is skipped rather than
@@ -30,7 +29,7 @@ where
 {
     let mut timer = tokio::time::interval(TICK);
     timer.set_missed_tick_behavior(MissedTickBehavior::Skip);
-    let mut tick: u32 = 0;
+    let mut world = World::new(0);
     let mut last_due: Option<Instant> = None;
     let mut previous_commit: Option<Duration> = None;
     let mut report = Report::new(Instant::now());
@@ -42,20 +41,15 @@ where
         }
         last_due = Some(due);
 
-        let header = Header {
-            epoch,
-            keyframe: tick.is_multiple_of(KEYFRAME_EVERY),
-            timed: true,
-            match_number: 0,
-            tick,
-        };
+        world.step(|_| None);
+        let tick = world.snapshot(epoch);
         let started = Instant::now();
         let timing = Timing {
             commit_start_us: unix_micros(),
             step_us: micros(started - due),
             previous_commit_us: previous_commit.map_or(0, micros),
         };
-        let answer = tokio::time::timeout(COMMIT_TIMEOUT, commit(record(&header, Some(&timing))))
+        let answer = tokio::time::timeout(COMMIT_TIMEOUT, commit(tick.encode(Some(&timing))))
             .await
             .unwrap_or_else(|_| Err(anyhow::anyhow!("no answer within {COMMIT_TIMEOUT:?}")));
         previous_commit = None;
@@ -65,15 +59,16 @@ where
                 report.latency.record(took);
                 report.offset = Some(offset);
                 previous_commit = Some(took);
+                // Readers compare this hash with their own decoding of the tick.
+                if tick.is_keyframe() {
+                    info!(arena = %arena, epoch, tick = tick.tick, hash = %format!("{:016x}", tick.hash()), offset, "keyframe");
+                }
             }
             Err(err) => {
                 report.failed += 1;
-                warn!(arena = %arena, tick, error = %format!("{err:#}"), "tick commit failed");
+                warn!(arena = %arena, tick = tick.tick, error = %format!("{err:#}"), "tick commit failed");
             }
         }
-        // A failed tick's number is not reused: it may have landed anyway,
-        // and a gap is easier for a reader to handle than a repeat.
-        tick = tick.wrapping_add(1);
 
         let now = Instant::now();
         if now.duration_since(report.since) >= REPORT_EVERY {
@@ -152,8 +147,28 @@ mod tests {
 
     use tokio::time::Instant;
 
+    use felix_arena_core::{Tick, Timing};
+
     use super::{TICK, run};
-    use crate::tick::Header;
+
+    /// What the tests read back from a record.
+    #[derive(Clone, Copy)]
+    struct Header {
+        epoch: u16,
+        keyframe: bool,
+        timed: bool,
+        tick: u32,
+    }
+
+    fn header(record: &[u8]) -> Header {
+        let (tick, timing) = Tick::decode(record).unwrap();
+        Header {
+            epoch: tick.epoch,
+            keyframe: tick.is_keyframe(),
+            timed: timing.is_some(),
+            tick: tick.tick,
+        }
+    }
 
     /// Runs an arena for `length` of paused time, where the commit of tick
     /// `n` takes `latency(n)`, and returns each commit's tick and start.
@@ -164,7 +179,8 @@ mod tests {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let log = Arc::clone(&seen);
         let arena = tokio::spawn(run("a".into(), 1, move |record: Vec<u8>| {
-            let header = Header::decode(&record).unwrap();
+            let header = header(&record);
+            assert_eq!(Timing::of(&record).is_some(), header.timed);
             log.lock().unwrap().push((header, Instant::now()));
             let wait = latency(header.tick);
             async move {
@@ -182,17 +198,17 @@ mod tests {
         let seen = commits(Duration::from_secs(1), |_| Duration::from_millis(2)).await;
         assert_eq!(seen.len(), 30);
         for (i, (header, _)) in seen.iter().enumerate() {
-            assert_eq!(header.tick, i as u32);
+            assert_eq!(header.tick, i as u32 + 1);
             assert!(header.timed);
             assert_eq!(header.epoch, 1);
-            assert_eq!(header.keyframe, i % 30 == 0);
+            assert_eq!(header.keyframe, (i + 1) % 30 == 0);
         }
     }
 
     #[tokio::test(start_paused = true)]
     async fn slow_commit_skips_ticks_instead_of_bursting() {
         let seen = commits(Duration::from_secs(1), |tick| {
-            Duration::from_millis(if tick == 3 { 200 } else { 2 })
+            Duration::from_millis(if tick == 4 { 200 } else { 2 })
         })
         .await;
         // The 200 ms commit swallows about six ticks, which are not made up.
@@ -212,7 +228,7 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn hung_commit_times_out_and_the_clock_goes_on() {
         let seen = commits(Duration::from_secs(3), |tick| {
-            Duration::from_secs(if tick == 0 { 3600 } else { 0 })
+            Duration::from_secs(if tick == 1 { 3600 } else { 0 })
         })
         .await;
         assert!(seen.len() > 30, "{} commits", seen.len());

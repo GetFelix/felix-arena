@@ -1,11 +1,10 @@
-//! The simulation: the authority for each arena. For now it commits an empty
-//! tick to each arena's tick stream at 30 Hz and logs how long the commits
-//! take.
+//! The simulation: the authority for each arena. It steps each arena's world
+//! through `felix-arena-core` at 30 Hz, commits every tick to the arena's
+//! tick stream and logs how long the commits take.
 
 mod arena;
 mod config;
 mod latency;
-mod tick;
 
 use std::net::SocketAddr;
 use std::sync::Arc;

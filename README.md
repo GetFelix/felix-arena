@@ -86,12 +86,18 @@ each tick's offset and number as it arrives, and the p50 and p99 of each leg
 of its trip from the sim:
 
 ```bash
-cd web && npm install && npm run dev
+cd web && npm install && npm run core && npm run dev
 # open http://localhost:5173/ticks.html?arena=alpha
 ```
 
+`npm run core` builds `core/` to WebAssembly into `web/src/core/`, which the
+page decodes ticks with. It needs the `wasm32-unknown-unknown` target, which
+`rust-toolchain.toml` installs, and `wasm-bindgen-cli` 0.2.129
+(`cargo install wasm-bindgen-cli --version 0.2.129`).
+
 `?as=` picks the dev user to sign in as (default `cleo`, who may only watch).
-`npm run smoke` checks the same path from Node: ticks arrive at 30 Hz, a
+`npm run smoke` checks the same path from Node: ticks arrive at 30 Hz, the
+WebAssembly build decodes keyframes to the state hashes the sim logged, a
 replay slot reads the same records while the live one keeps going, and it
 prints each leg's latency.
 

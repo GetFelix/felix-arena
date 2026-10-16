@@ -5,7 +5,7 @@
 import { Gateway, type EventFrame } from './gateway';
 import { LEGS, Legs } from './legs';
 import { palette } from './palette';
-import { parseTickHeader } from './tick';
+import { decodeTick, loadCore, type Tick } from './core';
 
 const params = new URLSearchParams(location.search);
 const arena = params.get('arena') ?? 'alpha';
@@ -33,22 +33,27 @@ const arrivals: number[] = [];
 const legs = new Legs();
 
 function onTick(frame: EventFrame) {
-  const header = parseTickHeader(frame.payload);
-  if (!header || frame.offset === null) return;
+  let tick: Tick;
+  try {
+    tick = decodeTick(frame.payload);
+  } catch {
+    return;
+  }
+  if (frame.offset === null) return;
   if (lastOffset !== null) dropped += Math.max(0, frame.offset - lastOffset - 1 - frame.skippedBefore);
   lastOffset = frame.offset;
-  if (header.timing) legs.add(frame, header.timing);
+  if (tick.timing) legs.add(frame, tick.timing);
   const now = performance.now();
   arrivals.push(now);
   while (arrivals[0]! < now - 1000) arrivals.shift();
 
   element('offset').textContent = String(frame.offset);
-  element('tick').textContent = String(header.tick);
-  element('epoch').textContent = String(header.epoch);
+  element('tick').textContent = String(tick.tick);
+  element('epoch').textContent = String(tick.epoch);
   element('rate').textContent = String(arrivals.length);
   element('dropped').textContent = String(dropped);
   const row = document.createElement('tr');
-  for (const cell of [frame.offset, header.tick, header.keyframe ? 'yes' : '']) {
+  for (const cell of [frame.offset, tick.tick, tick.keyframe ? 'yes' : '']) {
     row.append(Object.assign(document.createElement('td'), { textContent: String(cell) }));
   }
   const recent = element('recent');
@@ -72,6 +77,7 @@ function showLegs() {
 }
 
 async function main() {
+  await loadCore();
   // The dev IdP mints an ID token for anyone; a real page signs in with PKCE.
   const answer = await fetch(`${IDP}/token?sub=${encodeURIComponent(user)}&aud=felix-arena`);
   const { id_token: token } = (await answer.json()) as { id_token: string };
