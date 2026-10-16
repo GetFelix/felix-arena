@@ -157,10 +157,14 @@ impl Players {
                     })
                 }
             };
-            let behind = seat
+            // After a silence the client may have started counting again,
+            // as a reloaded page does, so its numbers are not compared with
+            // the old ones.
+            let applied = seat
                 .applied
-                .map(|applied| applied.wrapping_sub(record.inputs[0].seq));
-            let input = match record.since(seat.applied) {
+                .filter(|_| at.duration_since(seat.heard) <= HOLD);
+            let behind = applied.map(|applied| applied.wrapping_sub(record.inputs[0].seq));
+            let input = match record.since(applied) {
                 Some(input) => input,
                 None if behind.is_some_and(|behind| behind > RESTART_GAP) => record.inputs[0],
                 None => continue,
@@ -309,21 +313,28 @@ mod tests {
         let mut world = World::new(0);
         let mut players = Players::default();
         let now = Instant::now();
-        let got = |seq| {
+        let got = |seq, at| {
             vec![Received {
                 principal: "ana".into(),
                 record: record(seq, 1),
-                at: now,
+                at,
             }]
         };
-        players.update(&mut world, got(5000), now);
+        players.update(&mut world, got(5000, now), now);
         assert_eq!(
-            players.update(&mut world, got(1), now)[0].map(|i| i.seq),
+            players.update(&mut world, got(1, now), now)[0].map(|i| i.seq),
             Some(1)
         );
         assert_eq!(
-            players.update(&mut world, got(2), now)[0].map(|i| i.seq),
+            players.update(&mut world, got(2, now), now)[0].map(|i| i.seq),
             Some(2)
+        );
+        // A reload soon after, from a little behind, is heard once the client
+        // has been quiet for longer than the hold.
+        let later = now + HOLD * 2;
+        assert_eq!(
+            players.update(&mut world, got(1, later), later)[0].map(|i| i.seq),
+            Some(1)
         );
     }
 }

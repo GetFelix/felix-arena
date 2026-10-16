@@ -73,6 +73,8 @@ it('each player moves only its own craft, and a watcher cannot send inputs', asy
     return tick.crafts.find((craft) => craft.slot === slot);
   };
 
+  // The sim's log outlives a run, so count the refusals this run adds.
+  const refusedBefore = refusedInputs(ARENA);
   const anaInputs = new Inputs(1);
   const benInputs = new Inputs(20_000);
   const forged = new Inputs(40_000);
@@ -120,7 +122,7 @@ it('each player moves only its own craft, and a watcher cannot send inputs', asy
   // The sim saw the forged records and refused them. It reports every 5 s.
   let refused = 0;
   for (let waited = 0; refused === 0 && waited < 8000; waited += 500) {
-    refused = refusedInputs(ARENA);
+    refused = refusedInputs(ARENA) - refusedBefore;
     if (refused === 0) await sleep(500);
   }
   expect(refused).toBeGreaterThan(0);
