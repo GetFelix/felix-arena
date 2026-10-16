@@ -4,7 +4,7 @@
 use crate::arena::{HALF_X, HALF_Z, OBSTACLES, Obstacle, spawn};
 use crate::fixed::{self, div_round, length};
 use crate::input::{BOOST, FIRE, Input};
-use crate::tick::{Bolt, Craft, Event, Keyframe, Player, Tick};
+use crate::tick::{Bolt, Craft, Event, Keyframe, MatchState, Player, Tick};
 
 /// Steps a second.
 pub const HZ: i32 = 30;
@@ -34,6 +34,22 @@ pub const REGEN_AFTER: u16 = 120;
 /// Ticks per point of health regenerated.
 pub const REGEN_EVERY: u16 = 3;
 pub const RESPAWN_AFTER: u16 = 150;
+/// Ticks a rail charges before it fires: half a second.
+pub const RAIL_CHARGE: u8 = 15;
+pub const RAIL_DAMAGE: u8 = 70;
+pub const RAIL_SHOTS: u8 = 3;
+/// How close to the beam a craft's edge must be to be hit.
+pub const RAIL_RADIUS: i32 = 60;
+/// Ticks after a rail shot before the weapon fires again.
+const RAIL_COOLDOWN: u8 = 15;
+/// The beam's reach, past the arena's diagonal.
+const RAIL_REACH: i32 = 5000;
+/// The beam is checked every this many centimetres.
+const RAIL_STEP: i32 = 10;
+/// How far past touching the centre plinth a craft still takes the rail.
+const PICKUP_REACH: i32 = 40;
+/// The `bolt` of a hit by the rail, which has none.
+pub const RAIL_BOLT: u16 = u16::MAX;
 /// Bolts are checked this many times along each tick's flight, so one cannot
 /// pass through a craft or a thin wall between two checks.
 const BOLT_STEPS: i32 = 4;
@@ -43,6 +59,52 @@ const BOLT_STEPS: i32 = 4;
 pub enum Team {
     Coral,
     Violet,
+}
+
+/// Where a match is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Phase {
+    /// Free play before the match, which counts down once two players are in.
+    Warmup = 0,
+    Playing = 1,
+    /// The match is over: crafts take no input until the next warmup.
+    Results = 2,
+}
+
+impl Phase {
+    pub(crate) fn from_byte(byte: u8) -> Option<Self> {
+        match byte {
+            0 => Some(Self::Warmup),
+            1 => Some(Self::Playing),
+            2 => Some(Self::Results),
+            _ => None,
+        }
+    }
+}
+
+/// How long each part of a match lasts, in ticks, and the kills that win it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Rules {
+    pub warmup: u16,
+    pub length: u16,
+    pub results: u16,
+    pub kill_limit: u16,
+    /// Ticks after the rail is taken before the crystal holds another.
+    pub rail_every: u16,
+}
+
+impl Default for Rules {
+    /// The design's match: a 10 second warmup, 5 minutes or 25 kills, 15
+    /// seconds of results, a rail every 30 seconds.
+    fn default() -> Self {
+        Self {
+            warmup: 10 * HZ as u16,
+            length: 300 * HZ as u16,
+            results: 15 * HZ as u16,
+            kill_limit: 25,
+            rail_every: 30 * HZ as u16,
+        }
+    }
 }
 
 /// A craft's state the tick does not carry, which only the sim needs.
@@ -62,7 +124,8 @@ pub struct World {
     players: Vec<Player>,
     bolts: Vec<Bolt>,
     next_bolt: u16,
-    scores: [u16; 2],
+    rules: Rules,
+    state: MatchState,
     /// What happened in the step that made the current tick.
     events: Vec<Event>,
     /// Joins and leaves since that step, which belong to the next tick.
@@ -70,7 +133,12 @@ pub struct World {
 }
 
 impl World {
+    /// Match `match_number` under the default rules, in its warmup.
     pub fn new(match_number: u32) -> Self {
+        Self::with_rules(match_number, Rules::default())
+    }
+
+    pub fn with_rules(match_number: u32, rules: Rules) -> Self {
         Self {
             match_number,
             tick: 0,
@@ -79,10 +147,20 @@ impl World {
             players: Vec::new(),
             bolts: Vec::new(),
             next_bolt: 0,
-            scores: [0; 2],
+            rules,
+            state: MatchState {
+                phase: Phase::Warmup,
+                left: rules.warmup,
+                scores: [0; 2],
+                rail_in: rules.rail_every,
+            },
             events: Vec::new(),
             pending: Vec::new(),
         }
+    }
+
+    pub fn state(&self) -> MatchState {
+        self.state
     }
 
     /// The tick number of the current state.
@@ -147,25 +225,118 @@ impl World {
         self.events = std::mem::take(&mut self.pending);
         self.tick = self.tick.wrapping_add(1);
         self.move_bolts();
+        let over = self.state.phase == Phase::Results;
         for i in 0..self.crafts.len() {
             let slot = self.crafts[i].slot;
-            let control = input(slot);
+            let mut control = input(slot);
+            // After a match, crafts coast and nobody fires until the warmup.
+            // The input still counts as applied, so a client knows it was
+            // heard.
+            if over && let Some(ignored) = control.take() {
+                self.crafts[i].last_input = ignored.seq;
+            }
             self.step_craft(i, control);
         }
         self.separate_crafts();
+        self.pick_up_rail();
+        self.run_clock();
+    }
+
+    /// Count the phase down, and move on when it runs out or a team has won.
+    fn run_clock(&mut self) {
+        let state = &mut self.state;
+        match state.phase {
+            // The warmup waits for a second player.
+            Phase::Warmup if self.players.len() < 2 => state.left = self.rules.warmup,
+            _ => state.left = state.left.saturating_sub(1),
+        }
+        let won = state.scores.iter().any(|s| *s >= self.rules.kill_limit);
+        match state.phase {
+            Phase::Warmup if state.left == 0 => self.start(Phase::Playing),
+            Phase::Playing if state.left == 0 || won => {
+                self.state.phase = Phase::Results;
+                self.state.left = self.rules.results;
+                self.bolts.clear();
+                for craft in &mut self.crafts {
+                    craft.charge = 0;
+                }
+            }
+            Phase::Results if state.left == 0 => {
+                self.match_number = self.match_number.wrapping_add(1);
+                self.start(Phase::Warmup);
+            }
+            _ => {}
+        }
+    }
+
+    /// Begin `phase` from a clean slate: scores, bolts and the rail reset,
+    /// and every craft back at its spawn.
+    fn start(&mut self, phase: Phase) {
+        self.state = MatchState {
+            phase,
+            left: match phase {
+                Phase::Warmup => self.rules.warmup,
+                Phase::Playing => self.rules.length,
+                Phase::Results => self.rules.results,
+            },
+            scores: [0; 2],
+            rail_in: self.rules.rail_every,
+        };
+        self.bolts.clear();
+        for player in &mut self.players {
+            (player.kills, player.deaths) = (0, 0);
+        }
+        for i in 0..self.crafts.len() {
+            let craft = self.crafts[i];
+            let place = self
+                .players
+                .iter()
+                .filter(|p| p.team == craft.team && p.slot < craft.slot)
+                .count();
+            self.crafts[i] = Craft {
+                last_input: craft.last_input,
+                ..self.spawned(craft.slot, craft.team, place)
+            };
+            self.hidden[usize::from(craft.slot)] = Hidden::default();
+        }
+    }
+
+    /// Hand the rail on the crystal to the first live craft touching the
+    /// plinth, in slot order, or count down to the next one.
+    fn pick_up_rail(&mut self) {
+        if self.state.phase == Phase::Results {
+            return;
+        }
+        if self.state.rail_in > 0 {
+            self.state.rail_in -= 1;
+            return;
+        }
+        let Obstacle::Round { x, z, radius } = OBSTACLES[0] else {
+            return;
+        };
+        let reach = i64::from(CRAFT_RADIUS + radius + PICKUP_REACH);
+        let near = self.crafts.iter_mut().find(|c| {
+            let (dx, dz) = (i64::from(c.x) - i64::from(x), i64::from(c.z) - i64::from(z));
+            c.alive && dx * dx + dz * dz <= reach * reach
+        });
+        if let Some(craft) = near {
+            craft.rail = RAIL_SHOTS;
+            self.state.rail_in = self.rules.rail_every;
+            self.events.push(Event::PickedUp { slot: craft.slot });
+        }
     }
 
     /// The current state as a tick, for `epoch`. Every
     /// [`KEYFRAME_EVERY`]th tick is a keyframe.
     pub fn snapshot(&self, epoch: u16) -> Tick {
         let keyframe = self.tick.is_multiple_of(KEYFRAME_EVERY).then(|| Keyframe {
-            scores: self.scores,
             players: self.players.clone(),
         });
         Tick {
             epoch,
             match_number: self.match_number,
             tick: self.tick,
+            state: self.state,
             crafts: self.crafts.clone(),
             bolts: self.bolts.clone(),
             events: self.events.clone(),
@@ -203,7 +374,11 @@ impl World {
                 self.events.push(Event::Spawned { slot });
             }
         }
-        if let Some(shot) = shot {
+        self.crafts[i] = craft;
+        self.hidden[usize::from(slot)] = hidden;
+        if let Some(shot) = shot.filter(|s| s.rail) {
+            self.rail(slot, shot);
+        } else if let Some(shot) = shot {
             let bolt = self.next_bolt;
             self.next_bolt = self.next_bolt.wrapping_add(1);
             self.bolts.push(Bolt {
@@ -219,8 +394,42 @@ impl World {
                 seq: shot.seq,
             });
         }
-        self.crafts[i] = craft;
-        self.hidden[usize::from(slot)] = hidden;
+    }
+
+    /// The rail fired by `slot`: a beam from the shot's muzzle along its
+    /// heading, to the first enemy craft within [`RAIL_RADIUS`] of it or the
+    /// first wall or cover.
+    fn rail(&mut self, slot: u8, shot: Shot) {
+        let team = self.crafts.iter().find(|c| c.slot == slot).map(|c| c.team);
+        let (dx, dz) = (fixed::cos(shot.heading), fixed::sin(shot.heading));
+        let (x0, z0) = (i32::from(shot.x), i32::from(shot.z));
+        let reach = i64::from(CRAFT_RADIUS + RAIL_RADIUS);
+        let mut end = (x0, z0);
+        let mut target = None;
+        for travel in (0..=RAIL_REACH).step_by(RAIL_STEP as usize) {
+            let (x, z) = (x0 + fixed::scale(dx, travel), z0 + fixed::scale(dz, travel));
+            if x.abs() > HALF_X || z.abs() > HALF_Z || OBSTACLES.iter().any(|o| o.touches(x, z, 1))
+            {
+                break;
+            }
+            end = (x, z);
+            target = self.crafts.iter().position(|c| {
+                let (ex, ez) = (i64::from(x - i32::from(c.x)), i64::from(z - i32::from(c.z)));
+                c.alive && Some(c.team) != team && ex * ex + ez * ez < reach * reach
+            });
+            if target.is_some() {
+                break;
+            }
+        }
+        self.events.push(Event::Railed {
+            slot,
+            target: target.map(|i| self.crafts[i].slot),
+            x: end.0 as i16,
+            z: end.1 as i16,
+        });
+        if let Some(i) = target {
+            self.damage(i, slot, RAIL_BOLT, RAIL_DAMAGE);
+        }
     }
 
     fn spawned(&self, slot: u8, team: Team, place: usize) -> Craft {
@@ -251,7 +460,7 @@ impl World {
                     }
                 });
                 if let Some(target) = hit {
-                    self.damage(target, bolt.owner, bolt.id);
+                    self.damage(target, bolt.owner, bolt.id, BOLT_DAMAGE);
                     return false;
                 }
                 if step == BOLT_STEPS {
@@ -263,9 +472,9 @@ impl World {
         self.bolts = bolts;
     }
 
-    fn damage(&mut self, target: usize, attacker: u8, bolt: u16) {
+    fn damage(&mut self, target: usize, attacker: u8, bolt: u16, damage: u8) {
         let craft = &mut self.crafts[target];
-        let damage = BOLT_DAMAGE.min(craft.health);
+        let damage = damage.min(craft.health);
         craft.health -= damage;
         let slot = craft.slot;
         self.hidden[usize::from(slot)].since_damage = 0;
@@ -280,6 +489,7 @@ impl World {
         }
         craft.alive = false;
         (craft.vx, craft.vz) = (0, 0);
+        (craft.rail, craft.charge) = (0, 0);
         self.hidden[usize::from(slot)].respawn_in = RESPAWN_AFTER;
         self.events.push(Event::Killed {
             victim: slot,
@@ -299,7 +509,7 @@ impl World {
             }
         }
         if let Some(team) = killer_team {
-            let score = &mut self.scores[team as usize];
+            let score = &mut self.state.scores[team as usize];
             *score = score.saturating_add(1);
         }
     }
@@ -403,6 +613,8 @@ pub struct Shot {
     pub z: i16,
     pub heading: u16,
     pub seq: u16,
+    /// A rail shot, which is a beam rather than a bolt.
+    pub rail: bool,
 }
 
 /// One tick of `craft`'s own rules under `control`: its cooldowns, its
@@ -419,6 +631,24 @@ pub fn steer(craft: &mut Craft, control: Option<Input>) -> Option<Shot> {
         return None;
     }
     let mut shot = None;
+    let reach = CRAFT_RADIUS + BOLT_RADIUS + 5;
+    let muzzle = |craft: &Craft, aim: u16, seq: u16, rail: bool| Shot {
+        x: (i32::from(craft.x) + fixed::scale(fixed::cos(aim), reach)) as i16,
+        z: (i32::from(craft.z) + fixed::scale(fixed::sin(aim), reach)) as i16,
+        heading: aim,
+        seq,
+        rail,
+    };
+    // A charging rail fires when its charge runs out, wherever the craft
+    // then aims.
+    if craft.charge > 0 {
+        craft.charge -= 1;
+        if craft.charge == 0 {
+            craft.rail -= 1;
+            craft.fire_cooldown = RAIL_COOLDOWN;
+            shot = Some(muzzle(craft, craft.heading, craft.last_input, true));
+        }
+    }
     let (mut vx, mut vz) = (i32::from(craft.vx), i32::from(craft.vz));
     match control {
         Some(input) => {
@@ -439,15 +669,13 @@ pub fn steer(craft: &mut Craft, control: Option<Input>) -> Option<Shot> {
                 (vx, vz) = (fixed::scale(dx, BOOST_SPEED), fixed::scale(dz, BOOST_SPEED));
                 craft.boost_cooldown = BOOST_COOLDOWN;
             }
-            if input.buttons & FIRE != 0 && craft.fire_cooldown == 0 {
-                craft.fire_cooldown = FIRE_COOLDOWN;
-                let reach = CRAFT_RADIUS + BOLT_RADIUS + 5;
-                shot = Some(Shot {
-                    x: (i32::from(craft.x) + fixed::scale(fixed::cos(input.aim), reach)) as i16,
-                    z: (i32::from(craft.z) + fixed::scale(fixed::sin(input.aim), reach)) as i16,
-                    heading: input.aim,
-                    seq: input.seq,
-                });
+            if input.buttons & FIRE != 0 && craft.fire_cooldown == 0 && craft.charge == 0 {
+                if craft.rail > 0 {
+                    craft.charge = RAIL_CHARGE;
+                } else {
+                    craft.fire_cooldown = FIRE_COOLDOWN;
+                    shot = Some(muzzle(craft, input.aim, input.seq, false));
+                }
             }
         }
         None => (vx, vz) = toward(vx, vz, 0, 0, COAST_DRAG),

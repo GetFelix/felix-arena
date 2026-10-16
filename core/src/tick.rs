@@ -2,7 +2,7 @@
 //! The layout is the table in docs/design.md, "Ticks are commits". All
 //! numbers are little-endian.
 
-use crate::world::{MAX_HEALTH, Team};
+use crate::world::{MAX_HEALTH, Phase, Team};
 
 /// One tick: the whole dynamic state of the match, so any single tick can be
 /// drawn without the ones before it.
@@ -12,6 +12,8 @@ pub struct Tick {
     pub epoch: u16,
     pub match_number: u32,
     pub tick: u32,
+    /// Where the match is, carried by every tick so any one can be drawn.
+    pub state: MatchState,
     /// In slot order.
     pub crafts: Vec<Craft>,
     pub bolts: Vec<Bolt>,
@@ -35,7 +37,21 @@ pub struct Timing {
     pub previous_commit_us: u32,
 }
 
-/// One craft, 16 bytes on the wire.
+/// The match's clock, score and pickup, 9 bytes on the wire.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MatchState {
+    pub phase: Phase,
+    /// Ticks left in the phase. A warmup waiting for players holds at its
+    /// full length.
+    pub left: u16,
+    /// Kills by team: Coral, then Violet.
+    pub scores: [u16; 2],
+    /// Ticks until a rail appears on the centre crystal, or 0 while one is
+    /// there.
+    pub rail_in: u16,
+}
+
+/// One craft, 17 bytes on the wire.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Craft {
     pub slot: u8,
@@ -56,6 +72,10 @@ pub struct Craft {
     pub boost_cooldown: u8,
     /// The sequence number of the last input applied to this craft.
     pub last_input: u16,
+    /// Rail shots left, at most 3.
+    pub rail: u8,
+    /// Ticks until a charging rail fires, or 0 when none is charging.
+    pub charge: u8,
 }
 
 /// A blaster bolt in flight, 9 bytes on the wire. It moves at the bolt speed
@@ -105,13 +125,23 @@ pub enum Event {
         victim: u8,
         killer: u8,
     },
+    /// `slot` took the rail from the centre crystal.
+    PickedUp {
+        slot: u8,
+    },
+    /// `slot` fired the rail, whose beam ended at `(x, z)`: on `target`, or
+    /// on the arena when `target` is `None`.
+    Railed {
+        slot: u8,
+        target: Option<u8>,
+        x: i16,
+        z: i16,
+    },
 }
 
 /// What only a keyframe carries.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Keyframe {
-    /// Kills by team: Coral, then Violet.
-    pub scores: [u16; 2],
     /// In slot order.
     pub players: Vec<Player>,
 }
@@ -146,6 +176,9 @@ const TIMED: u8 = 2;
 const ALIVE: u8 = 1;
 const VIOLET: u8 = 2;
 const FIRE_SHIFT: u8 = 3;
+const CHARGE_SHIFT: u8 = 2;
+/// A railed event's target when the beam hit no craft.
+const NO_TARGET: u8 = 255;
 
 impl Craft {
     pub(crate) fn spawned(slot: u8, team: Team, x: i16, z: i16, heading: u16) -> Self {
@@ -162,6 +195,8 @@ impl Craft {
             health: MAX_HEALTH,
             boost_cooldown: 0,
             last_input: 0,
+            rail: 0,
+            charge: 0,
         }
     }
 }
@@ -187,6 +222,12 @@ impl Tick {
             out.extend_from_slice(&timing.step_us.to_le_bytes());
             out.extend_from_slice(&timing.previous_commit_us.to_le_bytes());
         }
+        out.push(self.state.phase as u8);
+        out.extend_from_slice(&self.state.left.to_le_bytes());
+        for score in self.state.scores {
+            out.extend_from_slice(&score.to_le_bytes());
+        }
+        out.extend_from_slice(&self.state.rail_in.to_le_bytes());
         out.push(u8::try_from(self.crafts.len()).expect("at most 255 crafts"));
         for craft in &self.crafts {
             out.push(craft.slot);
@@ -204,6 +245,7 @@ impl Tick {
             out.push(craft.health);
             out.push(craft.boost_cooldown);
             out.extend_from_slice(&craft.last_input.to_le_bytes());
+            out.push(craft.rail.min(3) | (craft.charge.min(31) << CHARGE_SHIFT));
         }
         out.extend_from_slice(
             &u16::try_from(self.bolts.len())
@@ -226,9 +268,6 @@ impl Tick {
             event.encode(&mut out);
         }
         if let Some(keyframe) = &self.keyframe {
-            for score in keyframe.scores {
-                out.extend_from_slice(&score.to_le_bytes());
-            }
             out.push(u8::try_from(keyframe.players.len()).expect("at most 255 players"));
             for player in &keyframe.players {
                 out.push(player.slot);
@@ -262,6 +301,12 @@ impl Tick {
         } else {
             None
         };
+        let state = MatchState {
+            phase: Phase::from_byte(r.u8()?)?,
+            left: r.u16()?,
+            scores: [r.u16()?, r.u16()?],
+            rail_in: r.u16()?,
+        };
         let crafts = (0..r.u8()?)
             .map(|_| {
                 let slot = r.u8()?;
@@ -286,6 +331,16 @@ impl Tick {
                     health: r.u8()?,
                     boost_cooldown: r.u8()?,
                     last_input: r.u16()?,
+                    rail: 0,
+                    charge: 0,
+                })
+                .and_then(|mut craft| {
+                    let rail = r.u8()?;
+                    if rail >> CHARGE_SHIFT > 31 {
+                        return None;
+                    }
+                    (craft.rail, craft.charge) = (rail & 3, rail >> CHARGE_SHIFT);
+                    Some(craft)
                 })
             })
             .collect::<Option<Vec<_>>>()?;
@@ -304,7 +359,6 @@ impl Tick {
             .map(|_| Event::decode(&mut r))
             .collect::<Option<Vec<_>>>()?;
         let keyframe = if flags & KEYFRAME != 0 {
-            let scores = [r.u16()?, r.u16()?];
             let players = (0..r.u8()?)
                 .map(|_| {
                     Some(Player {
@@ -316,7 +370,7 @@ impl Tick {
                     })
                 })
                 .collect::<Option<Vec<_>>>()?;
-            Some(Keyframe { scores, players })
+            Some(Keyframe { players })
         } else {
             None
         };
@@ -328,6 +382,7 @@ impl Tick {
                 epoch,
                 match_number,
                 tick,
+                state,
                 crafts,
                 bolts,
                 events,
@@ -391,6 +446,12 @@ impl Event {
                 out.push(damage);
             }
             Event::Killed { victim, killer } => out.extend_from_slice(&[6, victim, killer]),
+            Event::PickedUp { slot } => out.extend_from_slice(&[7, slot]),
+            Event::Railed { slot, target, x, z } => {
+                out.extend_from_slice(&[8, slot, target.unwrap_or(NO_TARGET)]);
+                out.extend_from_slice(&x.to_le_bytes());
+                out.extend_from_slice(&z.to_le_bytes());
+            }
         }
     }
 
@@ -417,6 +478,13 @@ impl Event {
             6 => Event::Killed {
                 victim: r.u8()?,
                 killer: r.u8()?,
+            },
+            7 => Event::PickedUp { slot: r.u8()? },
+            8 => Event::Railed {
+                slot: r.u8()?,
+                target: Some(r.u8()?).filter(|t| *t != NO_TARGET),
+                x: r.i16()?,
+                z: r.i16()?,
             },
             _ => return None,
         })

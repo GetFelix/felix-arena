@@ -2,7 +2,19 @@
 // page predicts with. `npm run core` builds it into src/core/.
 import init, { arena, initSync } from './core/felix_arena_core.js';
 
-export { boltReach, boltSpeed, decodeTick, Inputs, playerKey, Prediction, World } from './core/felix_arena_core.js';
+export {
+  boltReach,
+  boltSpeed,
+  boostTicks,
+  decodeInput,
+  decodeTick,
+  Inputs,
+  playerKey,
+  Prediction,
+  railChargeTicks,
+  respawnTicks,
+  World,
+} from './core/felix_arena_core.js';
 export type { Bolt, Craft, Event, Player, Shot, Tick, Timing } from './core/felix_arena_core.js';
 
 /**

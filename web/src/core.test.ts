@@ -36,7 +36,7 @@ describe('core in WebAssembly', () => {
   it('hands over the arena in metres, point-symmetric about the centre', () => {
     const { halfX, halfZ, obstacles } = arenaLayout();
     expect([halfX, halfZ]).toEqual([20, 14]);
-    expect(obstacles[0]).toEqual({ kind: 'round', x: 0, z: 0, radius: 0.9 });
+    expect(obstacles[0]).toEqual({ kind: 'round', x: 0, z: 0, radius: 2.3 });
     expect(obstacles[1]).toEqual({ kind: 'box', x: 12.5, z: -1.5, halfX: 0.5, halfZ: 3 });
     for (let i = 1; i < obstacles.length; i += 2) {
       const [a, b] = [obstacles[i]!, obstacles[i + 1]!];

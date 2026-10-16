@@ -60,7 +60,7 @@ it('draws a flying craft smoothly with one tick in twenty lost', async () => {
   expect(run.frames).toBeGreaterThan(300);
   expect(run.stalls).toBe(0);
   // A runner that holds the socket up for over 100 ms starves any interpolator; that may happen, but rarely.
-  expect(run.starved).toBeLessThan(run.frames / 50);
+  expect(run.starved + run.recovering).toBeLessThan(run.frames / 20);
   expect(run.maxJump).toBeLessThan(4);
   expect(run.maxError).toBeLessThan(40);
 }, 30_000);

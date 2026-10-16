@@ -14,8 +14,8 @@ pub mod wasm;
 pub mod world;
 
 pub use input::{Input, InputRecord};
-pub use tick::{Bolt, Craft, Event, Keyframe, Player, Tick, Timing, player_key};
-pub use world::{CRAFT_RADIUS, Shot, Team, World, bolt_ticks, separate, steer};
+pub use tick::{Bolt, Craft, Event, Keyframe, MatchState, Player, Tick, Timing, player_key};
+pub use world::{CRAFT_RADIUS, Phase, Rules, Shot, Team, World, bolt_ticks, separate, steer};
 
 #[cfg(test)]
 mod tests;

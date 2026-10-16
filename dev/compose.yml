@@ -42,6 +42,9 @@ services:
   seed:
     image: docker.io/library/node:24-alpine
     command: ["node", "/app/seed.mjs"]
+    environment:
+      # dan and eve make two a side, with ana and ben.
+      ARENA_PLAYERS: ana,ben,dan,eve
     volumes:
       - ./seed.mjs:/app/seed.mjs:ro
       - ./state:/state
@@ -106,6 +109,12 @@ services:
       SIM_FELIX_TOKEN_FILE: /state/sim.token
       SIM_TENANT: arena
       SIM_ARENAS: alpha bravo
+      # The match's lengths; CI's match job shortens them.
+      SIM_WARMUP_SECONDS: ${SIM_WARMUP_SECONDS:-10}
+      SIM_MATCH_SECONDS: ${SIM_MATCH_SECONDS:-300}
+      SIM_RESULTS_SECONDS: ${SIM_RESULTS_SECONDS:-15}
+      SIM_KILL_LIMIT: ${SIM_KILL_LIMIT:-25}
+      SIM_RAIL_SECONDS: ${SIM_RAIL_SECONDS:-30}
       RUST_LOG: info
     volumes:
       - ./state:/state:ro

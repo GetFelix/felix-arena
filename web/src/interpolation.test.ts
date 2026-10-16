@@ -109,7 +109,7 @@ describe('interpolation', () => {
     expect(run.lostRuns).toBeGreaterThan(5);
     expect(run.frames).toBeGreaterThan(1500);
     expect(run.stalls).toBe(0);
-    expect(run.starved).toBe(0);
+    expect(run.starved + run.recovering).toBe(0);
     // A frame never moves a craft more than 4 cm away from the step the committed ticks take over the same time.
     expect(run.maxJump).toBeLessThan(4);
     // Linear blending across a lost tick cuts corners a little; a dash that starts inside a gap is the worst case.

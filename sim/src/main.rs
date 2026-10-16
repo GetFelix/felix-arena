@@ -54,21 +54,27 @@ async fn main() -> Result<()> {
             format!("arena.input.{arena}"),
             Arc::clone(&inbox),
         ));
-        arenas.spawn(arena::run(arena.clone(), EPOCH, inbox, move |record| {
-            let (client, tenant, namespace, stream) = (
-                Arc::clone(&client),
-                tenant.clone(),
-                namespace.clone(),
-                stream.clone(),
-            );
-            async move {
-                let ops = vec![CommitOp::publish(stream.as_str(), record)];
-                let receipt = client
-                    .commit(&tenant, &namespace, stream.as_bytes(), ops)
-                    .await?;
-                Ok(receipt.offset)
-            }
-        }));
+        arenas.spawn(arena::run(
+            arena.clone(),
+            EPOCH,
+            config.rules,
+            inbox,
+            move |record| {
+                let (client, tenant, namespace, stream) = (
+                    Arc::clone(&client),
+                    tenant.clone(),
+                    namespace.clone(),
+                    stream.clone(),
+                );
+                async move {
+                    let ops = vec![CommitOp::publish(stream.as_str(), record)];
+                    let receipt = client
+                        .commit(&tenant, &namespace, stream.as_bytes(), ops)
+                        .await?;
+                    Ok(receipt.offset)
+                }
+            },
+        ));
     }
     // An arena's loop only ends by panicking.
     if let Some(Err(err)) = arenas.join_next().await {

@@ -116,6 +116,13 @@ impl Prediction {
         shot.map(JsShot)
     }
 
+    /// Step without input, as the sim does a craft whose player is silent
+    /// or whose match is over.
+    pub fn coast(&mut self) {
+        crate::steer(&mut self.craft, None);
+        crate::separate(&mut self.craft, &self.others);
+    }
+
     /// A copy to step without changing this one.
     #[wasm_bindgen(js_name = clone)]
     pub fn copy(&self) -> Prediction {
@@ -150,6 +157,11 @@ impl JsShot {
     pub fn seq(&self) -> u16 {
         self.0.seq
     }
+    /// A rail shot: a beam the sim judges, not a bolt.
+    #[wasm_bindgen(getter)]
+    pub fn rail(&self) -> bool {
+        self.0.rail
+    }
     /// Ticks the bolt flies before the arena stops it, if it meets no craft.
     #[wasm_bindgen(getter)]
     pub fn ticks(&self) -> u32 {
@@ -161,6 +173,38 @@ impl JsShot {
 #[wasm_bindgen(js_name = boltReach)]
 pub fn bolt_reach() -> i32 {
     crate::CRAFT_RADIUS + crate::world::BOLT_RADIUS
+}
+
+/// The newest input in an input record, as its sequence number, move x,
+/// move z, aim and buttons, or `undefined` when the bytes are not a record.
+#[wasm_bindgen(js_name = decodeInput)]
+pub fn decode_input(record: &[u8]) -> Option<Vec<i32>> {
+    let input = crate::InputRecord::decode(record)?.inputs[0];
+    Some(vec![
+        i32::from(input.seq),
+        i32::from(input.move_x),
+        i32::from(input.move_z),
+        i32::from(input.aim),
+        i32::from(input.buttons),
+    ])
+}
+
+/// Ticks a destroyed craft waits to respawn.
+#[wasm_bindgen(js_name = respawnTicks)]
+pub fn respawn_ticks() -> u16 {
+    crate::world::RESPAWN_AFTER
+}
+
+/// Ticks the boost takes to cool down.
+#[wasm_bindgen(js_name = boostTicks)]
+pub fn boost_ticks() -> u8 {
+    crate::world::BOOST_COOLDOWN
+}
+
+/// Ticks a rail charges before it fires.
+#[wasm_bindgen(js_name = railChargeTicks)]
+pub fn rail_charge_ticks() -> u8 {
+    crate::world::RAIL_CHARGE
 }
 
 /// Bolt speed in centimetres a second.
@@ -179,6 +223,27 @@ impl JsWorld {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
         Self(crate::World::new(0))
+    }
+
+    /// A world under shorter rules, in ticks, for tests of the match loop.
+    #[wasm_bindgen(js_name = withRules)]
+    pub fn with_rules(
+        warmup: u16,
+        length: u16,
+        results: u16,
+        kill_limit: u16,
+        rail_every: u16,
+    ) -> Self {
+        Self(crate::World::with_rules(
+            0,
+            crate::Rules {
+                warmup,
+                length,
+                results,
+                kill_limit,
+                rail_every,
+            },
+        ))
     }
 
     /// Join the player with Felix principal `principal`: its slot, or
@@ -254,6 +319,34 @@ impl JsTick {
     #[wasm_bindgen(getter)]
     pub fn keyframe(&self) -> bool {
         self.tick.is_keyframe()
+    }
+    /// `warmup`, `playing` or `results`.
+    #[wasm_bindgen(getter)]
+    pub fn phase(&self) -> String {
+        match self.tick.state.phase {
+            crate::Phase::Warmup => "warmup",
+            crate::Phase::Playing => "playing",
+            crate::Phase::Results => "results",
+        }
+        .into()
+    }
+    /// Ticks left in the phase.
+    #[wasm_bindgen(getter, js_name = phaseLeft)]
+    pub fn phase_left(&self) -> u16 {
+        self.tick.state.left
+    }
+    #[wasm_bindgen(getter, js_name = coralScore)]
+    pub fn coral_score(&self) -> u16 {
+        self.tick.state.scores[0]
+    }
+    #[wasm_bindgen(getter, js_name = violetScore)]
+    pub fn violet_score(&self) -> u16 {
+        self.tick.state.scores[1]
+    }
+    /// Ticks until a rail is on the crystal, or 0 while one is.
+    #[wasm_bindgen(getter, js_name = railIn)]
+    pub fn rail_in(&self) -> u16 {
+        self.tick.state.rail_in
     }
     /// The state hash as 16 hex digits, as the sim logs it.
     #[wasm_bindgen(getter)]
@@ -363,6 +456,16 @@ impl JsCraft {
     pub fn boost_cooldown(&self) -> u8 {
         self.0.boost_cooldown
     }
+    /// Rail shots left.
+    #[wasm_bindgen(getter)]
+    pub fn rail(&self) -> u8 {
+        self.0.rail
+    }
+    /// Ticks until a charging rail fires, or 0.
+    #[wasm_bindgen(getter)]
+    pub fn charge(&self) -> u8 {
+        self.0.charge
+    }
 }
 
 /// Something that happened in a tick. `kind` names it; the other fields are
@@ -383,6 +486,8 @@ impl JsEvent {
             Fired { .. } => "fired",
             Hit { .. } => "hit",
             Killed { .. } => "killed",
+            PickedUp { .. } => "picked",
+            Railed { .. } => "railed",
         }
         .into()
     }
@@ -392,7 +497,12 @@ impl JsEvent {
     pub fn slot(&self) -> u8 {
         use crate::Event::*;
         match self.0 {
-            Joined { slot, .. } | Left { slot } | Spawned { slot } | Fired { slot, .. } => slot,
+            Joined { slot, .. }
+            | Left { slot }
+            | Spawned { slot }
+            | Fired { slot, .. }
+            | PickedUp { slot }
+            | Railed { slot, .. } => slot,
             Hit { target, .. } => target,
             Killed { victim, .. } => victim,
         }
@@ -403,6 +513,29 @@ impl JsEvent {
         match self.0 {
             crate::Event::Hit { attacker, .. } => attacker,
             crate::Event::Killed { killer, .. } => killer,
+            _ => 0,
+        }
+    }
+    /// Who a rail's beam hit, if anyone.
+    #[wasm_bindgen(getter)]
+    pub fn target(&self) -> Option<u8> {
+        match self.0 {
+            crate::Event::Railed { target, .. } => target,
+            _ => None,
+        }
+    }
+    /// Where a rail's beam ended, in centimetres.
+    #[wasm_bindgen(getter)]
+    pub fn x(&self) -> i16 {
+        match self.0 {
+            crate::Event::Railed { x, .. } => x,
+            _ => 0,
+        }
+    }
+    #[wasm_bindgen(getter)]
+    pub fn z(&self) -> i16 {
+        match self.0 {
+            crate::Event::Railed { z, .. } => z,
             _ => 0,
         }
     }
@@ -488,5 +621,13 @@ impl JsPlayer {
     #[wasm_bindgen(getter)]
     pub fn violet(&self) -> bool {
         self.0.team == crate::Team::Violet
+    }
+    #[wasm_bindgen(getter)]
+    pub fn kills(&self) -> u16 {
+        self.0.kills
+    }
+    #[wasm_bindgen(getter)]
+    pub fn deaths(&self) -> u16 {
+        self.0.deaths
     }
 }
