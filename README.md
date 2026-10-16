@@ -137,7 +137,9 @@ The live game is `play.html`: `http://localhost:5173/play.html?arena=alpha&as=an
 flies `ana`'s craft (WASD to move, the mouse to aim, the left button to fire,
 Space to boost) and `as=ben` in a second window flies the other. Your craft
 is predicted through `core` and everyone else is interpolated from ticks.
-`&quality=low` draws without post processing or shadows. The page runs the
+The quality tier (High, Medium or Low) is chosen
+from the first seconds of frame times; the Quality setting on the HUD or
+`&quality=high|medium|low|auto` overrides it. The page runs the
 match loop the sim decides: warmup, play, results and the next match, with the
 score, clock, kill feed and your hull, boost and rail on the HUD, and Tab for
 the scoreboard. `dev/compose.yml` lets `ana`, `ben`, `dan` and `eve` play.
@@ -155,6 +157,26 @@ player is refused, and `cleo` cannot publish inputs. And it has `ana` fly
 circles in arena `alpha` while `cleo` watches, then plays `cleo`'s ticks
 through the interpolator with one in twenty thrown away, checking that the
 craft moves smoothly.
+
+## Frame time
+
+The target is 60 frames a second at 1080p on a laptop iGPU at High or Medium.
+The benchmark plays a busy two-minute offline match at 1920x1080 and reports
+the frame times and the tier it drew at:
+
+```bash
+cd web && npm install && npm run core && npm run build && npx vite preview
+# open http://localhost:4173/play.html?offline&bench&quality=auto
+# and again with &quality=high and &quality=medium
+```
+
+Run it in a normal (not headless) browser window, plugged in, with nothing else
+busy. Frame intervals cannot be shorter than the display's refresh, so a
+60 Hz display caps the result at 60 frames a second.
+
+| Machine | GPU | Browser | Tier | Frames a second | Frame time p50 / p95 |
+|---|---|---|---|---|---|
+| _to be measured_ | | | | | |
 
 ## How it works
 

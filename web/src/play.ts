@@ -1,8 +1,10 @@
-// The live game. `?arena=` picks the arena and `?as=` the dev IdP user to play as; `?quality=low` draws without
-// post processing or shadows. The style frame at / stays the frozen scene it was ported as.
+// The live game. `?arena=` picks the arena and `?as=` the dev IdP user to play as; `?quality=high|medium|low|auto`
+// overrides the quality setting. `?offline&bench` runs the frame-time benchmark. The style frame at / stays the
+// frozen scene it was ported as.
 import { Clock, Color, Fog, Group, Scene, Vector3 } from 'three';
 import { buildArena } from './arena';
 import { hdriUrl, modelUrls } from './assets';
+import { Bench, BENCH_SIZE, type BenchReport, gpuName } from './bench';
 import { ArenaCamera } from './camera';
 import { Controls } from './controls';
 import {
@@ -30,7 +32,9 @@ import { palette, setCssColours } from './palette';
 import { Pickup } from './pickup';
 import { Own, Pacer } from './prediction';
 import { seeded } from './random';
-import { createRenderer, Post } from './renderer';
+import { requestedTier, TierChooser, urlTier } from './quality';
+import { createRenderer, Pipeline } from './renderer';
+import { qualitySetting } from './settings';
 import { blobTexture, flareTexture, glowTexture } from './textures';
 
 const params = new URLSearchParams(location.search);
@@ -38,9 +42,12 @@ const ARENA = params.get('arena') ?? 'alpha';
 const USER = params.get('as') ?? 'ana';
 const GATEWAY = params.get('gateway') ?? 'ws://127.0.0.1:8787/ws';
 const IDP = params.get('idp') ?? 'http://127.0.0.1:9400';
-const LOW = params.get('quality') === 'low';
+/** The frame-time benchmark: an offline match, `&seconds=` long (120 by default), drawn at 1920x1080. */
+const BENCH = params.has('bench');
+/** A tier the URL or the saved setting asks for, or null to choose. The benchmark heeds only the URL. */
+const ASKED = BENCH ? urlTier(params) : requestedTier(params);
 /** Play against bots with the sim in the page, without the dev stack: `?offline`, with `&warmup=`, `&length=` and `&results=` in seconds. */
-const OFFLINE = params.has('offline');
+const OFFLINE = params.has('offline') || BENCH;
 
 /** What the page exposes for tests and the dev console. */
 export interface ArenaDebug {
@@ -60,6 +67,10 @@ export interface ArenaDebug {
   crafts: { slot: number; violet: boolean; alive: boolean; x: number; z: number }[];
   /** Where a point on the floor, in centimetres, is on screen, in CSS pixels. */
   screenOf: (x: number, z: number) => { x: number; y: number };
+  /** The quality tier drawn now. */
+  tier: string;
+  /** The benchmark's report, once it has run. */
+  bench: BenchReport | null;
 }
 
 declare global {
@@ -89,18 +100,19 @@ async function main(): Promise<void> {
     phases: [],
     crafts: [],
     screenOf: () => ({ x: 0, y: 0 }),
+    tier: '',
+    bench: null,
   };
   window.arena = debug;
 
   const renderer = createRenderer();
-  if (LOW) renderer.shadowMap.enabled = false;
   document.body.prepend(renderer.domElement);
   const scene = new Scene();
   scene.background = new Color(palette.void);
   const fog = new Fog(palette.void, 42, 90);
   scene.fog = fog;
   const view = new ArenaCamera(renderer.domElement, fog, true);
-  addLights(scene);
+  const keyLight = addLights(scene);
   const fx = new Group();
   scene.add(fx);
 
@@ -120,13 +132,37 @@ async function main(): Promise<void> {
     const p = new Vector3(x / 100, 0.6, z / 100).project(view.camera);
     return { x: ((p.x + 1) / 2) * innerWidth, y: ((1 - p.y) / 2) * innerHeight };
   };
-  const post = LOW ? null : new Post(renderer, scene, view.camera, fx);
+  const pipeline = new Pipeline(renderer, scene, view.camera, fx, keyLight, ASKED ?? 'high');
+  const select = document.getElementById('quality') as HTMLSelectElement;
+  let chooser = ASKED ? null : new TierChooser('high', (tier) => pipeline.setTier(tier));
+  const setting = qualitySetting(
+    select,
+    ASKED === null,
+    () => pipeline.tier,
+    (tier) => {
+      chooser = tier ? null : new TierChooser('high', (t) => pipeline.setTier(t));
+      pipeline.setTier(tier ?? 'high');
+    },
+  );
+  const bench = BENCH
+    ? new Bench(Number(params.get('seconds') ?? 120), ASKED !== null, gpuName(renderer.getContext()))
+    : null;
+  const fitView = () => {
+    if (bench) {
+      // The target is set at 1080p, so the benchmark draws 1920x1080 whatever the window, scaled to fit it.
+      renderer.setPixelRatio(1);
+      view.fit(...BENCH_SIZE);
+      pipeline.setSize(...BENCH_SIZE, false);
+      Object.assign(renderer.domElement.style, { width: '100vw', height: '100vh', objectFit: 'contain' });
+    } else {
+      view.fit();
+      pipeline.setSize(innerWidth, innerHeight);
+    }
+  };
+  fitView();
   const controls = new Controls(renderer.domElement);
-  addEventListener('resize', () => {
-    view.fit();
-    if (post) post.setSize(renderer, innerWidth, innerHeight);
-    else renderer.setSize(innerWidth, innerHeight);
-  });
+  addEventListener('resize', fitView);
+  document.addEventListener('visibilitychange', () => chooser?.pause());
 
   const status = document.getElementById('loading')!;
   status.textContent = `Joining ${ARENA}`;
@@ -134,7 +170,9 @@ async function main(): Promise<void> {
   let key: string;
   if (OFFLINE) {
     const seconds = (name: string, fallback: number) => Number(params.get(name) ?? fallback);
-    gateway = new Offline(seconds('warmup', 10), seconds('length', 300), seconds('results', 15));
+    gateway = BENCH
+      ? new Offline(2, seconds('length', 600), 15)
+      : new Offline(seconds('warmup', 10), seconds('length', 300), seconds('results', 15));
     key = playerKey(OFFLINE_PRINCIPAL);
   } else {
     const token = (
@@ -220,13 +258,19 @@ async function main(): Promise<void> {
   const clock = new Clock();
   let shown: number | null = null;
   let lastT = 0;
-  renderer.setAnimationLoop(() => {
+  renderer.setAnimationLoop((frameAt: number) => {
+    const settled = !chooser || chooser.done;
+    chooser?.frame(frameAt);
+    if (debug.tier !== pipeline.tier) {
+      debug.tier = pipeline.tier;
+      setting.refresh();
+    }
     const now = performance.now();
     const frameStart = now;
     const t = clock.getElapsedTime();
     const frame = interpolator.sample(now);
     const ownDrawn = own?.draw(now) ?? null;
-    live = controls.sample(view.camera, ownDrawn?.x ?? 0, ownDrawn?.z ?? 0);
+    live = bench ? bench.controls(t) : controls.sample(view.camera, ownDrawn?.x ?? 0, ownDrawn?.z ?? 0);
     own?.steer(live);
     const ownNow = own?.draw(now) ?? null;
     debug.own = ownNow && { x: ownNow.x, z: ownNow.z, heading: ownNow.heading };
@@ -306,9 +350,15 @@ async function main(): Promise<void> {
     );
     view.update(t);
     const updated = performance.now();
-    if (post) post.render(t);
-    else renderer.render(scene, view.camera);
+    pipeline.render(t);
     shown = now;
+    if (bench?.frame(frameAt, performance.now() - frameStart, settled, pipeline.tier, renderer.domElement)) {
+      debug.bench = bench.report;
+      console.log('bench', JSON.stringify(bench.report));
+      const out = document.getElementById('bench')!;
+      out.textContent = JSON.stringify(bench.report, null, 2);
+      out.hidden = false;
+    }
     if (controls.changedAt !== null) {
       const rendered = performance.now();
       debug.inputToPixel.push({

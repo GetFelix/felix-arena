@@ -38,10 +38,10 @@ export class ArenaCamera {
     this.fit();
   }
 
-  /** Fits the arena to the viewport. In portrait the long axis runs up the screen. */
-  fit(): void {
+  /** Fits the arena to a view `width` by `height`, the window by default. In portrait the long axis runs up the screen. */
+  fit(width = innerWidth, height = innerHeight): void {
     const { camera } = this;
-    camera.aspect = innerWidth / innerHeight;
+    camera.aspect = width / height;
     const a = camera.aspect;
     const k = 2 * Math.tan(MathUtils.degToRad(camera.fov / 2));
     const [w, h] = a >= 1 ? [46, 34] : [24, 46];
