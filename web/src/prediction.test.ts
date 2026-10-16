@@ -43,7 +43,8 @@ interface Run {
  */
 function play(latencyMs: number, seconds = 20, seed = 1, lose = 0): Run {
   const random = seeded(seed);
-  const world = new World();
+  // A warmup that never ends, so the match starting does not respawn ana mid-test.
+  const world = World.withRules(65535, 9000, 450, 25, 900);
   world.join('ana');
   world.join('ben');
   const own = new Own(0);

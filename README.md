@@ -119,7 +119,14 @@ The live game is `play.html`: `http://localhost:5173/play.html?arena=alpha&as=an
 flies `ana`'s craft (WASD to move, the mouse to aim, the left button to fire,
 Space to boost) and `as=ben` in a second window flies the other. Your craft
 is predicted through `core` and everyone else is interpolated from ticks.
-`&quality=low` draws without post processing or shadows.
+`&quality=low` draws without post processing or shadows. The page runs the
+match loop the sim decides: warmup, play, results and the next match, with the
+score, clock, kill feed and your hull, boost and rail on the HUD, and Tab for
+the scoreboard. `dev/compose.yml` lets `ana`, `ben`, `dan` and `eve` play.
+
+`play.html?offline` needs no dev stack: core's world runs in the page as the
+sim, with three bots, so the game can be seen and played anywhere.
+`&length=`, `&warmup=` and `&results=` shorten the match, in seconds.
 
 `npm run smoke` checks the same path from Node: ticks arrive at 30 Hz, the
 WebAssembly build decodes keyframes to the state hashes the sim logged, a

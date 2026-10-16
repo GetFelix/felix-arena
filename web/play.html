@@ -108,6 +108,163 @@
         background: var(--accent);
         box-shadow: 0 0 10px var(--accent);
       }
+      .phase {
+        position: absolute;
+        top: 66px;
+        left: 50%;
+        transform: translateX(-50%);
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.16em;
+        color: var(--muted);
+      }
+      .banner {
+        position: absolute;
+        top: 24%;
+        left: 50%;
+        transform: translateX(-50%);
+        text-align: center;
+        text-shadow: 0 2px 18px var(--void);
+      }
+      .banner b {
+        display: block;
+        font-size: 30px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+      }
+      .banner span {
+        display: block;
+        margin-top: 6px;
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--muted);
+      }
+      .me {
+        position: absolute;
+        bottom: 18px;
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex;
+        gap: 18px;
+        align-items: center;
+        padding: 10px 16px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        backdrop-filter: blur(8px);
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--muted);
+      }
+      .meter {
+        display: grid;
+        gap: 5px;
+      }
+      .meter .bar {
+        width: 180px;
+        height: 6px;
+        border-radius: 3px;
+        background: var(--line);
+        overflow: hidden;
+      }
+      .meter .bar i {
+        display: block;
+        height: 100%;
+        border-radius: 3px;
+        background: var(--ink);
+      }
+      .meter.boost .bar {
+        width: 90px;
+      }
+      .meter.boost .bar i {
+        background: var(--accent);
+      }
+      .pips {
+        display: flex;
+        gap: 4px;
+      }
+      .pips i {
+        width: 14px;
+        height: 6px;
+        border-radius: 2px;
+        background: var(--line);
+      }
+      .pips i.on {
+        background: var(--accent-glow);
+        box-shadow: 0 0 8px var(--accent);
+      }
+      .board {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: min(640px, calc(100vw - 32px));
+        padding: 26px 28px 22px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        backdrop-filter: blur(14px);
+      }
+      .board h2 {
+        margin: 0;
+        text-align: center;
+        font-size: 34px;
+        letter-spacing: 0.06em;
+      }
+      .board .final {
+        margin: 6px 0 18px;
+        text-align: center;
+        font-size: 15px;
+        font-weight: 700;
+        color: var(--muted);
+      }
+      .board .final .n {
+        font-size: 22px;
+        margin: 0 8px;
+      }
+      .teams {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 22px;
+      }
+      .teams table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 14px;
+      }
+      .teams th {
+        text-align: left;
+        font-size: 11px;
+        letter-spacing: 0.14em;
+        padding-bottom: 6px;
+        border-bottom: 1px solid var(--line);
+      }
+      .teams th:not(:first-child),
+      .teams td:not(:first-child) {
+        text-align: right;
+        width: 34px;
+        color: var(--muted);
+      }
+      .teams td {
+        padding: 7px 0;
+        font-weight: 600;
+        border-bottom: 1px solid var(--line);
+      }
+      .teams tr.you td:first-child::after {
+        content: ' · you';
+        color: var(--muted);
+        font-weight: 500;
+      }
+      .board .next {
+        margin-top: 16px;
+        text-align: center;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      [hidden] {
+        display: none !important;
+      }
       .loading {
         position: fixed;
         inset: 0;
@@ -129,6 +286,61 @@
   <body>
     <div class="loading" id="loading">Loading arena</div>
     <div class="hud">
+      <div class="score">
+        <span class="coral">CORAL</span><span class="n coral" id="coral">0</span
+        ><span class="clock" id="clock">0:00</span><span class="n violet" id="violet">0</span
+        ><span class="violet">VIOLET</span>
+      </div>
+      <div class="phase" id="phase"></div>
+      <div class="feed" id="feed"></div>
+      <div class="banner" id="banner" hidden><b id="banner-title"></b><span id="banner-sub"></span></div>
+      <div class="me" id="me" hidden>
+        <div class="meter">
+          <span>Hull</span>
+          <div class="bar"><i id="health"></i></div>
+        </div>
+        <div class="meter boost">
+          <span>Boost</span>
+          <div class="bar"><i id="boost"></i></div>
+        </div>
+        <div class="meter">
+          <span>Rail</span>
+          <div class="pips" id="rail"><i></i><i></i><i></i></div>
+        </div>
+      </div>
+      <div class="board" id="board" hidden>
+        <h2 id="board-title"></h2>
+        <div class="final">
+          <span class="coral">CORAL</span><span class="n coral" id="board-coral"></span>–<span
+            class="n violet"
+            id="board-violet"
+          ></span
+          ><span class="violet">VIOLET</span>
+        </div>
+        <div class="teams">
+          <table>
+            <thead>
+              <tr>
+                <th class="coral">CORAL</th>
+                <th>K</th>
+                <th>D</th>
+              </tr>
+            </thead>
+            <tbody id="board-coral-players"></tbody>
+          </table>
+          <table>
+            <thead>
+              <tr>
+                <th class="violet">VIOLET</th>
+                <th>K</th>
+                <th>D</th>
+              </tr>
+            </thead>
+            <tbody id="board-violet-players"></tbody>
+          </table>
+        </div>
+        <div class="next" id="board-next"></div>
+      </div>
       <div class="tag"><i></i><span id="where">felix-arena</span></div>
     </div>
     <script type="module" src="/src/play.ts"></script>

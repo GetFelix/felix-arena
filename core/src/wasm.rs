@@ -116,6 +116,13 @@ impl Prediction {
         shot.map(JsShot)
     }
 
+    /// Step without input, as the sim does a craft whose player is silent
+    /// or whose match is over.
+    pub fn coast(&mut self) {
+        crate::steer(&mut self.craft, None);
+        crate::separate(&mut self.craft, &self.others);
+    }
+
     /// A copy to step without changing this one.
     #[wasm_bindgen(js_name = clone)]
     pub fn copy(&self) -> Prediction {
@@ -161,6 +168,38 @@ impl JsShot {
 #[wasm_bindgen(js_name = boltReach)]
 pub fn bolt_reach() -> i32 {
     crate::CRAFT_RADIUS + crate::world::BOLT_RADIUS
+}
+
+/// The newest input in an input record, as its sequence number, move x,
+/// move z, aim and buttons, or `undefined` when the bytes are not a record.
+#[wasm_bindgen(js_name = decodeInput)]
+pub fn decode_input(record: &[u8]) -> Option<Vec<i32>> {
+    let input = crate::InputRecord::decode(record)?.inputs[0];
+    Some(vec![
+        i32::from(input.seq),
+        i32::from(input.move_x),
+        i32::from(input.move_z),
+        i32::from(input.aim),
+        i32::from(input.buttons),
+    ])
+}
+
+/// Ticks a destroyed craft waits to respawn.
+#[wasm_bindgen(js_name = respawnTicks)]
+pub fn respawn_ticks() -> u16 {
+    crate::world::RESPAWN_AFTER
+}
+
+/// Ticks the boost takes to cool down.
+#[wasm_bindgen(js_name = boostTicks)]
+pub fn boost_ticks() -> u8 {
+    crate::world::BOOST_COOLDOWN
+}
+
+/// Ticks a rail charges before it fires.
+#[wasm_bindgen(js_name = railChargeTicks)]
+pub fn rail_charge_ticks() -> u8 {
+    crate::world::RAIL_CHARGE
 }
 
 /// Bolt speed in centimetres a second.

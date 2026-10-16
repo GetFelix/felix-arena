@@ -158,3 +158,44 @@ jobs:
           node scripts/input-to-pixel.mjs 'http://127.0.0.1:4173/play.html?arena=alpha&as=ana&quality=low'
       - if: failure()
         run: docker compose -f dev/compose.yml logs --no-color
+
+  match:
+    name: match
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # A short match, so a whole one fits in the job: warmup, play, results and the next warmup.
+      - run: dev/up.sh
+        env:
+          SIM_WARMUP_SECONDS: '5'
+          SIM_MATCH_SECONDS: '45'
+          SIM_RESULTS_SECONDS: '12'
+          SIM_KILL_LIMIT: '10'
+          SIM_RAIL_SECONDS: '10'
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@0.2.129
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Two browsers and two bots play a whole match through the gateway
+        working-directory: web
+        run: |
+          npm ci
+          npm run core
+          npm run build
+          npx playwright install --with-deps chromium
+          npx vite preview --host 127.0.0.1 --port 4173 --strictPort &
+          for _ in $(seq 1 30); do curl -sf http://127.0.0.1:4173/play.html >/dev/null && break; sleep 1; done
+          npx vite-node scripts/match.ts -- http://127.0.0.1:4173/play.html shots
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: match-shots
+          path: web/shots
+      - if: failure()
+        run: docker compose -f dev/compose.yml logs --no-color

@@ -1,7 +1,19 @@
 // Muzzle flashes and hits in a live match, from fixed pools so nothing is allocated while playing. Each looks the way
 // the style frame's scripted fight draws it.
-import { type BufferAttribute, type Object3D, PointLight, type Sprite, Vector3 } from 'three';
+import {
+  AdditiveBlending,
+  type BufferAttribute,
+  CylinderGeometry,
+  Mesh,
+  MeshBasicMaterial,
+  type Object3D,
+  PlaneGeometry,
+  PointLight,
+  type Sprite,
+  Vector3,
+} from 'three';
 import { type Burst, burst, type CombatTextures, flash } from './combat';
+import { hdr } from './materials';
 import { palette } from './palette';
 
 /** How many of each effect a team can show at once. */
@@ -9,6 +21,12 @@ const FLASHES = 6;
 const BURSTS = 6;
 const FLASH_S = 0.07;
 const BURST_S = 0.9;
+const BEAMS = 3;
+const BEAM_S = 0.45;
+const BLASTS = 3;
+const BLAST_S = 0.5;
+/** Beams fly at muzzle height. */
+const BEAM_Y = 0.6;
 
 interface Shown<T> {
   item: T;
@@ -16,9 +34,19 @@ interface Shown<T> {
   where: Vector3;
 }
 
+interface Beam {
+  core: Mesh<CylinderGeometry, MeshBasicMaterial>;
+  glow: Mesh<PlaneGeometry, MeshBasicMaterial>;
+  end: Sprite;
+  from: Vector3;
+}
+
 interface Team {
   flashes: Shown<Sprite>[];
   bursts: Shown<Burst>[];
+  beams: Shown<Beam>[];
+  /** A destroyed craft: a large flash over a burst. */
+  blasts: Shown<{ flash: Sprite; burst: Burst }>[];
 }
 
 /** The effects of a match. Times are in seconds on the page's clock. */
@@ -38,6 +66,16 @@ export class Effects {
         at: -Infinity,
         where: new Vector3(),
       })),
+      beams: Array.from({ length: BEAMS }, () => ({
+        item: beam(fx, tex, colour),
+        at: -Infinity,
+        where: new Vector3(),
+      })),
+      blasts: Array.from({ length: BLASTS }, () => ({
+        item: { flash: flash(fx, tex, colour, 9), burst: burst(scene, fx, tex, colour, random) },
+        at: -Infinity,
+        where: new Vector3(),
+      })),
     });
     this.teams = [team(palette.coral), team(palette.violet)];
     this.lights = [0, 1, 2].map(() => {
@@ -45,7 +83,25 @@ export class Effects {
       scene.add(light);
       return light;
     });
-    for (const t of this.teams) for (const b of t.bursts) this.hideBurst(b.item);
+    for (const t of this.teams) {
+      for (const b of t.bursts) this.hideBurst(b.item);
+      for (const b of t.blasts) this.hideBurst(b.item.burst);
+    }
+  }
+
+  /** A rail beam of `violet`'s team from `(x0, z0)` to `(x1, z1)` in centimetres, at time `t`. */
+  railed(violet: boolean, x0: number, z0: number, x1: number, z1: number, t: number): void {
+    const slot = oldest(this.teams[violet ? 1 : 0].beams);
+    slot.at = t;
+    slot.item.from.set(x0 / 100, BEAM_Y, z0 / 100);
+    slot.where.set(x1 / 100, BEAM_Y, z1 / 100);
+  }
+
+  /** A craft of `violet`'s team destroyed at `(x, z)` in centimetres, at time `t`. */
+  destroyed(violet: boolean, x: number, z: number, t: number): void {
+    const slot = oldest(this.teams[violet ? 1 : 0].blasts);
+    slot.at = t;
+    slot.where.set(x / 100, 0.7, z / 100);
   }
 
   /** A muzzle flash at `(x, z)` in centimetres, at time `t`. */
@@ -86,6 +142,41 @@ export class Effects {
         showBurst(b.item, b.where, h);
         if (h < 0.25) glows.push({ level: 22 * (1 - h / 0.25), where: b.where, colour });
       }
+      for (const b of team.beams) {
+        const h = t - b.at;
+        const { core, glow, end, from } = b.item;
+        const live = h >= 0 && h < BEAM_S;
+        core.visible = glow.visible = end.visible = live;
+        if (!live) continue;
+        const fade = 1 - h / BEAM_S;
+        const length = Math.max(0.01, from.distanceTo(b.where));
+        const angle = Math.atan2(b.where.z - from.z, b.where.x - from.x);
+        for (const mesh of [core, glow]) {
+          mesh.position.copy(from).lerp(b.where, 0.5);
+          mesh.rotation.set(0, -angle, 0);
+          mesh.scale.set(length, 1, 1);
+        }
+        core.scale.set(length, 1 + h * 2, 1 + h * 2);
+        core.material.opacity = fade;
+        glow.material.opacity = fade * fade;
+        end.position.copy(b.where);
+        end.material.opacity = fade;
+        glows.push({ level: 26 * fade, where: b.where, colour });
+      }
+      for (const b of team.blasts) {
+        const h = t - b.at;
+        if (h < 0 || h >= BURST_S) {
+          this.hideBurst(b.item.burst);
+          b.item.flash.visible = false;
+          continue;
+        }
+        showBurst(b.item.burst, b.where, h);
+        b.item.flash.visible = h < BLAST_S;
+        b.item.flash.position.copy(b.where);
+        b.item.flash.material.opacity = Math.max(0, 1 - h / BLAST_S);
+        b.item.flash.scale.setScalar(6 + h * 10);
+        if (h < 0.4) glows.push({ level: 40 * (1 - h / 0.4), where: b.where, colour });
+      }
     });
     glows.sort((a, b) => b.level - a.level);
     this.lights.forEach((light, i) => {
@@ -101,6 +192,23 @@ export class Effects {
     b.sparks.visible = b.ring.visible = b.f.visible = false;
     for (const d of b.debris) d.m.visible = false;
   }
+}
+
+/** A rail beam along +x, one unit long, scaled to its length when shown. */
+function beam(fx: Object3D, tex: CombatTextures, colour: string): Beam {
+  const additive = { transparent: true, blending: AdditiveBlending, depthWrite: false } as const;
+  const core = new Mesh(
+    new CylinderGeometry(0.045, 0.045, 1, 8, 1, true).rotateZ(Math.PI / 2),
+    new MeshBasicMaterial({ color: hdr(colour, 7), ...additive }),
+  );
+  const glow = new Mesh(
+    new PlaneGeometry(1, 1.1).rotateX(-Math.PI / 2),
+    new MeshBasicMaterial({ map: tex.glow, color: hdr(colour, 1.8), ...additive }),
+  );
+  const end = flash(fx, tex, colour, 3.2);
+  core.visible = glow.visible = false;
+  fx.add(core, glow);
+  return { core, glow, end, from: new Vector3() };
 }
 
 function oldest<T>(shown: Shown<T>[]): Shown<T> {

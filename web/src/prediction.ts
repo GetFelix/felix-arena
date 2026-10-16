@@ -51,6 +51,8 @@ const MATCH = 3;
 
 interface Sent extends Control {
   seq: number;
+  /** Sent while the match was over, so the sim lets the craft coast. */
+  coast: boolean;
 }
 
 interface Shot {
@@ -85,6 +87,8 @@ export class Own {
   private live: Control = { moveX: 0, moveZ: 0, aim: 0, buttons: 0 };
   private shots: Shot[] = [];
   private confirmed = false;
+  /** The match is over and the sim ignores inputs. */
+  frozen = false;
 
   constructor(readonly slot: number) {}
 
@@ -95,11 +99,15 @@ export class Own {
 
   /** Step the craft by the input `seq` as it is sent at `nowMs`. */
   send(seq: number, control: Control, nowMs: number): void {
-    this.pending.push({ seq, ...control });
+    this.pending.push({ seq, ...control, coast: this.frozen });
     if (this.pending.length > KEEP) this.pending.shift();
     if (!this.state) return;
-    const shot = this.state.step(seq, control.moveX, control.moveZ, control.aim, control.buttons);
     this.steppedMs = nowMs;
+    if (this.frozen) {
+      this.state.coast();
+      return;
+    }
+    const shot = this.state.step(seq, control.moveX, control.moveZ, control.aim, control.buttons);
     if (shot) {
       this.shots.push({
         seq,
@@ -136,7 +144,10 @@ export class Own {
     if (this.confirmed) this.pending = this.pending.filter((input) => after(input.seq, lastInput));
     const next = new Prediction(craft);
     next.among(tick);
-    for (const input of this.pending) next.step(input.seq, input.moveX, input.moveZ, input.aim, input.buttons)?.free();
+    for (const input of this.pending) {
+      if (input.coast) next.coast();
+      else next.step(input.seq, input.moveX, input.moveZ, input.aim, input.buttons)?.free();
+    }
     for (const c of crafts) c.free();
     this.state?.free();
     this.state = next;
@@ -257,8 +268,10 @@ export class Own {
     const state = this.state!;
     const base = state.craft;
     const ahead = state.clone();
-    const { moveX, moveZ, aim } = this.live;
-    ahead.step(0, moveX, moveZ, aim, 0)?.free();
+    const { moveX, moveZ } = this.live;
+    const aim = this.frozen ? base.heading : this.live.aim;
+    if (this.frozen) ahead.coast();
+    else ahead.step(0, moveX, moveZ, aim, 0)?.free();
     const next = ahead.craft;
     const f = Math.min(1, Math.max(0, (nowMs - this.steppedMs) / TICK_MS));
     const out: OwnCraft = {

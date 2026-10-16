@@ -39,6 +39,9 @@ export interface CraftState {
   heading: number;
   health: number;
   lastInput: number;
+  /** Rail shots left, and ticks until a charging rail fires. */
+  rail: number;
+  charge: number;
 }
 
 /** A bolt as a tick has it. */
@@ -76,6 +79,8 @@ export function snapshot(tick: Tick): Snapshot {
       heading: c.heading,
       health: c.health,
       lastInput: c.lastInput,
+      rail: c.rail,
+      charge: c.charge,
     })),
     bolts: bolts.map((b) => ({ id: b.id, owner: b.owner, x: b.x, z: b.z, heading: b.heading })),
   };

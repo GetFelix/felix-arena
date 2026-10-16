@@ -1,19 +1,34 @@
 // The live game. `?arena=` picks the arena and `?as=` the dev IdP user to play as; `?quality=low` draws without
 // post processing or shadows. The style frame at / stays the frozen scene it was ported as.
-import { Clock, Color, Fog, Group, Scene } from 'three';
+import { Clock, Color, Fog, Group, Scene, Vector3 } from 'three';
 import { buildArena } from './arena';
 import { hdriUrl, modelUrls } from './assets';
 import { Bolts, type BoltView } from './bolts';
 import { ArenaCamera } from './camera';
 import { Controls } from './controls';
-import { arenaLayout, boltReach, decodeTick, Inputs, loadCore, playerKey, type Tick } from './core';
+import {
+  arenaLayout,
+  boltReach,
+  boostTicks,
+  decodeTick,
+  Inputs,
+  loadCore,
+  playerKey,
+  railChargeTicks,
+  respawnTicks,
+  type Tick,
+} from './core';
 import { Effects } from './effects';
 import { type CraftView, Fleet } from './fleet';
 import { Gateway } from './gateway';
+import { type Link, Offline, OFFLINE_PRINCIPAL } from './offline';
+import { Hud } from './hud';
 import { Interpolator, snapshot } from './interpolation';
 import { addLights, loadEnvironment } from './lighting';
+import { Match } from './match';
 import { ModelLibrary } from './models';
 import { palette, setCssColours } from './palette';
+import { Pickup } from './pickup';
 import { Own, Pacer } from './prediction';
 import { seeded } from './random';
 import { createRenderer, Post } from './renderer';
@@ -25,6 +40,8 @@ const USER = params.get('as') ?? 'ana';
 const GATEWAY = params.get('gateway') ?? 'ws://127.0.0.1:8787/ws';
 const IDP = params.get('idp') ?? 'http://127.0.0.1:9400';
 const LOW = params.get('quality') === 'low';
+/** Play against bots with the sim in the page, without the dev stack: `?offline`, with `&warmup=`, `&length=` and `&results=` in seconds. */
+const OFFLINE = params.has('offline');
 
 /** What the page exposes for tests and the dev console. */
 export interface ArenaDebug {
@@ -37,6 +54,11 @@ export interface ArenaDebug {
   ticks: number;
   /** Where your craft is drawn, in centimetres. */
   own: { x: number; z: number; heading: number } | null;
+  match: { number: number; phase: string; seconds: number; scores: [number, number]; railIn: number } | null;
+  /** Every craft as drawn: centimetres. */
+  crafts: { slot: number; violet: boolean; alive: boolean; x: number; z: number }[];
+  /** Where a point on the floor, in centimetres, is on screen, in CSS pixels. */
+  screenOf: (x: number, z: number) => { x: number; y: number };
 }
 
 declare global {
@@ -57,7 +79,15 @@ async function principal(token: string): Promise<string> {
 
 async function main(): Promise<void> {
   setCssColours();
-  const debug: ArenaDebug = { inputToPixel: [], slot: null, ticks: 0, own: null };
+  const debug: ArenaDebug = {
+    inputToPixel: [],
+    slot: null,
+    ticks: 0,
+    own: null,
+    match: null,
+    crafts: [],
+    screenOf: () => ({ x: 0, y: 0 }),
+  };
   window.arena = debug;
 
   const renderer = createRenderer();
@@ -82,6 +112,13 @@ async function main(): Promise<void> {
   const fleet = new Fleet(scene, fx, models, { glow, blob: blobTexture() });
   const bolts = new Bolts(fx, glow);
   const effects = new Effects(scene, fx, { glow, flare: flareTexture() }, seeded(1));
+  const pickup = new Pickup(fx, glow, arena.crystalLight);
+  const hud = new Hud();
+  const match = new Match();
+  debug.screenOf = (x, z) => {
+    const p = new Vector3(x / 100, 0.6, z / 100).project(view.camera);
+    return { x: ((p.x + 1) / 2) * innerWidth, y: ((1 - p.y) / 2) * innerHeight };
+  };
   const post = LOW ? null : new Post(renderer, scene, view.camera, fx);
   const controls = new Controls(renderer.domElement);
   addEventListener('resize', () => {
@@ -92,15 +129,23 @@ async function main(): Promise<void> {
 
   const status = document.getElementById('loading')!;
   status.textContent = `Joining ${ARENA}`;
-  const token = (
-    (await (await fetch(`${IDP}/token?sub=${encodeURIComponent(USER)}&aud=felix-arena`)).json()) as {
-      id_token: string;
-    }
-  ).id_token;
-  const key = playerKey(await principal(token));
-  const gateway = await Gateway.connect(GATEWAY, ARENA, token);
+  let gateway: Link;
+  let key: string;
+  if (OFFLINE) {
+    const seconds = (name: string, fallback: number) => Number(params.get(name) ?? fallback);
+    gateway = new Offline(seconds('warmup', 10), seconds('length', 300), seconds('results', 15));
+    key = playerKey(OFFLINE_PRINCIPAL);
+  } else {
+    const token = (
+      (await (await fetch(`${IDP}/token?sub=${encodeURIComponent(USER)}&aud=felix-arena`)).json()) as {
+        id_token: string;
+      }
+    ).id_token;
+    key = playerKey(await principal(token));
+    gateway = await Gateway.connect(GATEWAY, ARENA, token);
+  }
   gateway.onError = (err) => {
-    status.textContent = `${err.code}: ${err.message}`;
+    status.textContent = String(err.message);
   };
 
   const interpolator = new Interpolator();
@@ -108,7 +153,9 @@ async function main(): Promise<void> {
   const inputs = new Inputs(Math.floor(Math.random() * 65536));
   let own: Own | null = null;
   /** Events waiting for the render time to reach their tick, oldest first. */
-  const due: { tick: number; kind: string; slot: number; by: number }[] = [];
+  const due: { tick: number; kind: string; slot: number; by: number; x: number; z: number; target?: number }[] = [];
+  /** When your craft respawns, on the page's clock, while it is destroyed. */
+  let respawnAt: number | null = null;
 
   const onTick = (tick: Tick, arrivedMs: number) => {
     debug.ticks++;
@@ -131,10 +178,15 @@ async function main(): Promise<void> {
     const mine = own && s.crafts.find((c) => c.slot === own!.slot);
     pacer.tick(s.tick, arrivedMs, mine ? mine.lastInput : null);
     for (const e of tick.events) {
-      if (!(e.kind === 'fired' && e.slot === own?.slot))
-        due.push({ tick: s.tick, kind: e.kind, slot: e.slot, by: e.by });
+      if (!(e.kind === 'fired' && e.slot === own?.slot)) {
+        due.push({ tick: s.tick, kind: e.kind, slot: e.slot, by: e.by, x: e.x, z: e.z, target: e.target });
+      }
+      if (e.kind === 'killed' && e.slot === own?.slot) respawnAt = arrivedMs + (respawnTicks() * 1000) / 30;
       e.free();
     }
+    if (mine?.alive) respawnAt = null;
+    match.update(tick, arrivedMs);
+    if (own) own.frozen = match.phase === 'results';
     own?.reconcile(tick, arrivedMs);
   };
   await gateway.subscribe('ticks', 'live', 'live', (frame) => {
@@ -161,9 +213,10 @@ async function main(): Promise<void> {
   }, 4);
 
   status.remove();
-  document.getElementById('where')!.textContent = `${ARENA} · playing as ${USER}`;
+  document.getElementById('where')!.textContent = OFFLINE ? 'offline, against bots' : `${ARENA} · playing as ${USER}`;
   const clock = new Clock();
   let shown: number | null = null;
+  let lastT = 0;
   renderer.setAnimationLoop(() => {
     const now = performance.now();
     const frameStart = now;
@@ -175,10 +228,15 @@ async function main(): Promise<void> {
     const ownNow = own?.draw(now) ?? null;
     debug.own = ownNow && { x: ownNow.x, z: ownNow.z, heading: ownNow.heading };
 
-    const crafts: CraftView[] = (frame?.crafts ?? []).map((c) =>
-      c.slot === own?.slot && ownNow ? { ...c, ...ownNow, slot: c.slot, violet: c.violet } : c,
-    );
+    const charging = railChargeTicks();
+    const crafts: CraftView[] = (frame?.crafts ?? []).map((c) => {
+      const charge = c.charge > 0 ? 1 - c.charge / charging : 0;
+      return c.slot === own?.slot && ownNow
+        ? { ...c, ...ownNow, slot: c.slot, violet: c.violet, charge }
+        : { ...c, charge };
+    });
     fleet.update(crafts, t);
+    debug.crafts = crafts.map(({ slot, violet, alive, x, z }) => ({ slot, violet, alive, x, z }));
 
     const claimed = own?.claimed ?? new Set<number>();
     const drawn: BoltView[] = [];
@@ -204,17 +262,47 @@ async function main(): Promise<void> {
       const e = due.shift()!;
       const at = crafts.find((c) => c.slot === e.slot);
       if (!at) continue;
+      const angle = (at.heading / 65536) * 2 * Math.PI;
+      const nose = [at.x + Math.cos(angle) * 130, at.z + Math.sin(angle) * 130] as const;
       if (e.kind === 'fired') {
-        const angle = (at.heading / 65536) * 2 * Math.PI;
-        effects.fired(at.violet, at.x + Math.cos(angle) * 130, at.z + Math.sin(angle) * 130, t);
+        effects.fired(at.violet, nose[0], nose[1], t);
       } else if (e.kind === 'hit') {
         effects.hit(violet.get(e.by) ?? !at.violet, at.x, at.z, t);
+      } else if (e.kind === 'railed') {
+        effects.railed(at.violet, nose[0], nose[1], e.x, e.z, t);
+        effects.fired(at.violet, nose[0], nose[1], t);
+      } else if (e.kind === 'killed') {
+        effects.destroyed(at.violet, at.x, at.z, t);
       }
     }
     effects.update(t);
 
     arena.crystal.rotation.y = t * 0.2;
-    arena.crystalLight.intensity = 9 + Math.sin(t * 1.7) * 1.5;
+    pickup.update(match.railIn === 0 && match.phase !== 'results', t, t - lastT);
+    lastT = t;
+    debug.match = {
+      number: match.number,
+      phase: match.phase,
+      seconds: match.seconds,
+      scores: match.scores,
+      railIn: match.railIn,
+    };
+    const newestOwn = own && interpolator.newest?.crafts.find((c) => c.slot === own!.slot);
+    hud.update(
+      match,
+      own && newestOwn && ownNow
+        ? {
+            slot: own.slot,
+            alive: ownNow.alive,
+            health: ownNow.health,
+            boostCooling: ownNow.boostCooldown / boostTicks(),
+            rail: newestOwn.rail,
+            respawnIn: respawnAt === null ? null : (respawnAt - now) / 1000,
+          }
+        : null,
+      controls.scoreboard,
+      now,
+    );
     view.update(t);
     const updated = performance.now();
     if (post) post.render(t);

@@ -45,6 +45,24 @@ frame it describes, [prototype/style-frame.html](../prototype/style-frame.html).
 | Respawn | 5 seconds, at your team's spawn zone. The kill cam fills that wait |
 | Arena | 40 by 28 metres, walled, point-symmetric cover so neither side is better |
 
+**The match loop.** The warmup is free play: kills there do not count, and its
+clock waits until two players are in. When it runs out, scores, kills and
+deaths reset, bolts are cleared and every craft starts at its spawn. The match
+ends at its time or when a team reaches the kill limit. During results the
+sim ignores inputs, though it still counts them as applied, and crafts coast;
+then the next match's warmup starts with the same players and the next match
+number. The sim's `SIM_WARMUP_SECONDS`, `SIM_MATCH_SECONDS`,
+`SIM_RESULTS_SECONDS`, `SIM_KILL_LIMIT` and `SIM_RAIL_SECONDS` set the lengths,
+for tests that cannot wait five minutes.
+
+**The rail.** The crystal stands on a plinth 2.3 m across, which crafts and
+bolts collide with. When a rail is there, the first live craft that comes
+within 40 cm of touching the plinth takes it, with three shots, and the next
+appears 30 seconds later. Firing a held rail charges it for half a second,
+during which the craft keeps moving and aiming; then a beam goes from its nose
+along its aim to the first enemy craft whose edge is within 0.6 m of it, or the
+first wall or cover. Dying loses the rail.
+
 **Controls.** WASD or the left stick moves; the craft strafes, so it always
 faces where you aim. The mouse or the right stick aims. Left click or the right
 trigger fires. Space or the left trigger boosts: a short dash with a 3 second
@@ -296,14 +314,17 @@ without the ones before it:
 |---|---|---|
 | Header | Epoch (2 bytes), flags with the keyframe bit (1) and the timed bit (2), reserved (1), match number (4), tick number (4), little-endian | 12 bytes |
 | Timing, with the timed bit | Commit start in µs since the Unix epoch (8), the sim step (4), the previous tick's commit in µs (4) | 16 bytes |
-| Crafts | A count (1), then per craft: slot (1), flags with alive, team and the fire cooldown (1), position and velocity in centimetres (4 × 2), heading (2), health (1), boost cooldown (1), last input sequence applied (2) | 16 bytes each |
+| Match | Phase: warmup, playing or results (1), ticks left in the phase (2), team scores (2 × 2), ticks until a rail is on the crystal, 0 while one is (2) | 9 bytes |
+| Crafts | A count (1), then per craft: slot (1), flags with alive, team and the fire cooldown (1), position and velocity in centimetres (4 × 2), heading (2), health (1), boost cooldown (1), last input sequence applied (2), rail shots in the low 2 bits and rail charge ticks above them (1) | 17 bytes each |
 | Projectiles | A count (2), then per live bolt: id (2), owner (1), position (4), heading (2) | 9 bytes each |
-| Events | A count (2), then each a kind byte and its fields: joined (slot, team, player key), left, spawned, fired (slot, bolt, input sequence), hit (target, attacker, bolt, damage), killed (victim, killer) | 2 to 11 bytes each |
-| Keyframe only | Team scores (4), then the roster: per player, slot, team, player key, kills and deaths | 5 + 14 bytes a player |
+| Events | A count (2), then each a kind byte and its fields: joined (slot, team, player key), left, spawned, fired (slot, bolt, input sequence), hit (target, attacker, bolt, damage), killed (victim, killer), picked up (slot), railed (slot, target or 255, where the beam ended) | 2 to 11 bytes each |
+| Keyframe only | The roster: a count (1), then per player, slot, team, player key, kills and deaths | 1 + 14 bytes a player |
 
 A player key is the FNV-1a hash of the player's Felix principal, so a client
-finds its own craft without ticks carrying principals. The match clock and
-pickup timers join the keyframe with the match loop and the rail.
+finds its own craft without ticks carrying principals. The match's phase,
+clock, scores and rail timer are in every tick, so any one tick can draw the
+HUD; kills and deaths are on the keyframe's roster, and the page counts the
+`killed` events since it.
 
 A busy tick with 8 crafts and 30 bolts is about 450 bytes; a typical one is
 under 300. A 5-minute match is about 3 MB of log.

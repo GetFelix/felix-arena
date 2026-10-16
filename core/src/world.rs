@@ -228,8 +228,13 @@ impl World {
         let over = self.state.phase == Phase::Results;
         for i in 0..self.crafts.len() {
             let slot = self.crafts[i].slot;
+            let mut control = input(slot);
             // After a match, crafts coast and nobody fires until the warmup.
-            let control = input(slot).filter(|_| !over);
+            // The input still counts as applied, so a client knows it was
+            // heard.
+            if over && let Some(ignored) = control.take() {
+                self.crafts[i].last_input = ignored.seq;
+            }
             self.step_craft(i, control);
         }
         self.separate_crafts();
