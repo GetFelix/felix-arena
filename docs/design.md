@@ -511,8 +511,27 @@ rejected, because you were already dead, fades out.
 
 **Everyone else is interpolated.** Other crafts and bolts are drawn between the
 two ticks around a render time that runs two ticks (67 ms) behind the newest
-received. The buffer grows to 100 ms when arrival jitter rises. One or two
-missing ticks are bridged by interpolating across them.
+received (`web/src/interpolation.ts`). The page's clock for the sim is the
+earliest arrival over the last two seconds, the tick the network delayed
+least. The delay is one tick plus the 95th percentile of how much later than
+that the ticks arrived, plus 10 ms, kept between 67 and 100 ms, so it grows
+toward 100 ms when arrival jitter rises. The render time follows its target at
+most 10% faster or slower than real time, so a change in the delay never shows
+as a jump.
+
+One missing tick is bridged inside the two-tick delay by interpolating across
+it. With two missing, the tick after them arrives a tick too late, so for up
+to one tick the crafts carry on at the pace they last moved, and that guess is
+blended into the real ticks over 100 ms. A death, a respawn or a move of more
+than 3 m is shown at the tick it happened, not slid into.
+
+The tests hold this to numbers. `web/src/interpolation.test.ts` records thirty
+seconds of a four-player fight from core's own world, delivers it with jitter
+and one tick in twenty lost (some two in a row), and draws it at 60 frames a
+second: no frame moves a craft more than 4 cm beyond the furthest it moved in a
+tick around that moment, none stalls, and no craft is drawn more than 40 cm
+from where the ticks put it. The dev stack's smoke run does the same with ticks
+that crossed the gateway, at the times they really arrived.
 
 **No lag compensation.** Rewinding hitboxes to what the shooter saw matters for
 hitscan weapons with small targets. Blaster bolts travel and are judged by the
