@@ -81,15 +81,28 @@ dev/up.sh
 docker compose -f dev/compose.yml logs -f sim   # or podman compose
 ```
 
+The ticks page follows one arena's tick stream through the gateway, showing
+each tick's offset and number as it arrives:
+
+```bash
+cd web && npm install && npm run dev
+# open http://localhost:5173/ticks.html?arena=alpha
+```
+
+`?as=` picks the dev user to sign in as (default `cleo`, who may only watch).
+`npm run smoke` checks the same path from Node: ticks arrive at 30 Hz, and a
+replay slot reads the same records while the live one keeps going.
+
 ## How it works
 
 Three processes will sit around Felix: the browser client, a stateless
 gateway that bridges WebSocket to Felix's QUIC protocol, and a Rust simulation
 that is the single authority for each arena, stepping it at 30 Hz. The client
 and the simulation are this project's own. The gateway is
-[felix-gateway](https://github.com/GetFelix/felix-gateway) with game-shaped
-changes (binary frames, a second subscription slot for replays), shipped in
-this project's own image, which also serves the web client. The game rules live in one Rust crate, linked by the simulation and
+[felix-gateway](https://github.com/GetFelix/felix-gateway), whose
+`binary_events` and `slots` features carry the game's ticks as binary frames
+and let a replay run beside the live view. It will ship in this project's own
+image, which also serves the web client. The game rules live in one Rust crate, linked by the simulation and
 compiled to WebAssembly for the browser's prediction, so the two cannot
 disagree about the rules.
 

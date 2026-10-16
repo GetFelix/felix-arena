@@ -80,5 +80,15 @@ jobs:
           done
           echo "the sim did not report 30 Hz for both arenas" >&2
           exit 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Ticks reach a WebSocket client through the gateway
+        working-directory: web
+        run: |
+          npm ci
+          npm run smoke
       - if: failure()
         run: docker compose -f dev/compose.yml logs --no-color
