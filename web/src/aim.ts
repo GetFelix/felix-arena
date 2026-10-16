@@ -16,7 +16,7 @@ import { palette } from './palette';
 
 /** How far ahead of a craft's centre its nose is, in metres. */
 const NOSE = 1.3;
-const WIDTH = 0.16;
+const WIDTH = 0.12;
 /** The line stops this many CSS pixels short of the reticle's centre, outside its ring. */
 const GAP_PX = 15;
 
@@ -75,7 +75,7 @@ export class Aim {
     this.line.visible = false;
     fx.add(this.line);
     // Faint enough to stay under the bloom threshold: a guide, not an effect.
-    this.colours = [hdr(palette.coral, 0.5), hdr(palette.violet, 0.5)];
+    this.colours = [hdr(palette.coral, 0.3), hdr(palette.violet, 0.3)];
   }
 
   update(view: AimView, camera: PerspectiveCamera): void {
