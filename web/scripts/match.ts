@@ -27,6 +27,9 @@ type Arena = Pick<ArenaDebug, 'slot' | 'own' | 'match' | 'crafts' | 'phases'>;
 loadCore(readFileSync(new URL('../src/core/felix_arena_core_bg.wasm', import.meta.url)));
 
 /** A bot: a gateway session that reads ticks and steers its craft as the offline bots do. */
+/** Each bot's slot once it has found itself. */
+const botSlots = new Map<string, number | null>();
+
 async function bot(user: string): Promise<() => void> {
   const answer = await fetch(`${IDP}/token?sub=${user}&aud=felix-arena`);
   const token = ((await answer.json()) as { id_token: string }).id_token;
@@ -49,6 +52,7 @@ async function bot(user: string): Promise<() => void> {
     }));
     // A bot knows itself as the craft its inputs drive.
     slot ??= crafts.find((c) => c.lastInput !== 0 && Math.abs(c.lastInput - inputs.seq) < 10)?.slot ?? null;
+    botSlots.set(user, slot);
     const me = crafts.find((c) => c.slot === slot);
     control = me?.alive && tick.phase === 'playing' ? drive(me, crafts, state, tick.railIn === 0) : [0, 0, 0, 0];
     tick.free();
@@ -186,6 +190,9 @@ while (!done && Date.now() - started < LIMIT_MS) {
   await sleep(120);
 }
 
+const who = async (page: Page) =>
+  page.evaluate(() => ({ slot: window.arena!.slot, ticks: window.arena!.ticks, hidden: document.hidden }));
+console.log('ana:', await who(ana), 'ben:', await who(ben), 'bots:', Object.fromEntries(botSlots));
 const board = await ana.evaluate(() => ({
   title: document.getElementById('board-title')?.textContent,
   coral: document.getElementById('board-coral-players')?.textContent,
