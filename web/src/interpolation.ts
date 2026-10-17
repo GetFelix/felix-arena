@@ -248,7 +248,8 @@ function lateness(arrivals: number[]): number {
   return late[Math.floor((late.length - 1) * 0.95)]!;
 }
 
-function between(a: Snapshot, b: Snapshot, f: number): CraftState[] {
+/** The crafts `f` of the way from tick `a` to tick `b`. */
+export function between(a: Snapshot, b: Snapshot, f: number): CraftState[] {
   // A craft that left is drawn until the tick that drops it; one that joined appears at its first tick.
   return a.crafts.map((from) => {
     const to = b.crafts.find((c) => c.slot === from.slot);
@@ -266,7 +267,8 @@ function between(a: Snapshot, b: Snapshot, f: number): CraftState[] {
   });
 }
 
-function boltsBetween(a: Snapshot, b: Snapshot, f: number): BoltState[] {
+/** The bolts `f` of the way from tick `a` to tick `b`. */
+export function boltsBetween(a: Snapshot, b: Snapshot, f: number): BoltState[] {
   const out: BoltState[] = [];
   for (const from of a.bolts) {
     const to = b.bolts.find((bolt) => bolt.id === from.id);

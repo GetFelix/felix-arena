@@ -90,7 +90,7 @@ services:
         condition: service_completed_successfully
 
   gateway:
-    image: ghcr.io/getfelix/felix-gateway:0.5.0
+    image: ghcr.io/getfelix/felix-gateway:0.6.0
     environment:
       GATEWAY_FELIX_BROKERS: broker:5000
       GATEWAY_FELIX_CA_FILE: /state/broker-cert.pem
@@ -104,6 +104,9 @@ services:
     volumes:
       - ./scope.toml:/etc/felix-gateway/scope.toml:ro
       - ./state:/state:ro
+    # The broker writes the certificate the gateway trusts a moment after it
+    # starts; a gateway that starts first exits, and is started again.
+    restart: on-failure
     depends_on:
       broker:
         condition: service_started

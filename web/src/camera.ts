@@ -1,4 +1,4 @@
-import { type Fog, MathUtils, PerspectiveCamera } from 'three';
+import { type Fog, MathUtils, PerspectiveCamera, Vector3 } from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 /** About 56 degrees above the floor. */
@@ -73,11 +73,27 @@ export class ArenaCamera {
     camera.updateProjectionMatrix();
   }
 
-  /** Moves the camera to time `t` unless the player has taken it. */
-  update(t: number): void {
+  /** The distance from the arena's centre and the angle about y the camera rests at. */
+  get resting(): { radius: number; yaw: number } {
+    return { radius: this.radius, yaw: this.yawBase };
+  }
+
+  /**
+   * Moves the camera to time `t` unless the player has taken it. With a `pose`, the camera is `weight` of the way
+   * from where it rests to that pose, for the kill cam.
+   */
+  update(t: number, pose?: { position: Vector3; target: Vector3 }, weight = 0): void {
     if (!this.userMoved) {
       placeCamera(this.camera, this.radius, this.yawBase + (this.fixed ? 0 : Math.sin(t * 0.07) * 0.45));
     }
+    if (pose && weight > 0) {
+      this.look.set(0, 0, 0).lerp(pose.target, weight);
+      this.camera.position.lerp(pose.position, weight);
+      this.camera.lookAt(this.look);
+      return;
+    }
     this.controls.update();
   }
+
+  private readonly look = new Vector3();
 }

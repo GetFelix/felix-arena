@@ -27,6 +27,9 @@ import { type EventFrame, Gateway, GatewayError } from './gateway';
 import { botCount, botLevel, botTag } from './bots';
 import { type Link, Offline, OFFLINE_PRINCIPAL } from './offline';
 import { Hud } from './hud';
+import { KillCam, type KillCamTimes, Markers } from './killcam';
+import { KillRig } from './killcam-rig';
+import type { KillRef, Page, Reader } from './replay';
 import { joinFromKeyframe, type JoinTimes } from './join';
 import { Interpolator, snapshot } from './interpolation';
 import { addLights, loadEnvironment } from './lighting';
@@ -117,6 +120,22 @@ export interface ArenaDebug {
     | null;
   /** The newest tick taken, live or folded. */
   newestTick: number | null;
+  /** Each kill cam this page ran, oldest first: the timing of each step, and the bytes it replayed hashed. */
+  killcams: (KillCamTimes & {
+    from: number;
+    ticks: number;
+    first: number | null;
+    last: number | null;
+    hash: string | null;
+    /** The read of the second after the kill has finished. */
+    complete: boolean;
+  })[];
+  /** The kill cam's state now: `off`, `beat`, `replay` or `leaving`. */
+  killcam: string;
+  /** The replay's tick time and its kill's tick, while one plays. */
+  replayAt: { r: number; kill: number } | null;
+  /** For screenshots: hold the replay at its current moment, or let it play. */
+  holdReplay: (held: boolean) => void;
   /** The state each recent tick folded to, by `epoch/tick`: the tick's hash and the match's digest. */
   states: Record<string, string>;
 }
@@ -125,6 +144,15 @@ declare global {
   interface Window {
     arena?: ArenaDebug;
   }
+}
+
+/** FNV-1a, 64 bits, over `chunks` in order, as 16 hex digits: what a page replayed, to compare with another's. */
+function fnv64(chunks: Uint8Array[]): string {
+  let hash = 0xcbf29ce484222325n;
+  for (const chunk of chunks) {
+    for (const byte of chunk) hash = BigInt.asUintN(64, (hash ^ BigInt(byte)) * 0x100000001b3n);
+  }
+  return hash.toString(16).padStart(16, '0');
 }
 
 /** The Felix principal of an ID token's holder: hex SHA-256 of `issuer|subject`, as Felix's control plane keys it. */
@@ -155,6 +183,10 @@ async function main(): Promise<void> {
     join: null,
     states: {},
     newestTick: null,
+    killcams: [],
+    killcam: 'off',
+    replayAt: null,
+    holdReplay: () => {},
   };
   window.arena = debug;
 
@@ -181,6 +213,17 @@ async function main(): Promise<void> {
   const pickup = new Pickup(fx, glow, arena.crystalLight);
   const hud = new Hud();
   const match = new Match();
+  const killcam = new KillCam(() => {
+    const { radius, yaw } = view.resting;
+    return new KillRig(view.camera.fov, view.camera.aspect, radius, yaw);
+  }, new Markers(fx));
+  debug.holdReplay = (held) => {
+    killcam.held = held;
+  };
+  addEventListener('keydown', (event) => {
+    if (killcam.state === 'off') return;
+    if (event.code === 'Space' || event.code === 'Escape') killcam.skip(performance.now());
+  });
   debug.screenOf = (x, z) => {
     const p = new Vector3(x / 100, GUN_HEIGHT, z / 100).project(view.camera);
     return { x: ((p.x + 1) / 2) * innerWidth, y: ((1 - p.y) / 2) * innerHeight };
@@ -271,8 +314,59 @@ async function main(): Promise<void> {
     recordState(tick);
   };
 
-  const onTick = (tick: Tick, arrivedMs: number) => {
+  /**
+   * The offline sim keeps no log, so the page keeps the last 40 s of its ticks to replay from. A replay through
+   * Felix is always a fresh read of the log; this stand-in exists so the kill cam can be seen without the dev stack.
+   */
+  const localLog = new Map<number, { tick: number; payload: Uint8Array }>();
+  const localReader: Reader = {
+    read: (_stream, from, end, max = 0) => {
+      const records: Page['records'] = [];
+      let next = from;
+      while (localLog.has(next) && (end === null || next < end) && (max === 0 || records.length < max)) {
+        records.push({ offset: next, payload: localLog.get(next)!.payload });
+        next++;
+      }
+      return Promise.resolve({ records, nextOffset: next });
+    },
+  };
+  const reader = (): Reader => ('read' in gateway ? (gateway as Gateway) : localReader);
+  /** Where a kill in `tick` at `offset` replays from: the offset its event names, or offline, three seconds back. */
+  const replayFrom = (named: number | undefined, tick: number): number | null => {
+    if (named !== undefined) return named;
+    if (!OFFLINE) return null;
+    let best: number | null = null;
+    for (const [offset, held] of localLog)
+      if (held.tick >= tick - 90 && (best === null || offset < best)) best = offset;
+    return best;
+  };
+
+  /** Every kill cam run, for {@link ArenaDebug.killcams}. */
+  const runs: { times: KillCamTimes; kill: KillRef }[] = [];
+  Object.defineProperty(debug, 'killcams', {
+    get: () =>
+      runs.map((run) => {
+        const replay = killcam.replayOf(run.times);
+        const bytes = replay?.bytes() ?? [];
+        const span = replay?.span ?? null;
+        return {
+          ...run.times,
+          from: run.kill.replayFrom,
+          ticks: bytes.length,
+          first: span?.[0] ?? null,
+          last: span ? Math.min(span[1], replay!.end) : null,
+          hash: bytes.length ? fnv64(bytes) : null,
+          complete: replay?.times.afterMs != null,
+        };
+      }),
+  });
+
+  const onTick = (tick: Tick, arrivedMs: number, offset: number | null, payload: Uint8Array) => {
     debug.ticks++;
+    if (OFFLINE && offset !== null) {
+      localLog.set(offset, { tick: tick.tick, payload });
+      localLog.delete(offset - 1200);
+    }
     const players = tick.players;
     const me = players.find((p) => p.key === key)?.slot;
     for (const p of players) p.free();
@@ -305,10 +399,33 @@ async function main(): Promise<void> {
           damage: e.damage,
         });
       }
-      if (e.kind === 'killed' && e.slot === own?.slot) respawnAt = arrivedMs + (respawnTicks() * 1000) / 30;
+      if (e.kind === 'killed' && e.slot === own?.slot) {
+        respawnAt = arrivedMs + (respawnTicks() * 1000) / 30;
+        const from = replayFrom(e.replayFrom, s.tick);
+        if (offset !== null && from !== null) {
+          const kill: KillRef = {
+            matchNumber: tick.matchNumber,
+            tick: s.tick,
+            offset,
+            replayFrom: from,
+            victim: e.slot,
+            killer: e.by,
+            epoch: s.epoch,
+          };
+          const timing = tick.timing;
+          killcam.start(kill, reader(), arrivedMs, timing ? timing.commitStartUs / 1000 : null);
+          timing?.free();
+          const times = killcam.times!;
+          runs.push({ times, kill });
+        }
+      }
       e.free();
     }
-    if (mine?.alive) respawnAt = null;
+    if (mine?.alive) {
+      respawnAt = null;
+      // Back in the game: the replay gives way to it.
+      if (killcam.state !== 'off' && killcam.kill?.victim === mine.slot) killcam.skip(arrivedMs);
+    }
     match.update(tick, arrivedMs);
     recordState(tick);
     const phase = `${match.number}:${match.phase}`;
@@ -335,7 +452,7 @@ async function main(): Promise<void> {
       return;
     }
     if (catchingUp) foldTick(tick);
-    else onTick(tick, performance.now());
+    else onTick(tick, performance.now(), frame.offset, frame.payload);
     tick.free();
     if (!catchingUp) joiningSince = null;
     if (!catchingUp && liveMs === null) {
@@ -448,6 +565,11 @@ async function main(): Promise<void> {
   const clock = new Clock();
   let shown: number | null = null;
   let lastT = 0;
+  /** The tick each slot respawned in within the replay on screen, and that replay. */
+  const replaySpawned = new Map<number, number>();
+  let replayed: unknown = null;
+  /** The effects' clock, in seconds: the page's, slowed while a replay is in slow motion. */
+  let fxT = 0;
   renderer.setAnimationLoop((frameAt: number) => {
     if (joiningSince !== null && performance.now() - joiningSince < JOIN_HOLD_MS) return;
     const frameStartUnixMs = Date.now();
@@ -460,6 +582,7 @@ async function main(): Promise<void> {
     const now = performance.now();
     const frameStart = now;
     const t = clock.getElapsedTime();
+    const dtS = t - lastT;
     const frame = interpolator.sample(now);
     const ownDrawn = own?.draw(now) ?? null;
     live = bench ? bench.controls(t) : controls.sample(view.camera, ownDrawn?.x ?? 0, ownDrawn?.z ?? 0);
@@ -468,13 +591,24 @@ async function main(): Promise<void> {
     debug.own = ownNow && { x: ownNow.x, z: ownNow.z, heading: ownNow.heading };
 
     const charging = railChargeTicks();
-    const crafts: CraftView[] = (frame?.crafts ?? []).map((c) => {
+    const liveCrafts: CraftView[] = (frame?.crafts ?? []).map((c) => {
       const charge = c.charge > 0 ? 1 - c.charge / charging : 0;
       return c.slot === own?.slot && ownNow
         ? { ...c, ...ownNow, slot: c.slot, violet: c.violet, charge }
         : { ...c, charge };
     });
-    fleet.update(crafts, t);
+    // The kill cam draws its replay in place of the live world, which keeps updating underneath.
+    const cam = killcam.frame(now, liveCrafts);
+    const replay = cam.replay;
+    debug.killcam = killcam.state;
+    debug.replayAt = replay && killcam.kill ? { r: replay.renderTick, kill: killcam.kill.tick } : null;
+    document.body.classList.toggle('replaying', replay !== null);
+    // Effects and the crafts' bob run on their own clock, which slows with the replay.
+    fxT += replay ? dtS * replay.speed : dtS;
+    const crafts: CraftView[] = replay
+      ? replay.crafts.map((c) => ({ ...c, charge: c.charge > 0 ? 1 - c.charge / charging : 0 }))
+      : liveCrafts;
+    fleet.update(crafts, fxT);
     debug.crafts = crafts.map(({ slot, violet, alive, x, z, protected: shielded }) => ({
       slot,
       violet,
@@ -484,14 +618,14 @@ async function main(): Promise<void> {
       protected: shielded ?? false,
     }));
 
-    const claimed = own?.claimed ?? new Set<number>();
+    const claimed = (!replay && own?.claimed) || new Set<number>();
     const byId = new Map<number, { x: number; z: number }>();
     const violet = new Map(crafts.map((c) => [c.slot, c.violet]));
-    for (const b of frame?.bolts ?? []) {
+    for (const b of (replay ?? frame)?.bolts ?? []) {
       byId.set(b.id, b);
       if (!claimed.has(b.id)) effects.bolt(violet.get(b.owner) ?? false, b.x, b.z, b.heading);
     }
-    if (own) {
+    if (own && !replay) {
       const mine = violet.get(own.slot) ?? false;
       const reach = boltReach();
       const hits = (x: number, z: number) =>
@@ -499,45 +633,61 @@ async function main(): Promise<void> {
       for (const shot of own.drawShots(now, (id) => byId.has(id), hits)) {
         effects.bolt(mine, shot.x, shot.z, shot.heading, shot.opacity);
       }
-      for (const fired of own.firedSince(shown ?? now)) effects.fired(mine, fired.x, fired.z, t);
+      for (const fired of own.firedSince(shown ?? now)) effects.fired(mine, fired.x, fired.z, fxT);
     }
 
-    while (frame && due[0] && due[0].tick <= frame.renderTick) {
-      const e = due.shift()!;
+    const happened = (e: { kind: string; slot: number; by: number; x: number; z: number; damage: number }) => {
       const at = crafts.find((c) => c.slot === e.slot);
-      if (!at) continue;
+      if (!at) return;
       const angle = (at.heading / 65536) * 2 * Math.PI;
       const nose = [at.x + Math.cos(angle) * 130, at.z + Math.sin(angle) * 130] as const;
       if (e.kind === 'fired') {
-        effects.fired(at.violet, nose[0], nose[1], t);
+        effects.fired(at.violet, nose[0], nose[1], fxT);
       } else if (e.kind === 'hit' && e.damage === 0) {
         // A shot the spawn shield stopped.
         const from = crafts.find((c) => c.slot === e.by);
-        effects.absorbed(e.slot, from?.x ?? 0, from?.z ?? 0, t);
+        effects.absorbed(e.slot, from?.x ?? 0, from?.z ?? 0, fxT);
       } else if (e.kind === 'hit') {
-        effects.hit(violet.get(e.by) ?? !at.violet, at.x, at.z, t);
+        effects.hit(violet.get(e.by) ?? !at.violet, at.x, at.z, fxT);
       } else if (e.kind === 'railed') {
-        effects.railed(at.violet, nose[0], nose[1], e.x, e.z, t);
-        effects.fired(at.violet, nose[0], nose[1], t);
+        effects.railed(at.violet, nose[0], nose[1], e.x, e.z, fxT);
+        effects.fired(at.violet, nose[0], nose[1], fxT);
       } else if (e.kind === 'killed') {
-        effects.destroyed(at.violet, at.x, at.z, t);
-        spawnedIn.delete(e.slot);
-      } else if (e.kind === 'spawned') {
-        spawnedIn.set(e.slot, e.tick);
+        effects.destroyed(at.violet, at.x, at.z, fxT);
       }
+    };
+    while (frame && due[0] && due[0].tick <= frame.renderTick) {
+      const e = due.shift()!;
+      // While a replay plays, live events pass unseen; the replay is what is on screen.
+      if (!replay) happened(e);
+      if (e.kind === 'killed') spawnedIn.delete(e.slot);
+      else if (e.kind === 'spawned') spawnedIn.set(e.slot, e.tick);
+    }
+    if (killcam.replay !== replayed) {
+      replayed = killcam.replay;
+      replaySpawned.clear();
+    }
+    for (const e of replay?.events ?? []) {
+      happened(e);
+      if (e.kind === 'killed') replaySpawned.delete(e.slot);
+      else if (e.kind === 'spawned') replaySpawned.set(e.slot, e.tick);
     }
     const protection = spawnProtectionTicks();
     for (const c of crafts) {
       if (!c.alive || !c.protected) continue;
-      const since = spawnedIn.get(c.slot);
+      const since = (replay ? replaySpawned : spawnedIn).get(c.slot);
       // Counted to the newest tick at most: past it, nothing says the protection is still running down.
-      const at = frame ? Math.min(frame.renderTick, interpolator.newest?.tick ?? frame.renderTick) : 0;
-      const left = since === undefined || !frame ? protection : protection - (at - since);
+      const at = replay
+        ? replay.renderTick
+        : frame
+          ? Math.min(frame.renderTick, interpolator.newest?.tick ?? frame.renderTick)
+          : 0;
+      const left = since === undefined || (!frame && !replay) ? protection : protection - (at - since);
       effects.shield(c.slot, c.violet, c.x, c.z, left);
     }
     const posed = debug.absorbing;
-    if (posed) effects.absorbed(posed.slot, posed.x, posed.z, t - posed.ago);
-    effects.update(t);
+    if (posed) effects.absorbed(posed.slot, posed.x, posed.z, fxT - posed.ago);
+    effects.update(fxT);
 
     arena.crystal.rotation.y = t * 0.2;
     pickup.update(match.railIn === 0 && match.phase !== 'results', t, t - lastT);
@@ -569,15 +719,15 @@ async function main(): Promise<void> {
     // The cursor comes back for the results, which are read rather than played.
     aim.update(
       {
-        pointer: playing() && own && match.phase !== 'results' ? controls.pointerAt : null,
-        craft: ownCraft?.alive ? { x: ownCraft.x / 100, z: ownCraft.z / 100 } : null,
+        pointer: playing() && own && match.phase !== 'results' && !replay ? controls.pointerAt : null,
+        craft: ownCraft?.alive && !replay ? { x: ownCraft.x / 100, z: ownCraft.z / 100 } : null,
         violet: ownCraft?.violet ?? false,
         target: controls.target,
         firing: controls.firing,
       },
       view.camera,
     );
-    view.update(t);
+    view.update(t, cam.pose ?? undefined, cam.weight);
     const updated = performance.now();
     pipeline.render(t);
     shown = now;

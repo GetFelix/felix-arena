@@ -1,9 +1,9 @@
 // The browser end of felix-gateway's protocol, as much of it as the game uses:
-// join, subscriptions in named slots whose events arrive as binary frames, and stream state reads.
+// join, subscriptions in named slots whose events arrive as binary frames, stream state reads and range reads.
 // felix-gateway's docs/protocol.md is the reference.
 
 /** The optional protocol features the game needs. */
-export const FEATURES = ['binary_events', 'slots', 'state'] as const;
+export const FEATURES = ['binary_events', 'slots', 'state', 'read'] as const;
 
 /** One event frame from the gateway. Times are µs since the Unix epoch. */
 export interface EventFrame {
@@ -79,6 +79,12 @@ function unbase64(text: string): Uint8Array {
   return bytes;
 }
 
+/** A page of a range read: records in offset order, and where the next page starts. */
+export interface RangePage {
+  records: { offset: number; payload: Uint8Array }[];
+  nextOffset: number;
+}
+
 /** An error the gateway answered with. */
 export class GatewayError extends Error {
   override name = 'GatewayError';
@@ -106,7 +112,7 @@ export class Gateway {
   private readonly slots = new Map<string, number>();
   /** Subscribes waiting for an answer, oldest first, by `stream/slot`. */
   private readonly pending = new Map<string, Pending[]>();
-  /** Requests waiting for their answer by id: publishes for an `ack`, state reads for a `state_value`. */
+  /** Requests waiting for their answer by id: publishes for an `ack`, state reads for a `state_value`, range reads for `records`. */
   private readonly requests = new Map<number, { resolve: (answer: Json) => void; reject: (err: Error) => void }>();
   private nextId = 1;
   private closing = false;
@@ -203,6 +209,21 @@ export class Gateway {
     };
   }
 
+  /**
+   * One page of `stream`'s log from offset `from`, stopping before `end` (or at what is committed with `null`), at
+   * most `max` records. Read the next page from `nextOffset`. A trimmed offset rejects with code `trimmed`.
+   */
+  async read(stream: string, from: number, end: number | null, max = 0): Promise<RangePage> {
+    const answer = await this.request({ type: 'read', stream, from, end, max });
+    return {
+      records: (answer.records as { offset: number; payload: string }[]).map((r) => ({
+        offset: r.offset,
+        payload: unbase64(r.payload),
+      })),
+      nextOffset: answer.next_offset as number,
+    };
+  }
+
   private request(message: Json): Promise<Json> {
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
@@ -259,7 +280,7 @@ export class Gateway {
         startOffset: json.start_offset as number | null,
         liveOffset: json.live_offset as number | null,
       });
-    } else if (json.type === 'ack' || json.type === 'state_value') {
+    } else if (json.type === 'ack' || json.type === 'state_value' || json.type === 'records') {
       const id = json.id as number;
       this.requests.get(id)?.resolve(json);
       this.requests.delete(id);
