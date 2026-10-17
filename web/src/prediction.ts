@@ -24,6 +24,8 @@ export interface OwnCraft {
   heading: number;
   health: number;
   boostCooldown: number;
+  /** Under spawn protection, which firing gives up at once. */
+  protected: boolean;
 }
 
 /** A shot you fired, drawn ahead of the sim. */
@@ -286,6 +288,7 @@ export class Own {
       heading: base.alive ? aim : base.heading,
       health: base.health,
       boostCooldown: base.boostCooldown,
+      protected: base.protected,
     };
     base.free();
     next.free();

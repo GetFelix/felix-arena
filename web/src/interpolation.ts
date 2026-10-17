@@ -42,6 +42,8 @@ export interface CraftState {
   /** Rail shots left, and ticks until a charging rail fires. */
   rail: number;
   charge: number;
+  /** Under spawn protection: just respawned, and not hurt until it fires or the protection runs out. */
+  protected: boolean;
 }
 
 /** A bolt as a tick has it. */
@@ -81,6 +83,7 @@ export function snapshot(tick: Tick): Snapshot {
       lastInput: c.lastInput,
       rail: c.rail,
       charge: c.charge,
+      protected: c.protected,
     })),
     bolts: bolts.map((b) => ({ id: b.id, owner: b.owner, x: b.x, z: b.z, heading: b.heading })),
   };

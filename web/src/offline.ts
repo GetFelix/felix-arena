@@ -69,6 +69,7 @@ export class Offline implements Link {
       x: c.x,
       z: c.z,
       rail: c.rail,
+      protected: c.protected,
     }));
     const railThere = tick.railIn === 0;
     tick.free();
@@ -108,16 +109,18 @@ export class Offline implements Link {
 
 /**
  * A bot's stick, aim and buttons: close on the nearest enemy, circle it and fire; the bot in slot 2 fetches the rail
- * when it is up. `bot.turn` is which way it circles.
+ * when it is up. `bot.turn` is which way it circles. An enemy under spawn protection is chased only when there is no
+ * other, and not fired at, since shots cannot hurt it.
  */
 export function drive(
   me: { slot: number; violet: boolean; x: number; z: number; rail: number },
-  crafts: { slot: number; violet: boolean; alive: boolean; x: number; z: number }[],
+  crafts: { slot: number; violet: boolean; alive: boolean; x: number; z: number; protected?: boolean }[],
   bot: { turn: number },
   railThere: boolean,
 ): number[] {
   const enemies = crafts.filter((c) => c.alive && c.violet !== me.violet);
-  const target = enemies.sort((a, b) => Math.hypot(a.x - me.x, a.z - me.z) - Math.hypot(b.x - me.x, b.z - me.z))[0];
+  const away = (c: { x: number; z: number }) => Math.hypot(c.x - me.x, c.z - me.z);
+  const target = enemies.sort((a, b) => Number(!!a.protected) - Number(!!b.protected) || away(a) - away(b))[0];
   if (Math.random() < 0.01) bot.turn = -bot.turn;
   let [mx, mz] = [0, 0];
   let aim = 0;
@@ -131,7 +134,7 @@ export function drive(
     // Close in from afar, circle at fighting range.
     const closing = distance > 1100 ? 1 : distance < 600 ? -0.5 : 0;
     [mx, mz] = [dx * closing - dz * bot.turn * 0.8, dz * closing + dx * bot.turn * 0.8];
-    if (distance < 1800 && Math.random() < 0.8) buttons |= 1;
+    if (distance < 1800 && !target.protected && Math.random() < 0.8) buttons |= 1;
     if (Math.random() < 0.004) buttons |= 2;
   }
   const length = Math.hypot(mx, mz) || 1;

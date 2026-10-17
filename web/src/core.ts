@@ -13,6 +13,7 @@ export {
   Prediction,
   railChargeTicks,
   respawnTicks,
+  spawnProtectionTicks,
   World,
 } from './core/felix_arena_core.js';
 export type { Bolt, Craft, Event, Player, Shot, Tick, Timing } from './core/felix_arena_core.js';

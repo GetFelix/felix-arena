@@ -1,7 +1,7 @@
 //! The rules: movement, collision, bolts and damage, one 30 Hz step at a time.
 //! All state is in the units the tick carries, so a tick holds it exactly.
 
-use crate::arena::{HALF_X, HALF_Z, OBSTACLES, Obstacle, spawn};
+use crate::arena::{HALF_X, HALF_Z, OBSTACLES, Obstacle, line_of_sight, respawn_points, spawn};
 use crate::fixed::{self, div_round, length};
 use crate::input::{BOOST, FIRE, Input};
 use crate::tick::{Bolt, Craft, Event, Keyframe, MatchState, Player, Tick};
@@ -34,6 +34,11 @@ pub const REGEN_AFTER: u16 = 120;
 /// Ticks per point of health regenerated.
 pub const REGEN_EVERY: u16 = 3;
 pub const RESPAWN_AFTER: u16 = 150;
+/// Ticks a respawned craft takes no damage for, unless it fires first.
+pub const SPAWN_PROTECTION: u16 = 60;
+/// Enemies closer than this with a clear line to a respawn point count as
+/// half as far away when the point is chosen.
+pub const SPAWN_SIGHT: i32 = 1500;
 /// Ticks a rail charges before it fires: half a second.
 pub const RAIL_CHARGE: u8 = 15;
 pub const RAIL_DAMAGE: u8 = 70;
@@ -112,6 +117,8 @@ impl Default for Rules {
 struct Hidden {
     since_damage: u16,
     respawn_in: u16,
+    /// Ticks of spawn protection left, while the craft's flag is set.
+    protected_for: u16,
 }
 
 /// One arena's match: everything the sim steps.
@@ -350,6 +357,10 @@ impl World {
         let mut hidden = self.hidden[usize::from(slot)];
         let alive = craft.alive;
         let shot = steer(&mut craft, control);
+        if alive && craft.protected {
+            hidden.protected_for = hidden.protected_for.saturating_sub(1);
+            craft.protected = hidden.protected_for > 0;
+        }
         if alive {
             hidden.since_damage = hidden.since_damage.saturating_add(1);
             if craft.health < MAX_HEALTH
@@ -366,11 +377,18 @@ impl World {
                     .iter()
                     .filter(|p| p.team == craft.team && p.slot < slot)
                     .count();
+                let (x, z) = self.respawn_point(craft.team, place);
                 craft = Craft {
                     last_input: craft.last_input,
+                    x: x as i16,
+                    z: z as i16,
+                    protected: true,
                     ..self.spawned(slot, craft.team, place)
                 };
-                hidden = Hidden::default();
+                hidden = Hidden {
+                    protected_for: SPAWN_PROTECTION,
+                    ..Hidden::default()
+                };
                 self.events.push(Event::Spawned { slot });
             }
         }
@@ -432,6 +450,44 @@ impl World {
         }
     }
 
+    /// The respawn point for `team` farthest from the nearest live enemy, an
+    /// enemy within [`SPAWN_SIGHT`] in plain view counting as half as far.
+    /// Ties go to the first point in order. With no enemy alive, the craft
+    /// goes back to its spawn for `place`.
+    pub(crate) fn respawn_point(&self, team: Team, place: usize) -> (i32, i32) {
+        let enemies: Vec<(i32, i32)> = self
+            .crafts
+            .iter()
+            .filter(|c| c.alive && c.team != team)
+            .map(|c| (i32::from(c.x), i32::from(c.z)))
+            .collect();
+        if enemies.is_empty() {
+            return spawn(team, place);
+        }
+        let threat = |point: (i32, i32)| {
+            enemies
+                .iter()
+                .map(|&enemy| {
+                    let distance = length(enemy.0 - point.0, enemy.1 - point.1);
+                    if distance < SPAWN_SIGHT && line_of_sight(point, enemy) {
+                        distance / 2
+                    } else {
+                        distance
+                    }
+                })
+                .min()
+                .unwrap_or(i32::MAX)
+        };
+        let mut best = (spawn(team, place), i32::MIN);
+        for point in respawn_points(team) {
+            let score = threat(point);
+            if score > best.1 {
+                best = (point, score);
+            }
+        }
+        best.0
+    }
+
     fn spawned(&self, slot: u8, team: Team, place: usize) -> Craft {
         let (x, z) = spawn(team, place);
         let heading = if team == Team::Coral { 0 } else { 32768 };
@@ -474,6 +530,10 @@ impl World {
 
     fn damage(&mut self, target: usize, attacker: u8, bolt: u16, damage: u8) {
         let craft = &mut self.crafts[target];
+        // Spawn protection: the shot is stopped, and nothing is hurt.
+        if craft.protected {
+            return;
+        }
         let damage = damage.min(craft.health);
         craft.health -= damage;
         let slot = craft.slot;
@@ -670,6 +730,8 @@ pub fn steer(craft: &mut Craft, control: Option<Input>) -> Option<Shot> {
                 craft.boost_cooldown = BOOST_COOLDOWN;
             }
             if input.buttons & FIRE != 0 && craft.fire_cooldown == 0 && craft.charge == 0 {
+                // Firing gives up spawn protection.
+                craft.protected = false;
                 if craft.rail > 0 {
                     craft.charge = RAIL_CHARGE;
                 } else {

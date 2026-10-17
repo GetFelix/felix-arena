@@ -49,6 +49,7 @@ async function bot(user: string): Promise<() => void> {
       z: c.z,
       rail: c.rail,
       lastInput: c.lastInput,
+      protected: c.protected,
     }));
     // A bot knows itself as the craft its inputs drive.
     slot ??= crafts.find((c) => c.lastInput !== 0 && Math.abs(c.lastInput - inputs.seq) < 10)?.slot ?? null;

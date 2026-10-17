@@ -17,6 +17,7 @@ import {
   Points,
   PointsMaterial,
   RingGeometry,
+  SphereGeometry,
   Sprite,
   SpriteMaterial,
   type Texture,
@@ -415,6 +416,87 @@ export class EffectsKit {
   }
 }
 
+/** Spawn shields: one a craft, by slot. */
+export const SHIELDS = 8;
+/** How long a shield takes to rise, and to fade once the sim drops the protection, in seconds. */
+const SHIELD_IN_S = 0.2;
+const SHIELD_OUT_S = 0.25;
+/** With this few sim ticks of protection left a shield flickers, so the player sees it is about to go. */
+const SHIELD_FLICKER_TICKS = 15;
+
+/** A spawn shield: a dome over the craft, bright at its rim and crossed by faint bands that drift across it. */
+interface Shield {
+  dome: Mesh<SphereGeometry, MeshBasicMaterial>;
+  time: { value: number };
+  /** Asked for this frame, held since `since`, or let go at `gone`. */
+  asked: boolean;
+  held: boolean;
+  since: number;
+  gone: number;
+  violet: boolean;
+  where: Vector3;
+  /** Sim ticks of protection left. */
+  left: number;
+}
+
+/** The shield's vertex additions: the normal and view direction for its rim, and the point on the unit dome. */
+const SHIELD_VERTEX = `
+vShieldNormal = normalize( normalMatrix * normal );
+vShieldView = -mvPosition.xyz;
+vShieldAt = position;`;
+
+/**
+ * The shield's surface: a rim that brightens toward the dome's edge, and a honeycomb seen from above whose lines are
+ * lit by ripples running out from the crown.
+ */
+const SHIELD_FRAGMENT = `
+float hexEdge( vec2 p ) {
+  const vec2 s = vec2( 1.0, 1.7320508 );
+  vec4 c = floor( vec4( p, p - vec2( 0.5, 1.0 ) ) / s.xyxy ) + 0.5;
+  vec4 h = vec4( p - c.xy * s, p - ( c.zw + 0.5 ) * s );
+  vec2 q = abs( dot( h.xy, h.xy ) < dot( h.zw, h.zw ) ? h.xy : h.zw );
+  return 0.5 - max( dot( q, s * 0.5 ), q.x );
+}`;
+
+const SHIELD_ALPHA = `
+float facing = abs( dot( normalize( vShieldNormal ), normalize( vShieldView ) ) );
+float rim = pow( 1.0 - facing, 3.0 );
+float edge = hexEdge( vShieldAt.xz * 3.6 );
+float line = 1.0 - smoothstep( 0.0, fwidth( edge ) * 1.5 + 0.02, edge );
+float ripple = pow( 0.5 + 0.5 * sin( length( vShieldAt.xz ) * 9.0 - uShieldTime * 5.0 ), 3.0 );
+// The honeycomb fades toward the crown, so the craft under it stays clear.
+diffuseColor.a *= rim * 0.9 + line * ( 0.14 + 0.5 * ripple ) * ( 0.25 + 0.75 * ( 1.0 - facing ) ) + 0.02;
+#include <opaque_fragment>`;
+
+function shield(fx: Object3D, geometry: SphereGeometry): Shield {
+  const time = { value: 0 };
+  const material = new MeshBasicMaterial(additive);
+  const varyings = 'varying vec3 vShieldNormal;\nvarying vec3 vShieldView;\nvarying vec3 vShieldAt;\n';
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.uShieldTime = time;
+    shader.vertexShader = shader.vertexShader
+      .replace('void main() {', `${varyings}void main() {`)
+      .replace('#include <project_vertex>', `#include <project_vertex>${SHIELD_VERTEX}`);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('void main() {', `uniform float uShieldTime;\n${varyings}${SHIELD_FRAGMENT}\nvoid main() {`)
+      .replace('#include <opaque_fragment>', SHIELD_ALPHA);
+  };
+  const dome = new Mesh(geometry, material);
+  dome.visible = false;
+  fx.add(dome);
+  return {
+    dome,
+    time,
+    asked: false,
+    held: false,
+    since: -Infinity,
+    gone: -Infinity,
+    violet: false,
+    where: new Vector3(),
+    left: 0,
+  };
+}
+
 /** How long each live effect lasts, in seconds. */
 const FLASH_S = 0.07;
 const BEAM_S = 0.45;
@@ -447,7 +529,8 @@ function shown(n: number): Shown[] {
 /** Starts the oldest effect of `list` over, at time `t`. */
 function start(list: Shown[], violet: boolean, t: number): Shown {
   let s = list[0]!;
-  for (const o of list) if (o.at < s.at) s = o;
+  // Indexed rather than for-of: an iterator is only free when the call is inlined.
+  for (let i = 1; i < list.length; i++) if (list[i]!.at < s.at) s = list[i]!;
   s.at = t;
   s.violet = violet;
   return s;
@@ -461,9 +544,31 @@ export class Effects {
   private readonly beams = shown(BEAMS);
   private readonly blasts = shown(BLASTS);
   private readonly all = [...this.fires, ...this.hits, ...this.beams, ...this.blasts];
+  private readonly shields: Shield[];
+  private readonly shieldTints: [Color, Color];
+  /** The shields are drawn, unseen, in the first frame, so their shader compiles before a respawn needs it. */
+  private warm = true;
 
   constructor(scene: Object3D, fx: Object3D, tex: EffectTextures, random: () => number) {
     this.kit = new EffectsKit(scene, fx, tex, random);
+    // Made after the kit, so the style frame, which draws through the kit alone, is unchanged.
+    const dome = new SphereGeometry(1, 48, 24);
+    this.shields = Array.from({ length: SHIELDS }, () => shield(fx, dome));
+    this.shieldTints = [hdr(palette.coral, 2.4), hdr(palette.violet, 2.4)];
+  }
+
+  /**
+   * `slot`'s craft, of `violet`'s team, is under spawn protection at `(x, z)` in centimetres this frame, with `left`
+   * sim ticks of it to go unless the craft fires. The flicker near the end follows the sim's ticks rather than the
+   * page's clock, so it means the same on a page that draws slowly.
+   */
+  shield(slot: number, violet: boolean, x: number, z: number, left: number): void {
+    const s = this.shields[slot % SHIELDS]!;
+    s.asked = true;
+    s.left = left;
+    s.violet = violet;
+    s.where.x = x / 100;
+    s.where.z = z / 100;
   }
 
   /** A bolt at `(x, z)` in centimetres heading `heading` 65536ths of a turn from +x toward +z, for this frame. */
@@ -557,6 +662,40 @@ export class Effects {
       }
       b.glow = h < 0.4 ? 24 * (1 - h / 0.4) : 0;
     }
+    // Written out here rather than in a method: a float passed to a call that is not inlined is boxed.
+    for (let i = 0; i < SHIELDS; i++) {
+      const s = this.shields[i]!;
+      if (s.asked && !s.held) s.since = t;
+      if (!s.asked && s.held) s.gone = t;
+      s.held = s.asked;
+      s.asked = false;
+      let level: number;
+      let grow: number;
+      if (s.held) {
+        const age = t - s.since;
+        const rise = Math.min(1, age / SHIELD_IN_S);
+        // It comes up a little bright and settles, then flickers as the protection runs out.
+        level = rise * (1 + 0.6 * (1 - rise)) * (s.left < SHIELD_FLICKER_TICKS ? 0.6 + 0.4 * Math.cos(age * 40) : 1);
+        grow = 0.75 + 0.25 * rise * (2 - rise);
+      } else {
+        const out = t - s.gone;
+        level = out < SHIELD_OUT_S ? 1 - out / SHIELD_OUT_S : 0;
+        // Let go, it swells as it fades, rather than shrinking back into the craft.
+        grow = 1 + 0.15 * (out / SHIELD_OUT_S);
+      }
+      const dome = s.dome;
+      dome.visible = level > 0 || this.warm;
+      if (!dome.visible) continue;
+      dome.position.x = s.where.x;
+      dome.position.y = 0.2;
+      dome.position.z = s.where.z;
+      dome.scale.x = dome.scale.z = 1.35 * grow;
+      dome.scale.y = 1.15 * grow;
+      dome.material.color.copy(this.shieldTints[s.violet ? 1 : 0]);
+      dome.material.opacity = 0.55 * level;
+      s.time.value = t;
+    }
+    this.warm = false;
     // The point lights go to the brightest glows.
     for (const g of kit.glows) g.level = 0;
     for (const s of this.all) {

@@ -76,6 +76,9 @@ pub struct Craft {
     pub rail: u8,
     /// Ticks until a charging rail fires, or 0 when none is charging.
     pub charge: u8,
+    /// Just respawned, and takes no damage until it fires or the protection
+    /// runs out.
+    pub protected: bool,
 }
 
 /// A blaster bolt in flight, 9 bytes on the wire. It moves at the bolt speed
@@ -175,6 +178,7 @@ const KEYFRAME: u8 = 1;
 const TIMED: u8 = 2;
 const ALIVE: u8 = 1;
 const VIOLET: u8 = 2;
+const PROTECTED: u8 = 4;
 const FIRE_SHIFT: u8 = 3;
 const CHARGE_SHIFT: u8 = 2;
 /// A railed event's target when the beam hit no craft.
@@ -197,6 +201,7 @@ impl Craft {
             last_input: 0,
             rail: 0,
             charge: 0,
+            protected: false,
         }
     }
 }
@@ -237,7 +242,8 @@ impl Tick {
             } else {
                 0
             };
-            out.push(alive | violet | (craft.fire_cooldown.min(31) << FIRE_SHIFT));
+            let protected = if craft.protected { PROTECTED } else { 0 };
+            out.push(alive | violet | protected | (craft.fire_cooldown.min(31) << FIRE_SHIFT));
             for value in [craft.x, craft.z, craft.vx, craft.vz] {
                 out.extend_from_slice(&value.to_le_bytes());
             }
@@ -310,10 +316,8 @@ impl Tick {
         let crafts = (0..r.u8()?)
             .map(|_| {
                 let slot = r.u8()?;
+                // Every bit of a craft's flags has a meaning, so none is refused.
                 let flags = r.u8()?;
-                if flags & !(ALIVE | VIOLET | 31 << FIRE_SHIFT) != 0 {
-                    return None;
-                }
                 Some(Craft {
                     slot,
                     alive: flags & ALIVE != 0,
@@ -333,6 +337,7 @@ impl Tick {
                     last_input: r.u16()?,
                     rail: 0,
                     charge: 0,
+                    protected: flags & PROTECTED != 0,
                 })
                 .and_then(|mut craft| {
                     let rail = r.u8()?;

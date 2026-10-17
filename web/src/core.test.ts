@@ -27,6 +27,14 @@ describe('core in WebAssembly', () => {
     expect(keyframe.timing?.stepUs).toBe(keyframe.tick);
   });
 
+  it('carries spawn protection on a respawned craft', () => {
+    const protectedCrafts = fixture.flatMap(({ record }) =>
+      decodeTick(bytes(record)).crafts.filter((c) => c.protected),
+    );
+    expect(protectedCrafts.length).toBeGreaterThan(0);
+    expect(protectedCrafts.every((c) => c.alive && c.health === 100)).toBe(true);
+  });
+
   it('refuses bytes that are not exactly one tick', () => {
     const record = bytes(fixture[0]!.record);
     expect(() => decodeTick(record.subarray(0, record.length - 1))).toThrow('not a tick record');
