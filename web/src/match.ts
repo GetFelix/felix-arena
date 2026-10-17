@@ -1,6 +1,7 @@
 // The match as the HUD shows it, folded from ticks: the phase and its clock, the score, the roster with kills and
 // deaths, and the kill feed.
 import type { Tick } from './core';
+import type { KillRef } from './replay';
 
 export type Phase = 'warmup' | 'playing' | 'results';
 
@@ -28,7 +29,15 @@ export interface Kill {
   atMs: number;
   /** The rail made it. */
   rail: boolean;
+  /** The match it was in, and seconds left on the match's clock. */
+  matchNumber: number;
+  seconds: number;
+  /** Where to replay it from, or `null` when the tick did not say. */
+  replay: KillRef | null;
 }
+
+/** How many matches of kills are kept for replaying. */
+const MATCHES_KEPT = 5;
 
 /** How long a kill stays in the feed, and how many show. */
 const FEED_MS = 6000;
@@ -46,13 +55,24 @@ export class Match {
   /** A warmup whose clock is not moving: it waits for a second player. */
   waiting = false;
   private feed: Kill[] = [];
+  /** Every kill seen or loaded, by match number. */
+  private history = new Map<number, Kill[]>();
   /** The roster as of the newest keyframe, and the kills and deaths in ticks since it. */
   private roster = new Map<number, Standing>();
   private since = new Map<number, { kills: number; deaths: number }>();
   private lastTick = -1;
 
-  /** Take a tick that arrived at `nowMs`. A tick folded while catching up adds nothing to the kill feed. */
-  update(tick: Tick, nowMs: number, feed = true): void {
+  /**
+   * Take a tick that arrived at `nowMs`, at log `offset`. A tick folded while catching up adds nothing to the kill
+   * feed. `replayFrom` answers where a kill replays from, given the offset its event names.
+   */
+  update(
+    tick: Tick,
+    nowMs: number,
+    feed = true,
+    offset: number | null = null,
+    replayFrom: (named: number | undefined, tick: number) => number | null = (named) => named ?? null,
+  ): void {
     const phase = tick.phase as Phase;
     const left = tick.phaseLeft;
     const fresh = tick.matchNumber !== this.number || phase !== this.phase;
@@ -87,7 +107,29 @@ export class Match {
       if (e.kind === 'joined') this.roster.set(e.slot, { slot: e.slot, violet: e.violet, kills: 0, deaths: 0 });
       if (e.kind === 'left') this.roster.delete(e.slot);
       if (e.kind !== 'killed') continue;
-      if (feed) this.feed.push({ killer: e.by, victim: e.slot, atMs: nowMs, rail: railed.has(e.slot) });
+      const from = replayFrom(e.replayFrom, tick.tick);
+      const kill: Kill = {
+        killer: e.by,
+        victim: e.slot,
+        atMs: nowMs,
+        rail: railed.has(e.slot),
+        matchNumber: tick.matchNumber,
+        seconds: Math.ceil(left / 30),
+        replay:
+          offset === null || from === null
+            ? null
+            : {
+                matchNumber: tick.matchNumber,
+                tick: tick.tick,
+                offset,
+                replayFrom: from,
+                victim: e.slot,
+                killer: e.by,
+                epoch: tick.epoch,
+              },
+      };
+      if (feed) this.feed.push(kill);
+      this.remember(tick.matchNumber, [kill]);
       // Keyframes carry the tally; between them, kills are counted here.
       if (!tick.keyframe) {
         const tally = (slot: number) => this.since.get(slot) ?? { kills: 0, deaths: 0 };
@@ -102,6 +144,26 @@ export class Match {
   kills(nowMs: number): Kill[] {
     this.feed = this.feed.filter((k) => nowMs - k.atMs < FEED_MS);
     return this.feed.slice(-FEED);
+  }
+
+  /** Kills of match `number` from elsewhere, such as a scan of its log; kills already held are kept once. */
+  remember(number: number, kills: Kill[]): void {
+    const held = this.history.get(number) ?? [];
+    for (const k of kills) {
+      if (!held.some((h) => h.replay && k.replay && h.replay.offset === k.replay.offset && h.victim === k.victim)) {
+        held.push(k);
+      }
+    }
+    held.sort((a, b) => (a.replay?.tick ?? 0) - (b.replay?.tick ?? 0));
+    this.history.set(number, held);
+    // The oldest go, but never the match just taken: an earlier match loaded on request stays.
+    const others = [...this.history.keys()].filter((n) => n !== number).sort((a, b) => a - b);
+    for (const n of others.slice(0, Math.max(0, others.length - (MATCHES_KEPT - 1)))) this.history.delete(n);
+  }
+
+  /** The kills held for replaying, newest match first, each match's kills oldest first. */
+  replays(): [number, Kill[]][] {
+    return [...this.history.entries()].sort((a, b) => b[0] - a[0]);
   }
 
   /** Every player, best first: by kills, then fewest deaths, then slot. */

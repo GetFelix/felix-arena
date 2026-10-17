@@ -91,6 +91,8 @@ export class GatewayError extends Error {
   constructor(
     readonly code: string,
     message: string,
+    /** On `trimmed`: the oldest offset the log still holds. */
+    readonly oldest: number | null = null,
   ) {
     super(message);
   }
@@ -285,7 +287,11 @@ export class Gateway {
       this.requests.get(id)?.resolve(json);
       this.requests.delete(id);
     } else if (json.type === 'error') {
-      const err = new GatewayError(String(json.code), String(json.message));
+      const err = new GatewayError(
+        String(json.code),
+        String(json.message),
+        (json.oldest as number | undefined) ?? null,
+      );
       const request = typeof json.id === 'number' ? this.requests.get(json.id) : undefined;
       if (request) {
         this.requests.delete(json.id as number);

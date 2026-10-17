@@ -285,3 +285,45 @@ jobs:
           path: web/killcam
       - if: failure()
         run: docker compose -f dev/compose.yml logs --no-color
+
+  feed:
+    name: kill feed
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Short matches, and a broker that keeps about a minute of each log, so a kill of the last match can be seen
+      # replayed and then refused once retention has passed it.
+      - run: dev/up.sh
+        env:
+          ARENA_COMPOSE_EXTRA: retention.yml
+          SIM_WARMUP_SECONDS: '5'
+          SIM_MATCH_SECONDS: '45'
+          SIM_RESULTS_SECONDS: '5'
+          SIM_KILL_LIMIT: '99'
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@0.2.129
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: A spectator replays kills of the last match from the panel and from its log, and a trimmed one is refused
+        working-directory: web
+        run: |
+          npm ci
+          npm run core
+          npm run build
+          npx playwright install --with-deps chromium
+          npx vite preview --host 127.0.0.1 --port 4173 --strictPort &
+          for _ in $(seq 1 30); do curl -sf http://127.0.0.1:4173/play.html >/dev/null && break; sleep 1; done
+          npx vite-node scripts/feed.ts -- http://127.0.0.1:4173/play.html feed
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: feed
+          path: web/feed
+      - if: failure()
+        run: docker compose -f dev/compose.yml -f dev/retention.yml logs --no-color

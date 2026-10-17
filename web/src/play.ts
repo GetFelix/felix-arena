@@ -26,10 +26,10 @@ import { type CraftView, Fleet, GUN_HEIGHT } from './fleet';
 import { type EventFrame, Gateway, GatewayError } from './gateway';
 import { botCount, botLevel, botTag } from './bots';
 import { type Link, Offline, OFFLINE_PRINCIPAL } from './offline';
-import { Hud } from './hud';
+import { Hud, killKey } from './hud';
 import { KillCam, type KillCamTimes, Markers } from './killcam';
 import { KillRig, VIEWS } from './killcam-rig';
-import type { KillRef, Page, Reader } from './replay';
+import { killsOf, type KillRef, type Page, type Reader } from './replay';
 import { joinFromKeyframe, type JoinTimes } from './join';
 import { Interpolator, snapshot } from './interpolation';
 import { addLights, loadEnvironment } from './lighting';
@@ -132,6 +132,8 @@ export interface ArenaDebug {
   })[];
   /** The kill cam's state now: `off`, `beat`, `replay` or `leaving`. */
   killcam: string;
+  /** Every kill the replays panel holds: the key its row carries, and where it replays from. */
+  kills: { key: string; match: number; tick: number; offset: number; replayFrom: number }[];
   /** The replay's tick time and its kill's tick, while one plays. */
   replayAt: { r: number; kill: number } | null;
   /** For screenshots: hold the replay at its current moment, or let it play. */
@@ -186,6 +188,7 @@ async function main(): Promise<void> {
     killcams: [],
     killcam: 'off',
     replayAt: null,
+    kills: [],
     holdReplay: () => {},
   };
   window.arena = debug;
@@ -242,11 +245,81 @@ async function main(): Promise<void> {
       if (role === 'victim') tag.querySelector('span')!.textContent = slot === own?.slot ? 'YOU' : 'VICTIM';
     }
   };
+  Object.defineProperty(debug, 'kills', {
+    get: () =>
+      match.replays().flatMap(([n, kills]) =>
+        kills.flatMap((k) =>
+          k.replay
+            ? [
+                {
+                  key: killKey(k),
+                  match: n,
+                  tick: k.replay.tick,
+                  offset: k.replay.offset,
+                  replayFrom: k.replay.replayFrom,
+                },
+              ]
+            : [],
+        ),
+      ),
+  });
   debug.holdReplay = (held, ticksFromKill) => {
     killcam.held = held;
     if (ticksFromKill !== undefined) killcam.seek(ticksFromKill);
   };
+  /** The replays panel: open or not, and what loading an earlier match said. */
+  let replaysOpen = false;
+  let replaysNote = '';
+  /** Replay a kill from the feed or the panel, at once: there is no death beat for someone else's kill. */
+  const replayKill = (key: string) => {
+    for (const [, kills] of match.replays()) {
+      const kill = kills.find((k) => k.replay && killKey(k) === key);
+      if (!kill?.replay) continue;
+      killcam.start(kill.replay, reader(), performance.now(), null, 0);
+      runs.push({ times: killcam.times!, kill: kill.replay });
+      replaysOpen = false;
+      return;
+    }
+  };
+  for (const id of ['feed', 'replays-list']) {
+    document.getElementById(id)!.addEventListener('click', (event) => {
+      const key = (event.target as HTMLElement).closest<HTMLElement>('[data-kill]')?.dataset.kill;
+      if (key) replayKill(key);
+    });
+  }
+  document.getElementById('open-replays')!.addEventListener('click', () => {
+    replaysOpen = !replaysOpen;
+  });
+  /** Read the kills of the match before the earliest one held, from its log. */
+  const loadEarlier = async () => {
+    const held = match.replays().map(([n]) => n);
+    const n = Math.min(match.number, ...held) - 1;
+    if (n < 0) {
+      replaysNote = 'No earlier match';
+      return;
+    }
+    if (!('read' in gateway)) {
+      replaysNote = 'The offline game keeps no log';
+      return;
+    }
+    replaysNote = `Reading match ${n + 1}`;
+    try {
+      const kills = await killsOf(gateway as Gateway, n);
+      if (kills === null) replaysNote = `Match ${n + 1} is no longer in the log`;
+      else {
+        match.remember(
+          n,
+          kills.map((k) => ({ ...k, atMs: 0 })),
+        );
+        replaysNote = '';
+      }
+    } catch (err) {
+      replaysNote = String((err as Error).message);
+    }
+  };
+  document.getElementById('replays-earlier')!.addEventListener('click', () => void loadEarlier());
   addEventListener('keydown', (event) => {
+    if (event.code === 'KeyR' && !event.repeat) replaysOpen = !replaysOpen;
     if (killcam.state === 'off') return;
     const pick = ['Digit1', 'Digit2', 'Digit3'].indexOf(event.code);
     if (pick >= 0) killcam.view(VIEWS[pick]!);
@@ -335,10 +408,10 @@ async function main(): Promise<void> {
   };
   let catchUp = 0;
   /** A tick that was in the log before the join: only the match's tally takes it, and nothing is drawn. */
-  const foldTick = (tick: Tick) => {
+  const foldTick = (tick: Tick, offset: number | null) => {
     debug.ticks++;
     catchUp++;
-    match.update(tick, performance.now(), false);
+    match.update(tick, performance.now(), false, offset, replayFrom);
     recordState(tick);
   };
 
@@ -445,6 +518,7 @@ async function main(): Promise<void> {
           timing?.free();
           const times = killcam.times!;
           runs.push({ times, kill });
+          replaysOpen = false;
         }
       }
       e.free();
@@ -454,7 +528,7 @@ async function main(): Promise<void> {
       // Back in the game: the replay gives way to it.
       if (killcam.state !== 'off' && killcam.kill?.victim === mine.slot) killcam.skip(arrivedMs);
     }
-    match.update(tick, arrivedMs);
+    match.update(tick, arrivedMs, true, offset, replayFrom);
     recordState(tick);
     const phase = `${match.number}:${match.phase}`;
     if (debug.phases.at(-1) !== phase) debug.phases.push(phase);
@@ -479,7 +553,7 @@ async function main(): Promise<void> {
     } catch {
       return;
     }
-    if (catchingUp) foldTick(tick);
+    if (catchingUp) foldTick(tick, frame.offset);
     else onTick(tick, performance.now(), frame.offset, frame.payload);
     tick.free();
     if (!catchingUp) joiningSince = null;
@@ -743,6 +817,7 @@ async function main(): Promise<void> {
       controls.scoreboard,
       now,
     );
+    hud.replays(match, replaysOpen, replaysNote);
     const ownCraft = own && crafts.find((c) => c.slot === own!.slot);
     // The cursor comes back for the results, which are read rather than played.
     aim.update(

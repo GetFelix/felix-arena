@@ -1,6 +1,11 @@
 // The live HUD: score and clock, kill feed, your hull, boost and rail, the warmup and respawn banners, and the
 // scoreboard, which Tab shows and the results screen holds open.
-import { callsign, clock, type Match, type Standing } from './match';
+import { callsign, clock, type Kill, type Match, type Standing } from './match';
+
+/** The key a kill's element carries, which {@link killKey} gives back for a click. */
+export function killKey(kill: Kill): string {
+  return kill.replay ? `${kill.matchNumber}:${kill.replay.offset}:${kill.victim}` : '';
+}
 
 /** Your craft, as far as the HUD cares. */
 export interface Status {
@@ -31,7 +36,7 @@ export class Hud {
       .map((k) => {
         const team = (slot: number) => (match.standings().find((s) => s.slot === slot)?.violet ? 'violet' : 'coral');
         const how = k.rail ? 'railed' : 'eliminated';
-        return `<div><span class="${team(k.killer)}">${callsign(k.killer)}</span><span class="x">${how}</span><span class="${team(k.victim)}">${callsign(k.victim)}</span></div>`;
+        return `<div${k.replay ? ` data-kill="${killKey(k)}" title="Replay"` : ''}><span class="${team(k.killer)}">${callsign(k.killer)}</span><span class="x">${how}</span><span class="${team(k.victim)}">${callsign(k.victim)}</span></div>`;
       })
       .join('');
     this.html('feed', feed);
@@ -60,6 +65,31 @@ export class Hud {
     const board = match.phase === 'results' || scoreboard;
     this.hide('board', !board);
     if (board) this.board(match, me?.slot ?? null);
+  }
+
+  /** The replays panel: every kill held, by match, newest match first. `note` says what an earlier match's load did. */
+  replays(match: Match, open: boolean, note: string): void {
+    this.hide('replays', !open);
+    if (!open) return;
+    const teams = new Map(match.standings().map((s) => [s.slot, s.violet]));
+    const team = (slot: number) => (teams.get(slot) ? 'violet' : 'coral');
+    const held = match.replays();
+    if (!held.some(([n]) => n === match.number)) held.unshift([match.number, []]);
+    const html = held
+      .map(([number, kills]) => {
+        const rows = [...kills]
+          .reverse()
+          .map(
+            (k) =>
+              `<button class="kill" data-kill="${killKey(k)}"${k.replay ? '' : ' disabled'}><span class="t">${clock(k.seconds)}</span><span class="${team(k.killer)}">${callsign(k.killer)}</span><span class="x">${k.rail ? 'railed' : 'eliminated'}</span><span class="${team(k.victim)}">${callsign(k.victim)}</span></button>`,
+          )
+          .join('');
+        const title = number === match.number ? `Match ${number + 1} · now` : `Match ${number + 1}`;
+        return `<section><h4>${title}</h4>${rows || '<p>No kills yet</p>'}</section>`;
+      })
+      .join('');
+    this.html('replays-list', html);
+    this.text('replays-note', note);
   }
 
   private board(match: Match, mine: number | null): void {

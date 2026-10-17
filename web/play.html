@@ -87,6 +87,23 @@
         gap: 8px;
         align-items: center;
       }
+      .feed div[data-kill] {
+        pointer-events: auto;
+        cursor: pointer;
+        transition: border-color 150ms;
+      }
+      .feed div[data-kill]:hover {
+        border-color: var(--muted);
+      }
+      .feed div[data-kill]::after {
+        content: '';
+        width: 0;
+        height: 0;
+        border-left: 6px solid var(--muted);
+        border-top: 4px solid transparent;
+        border-bottom: 4px solid transparent;
+        margin-left: 2px;
+      }
       .feed .x {
         color: var(--muted);
         font-weight: 500;
@@ -521,6 +538,125 @@
       .tag {
         transition: opacity 200ms;
       }
+      .replays {
+        position: absolute;
+        top: 50%;
+        right: 16px;
+        transform: translateY(-50%);
+        width: min(360px, calc(100vw - 32px));
+        max-height: min(560px, calc(100vh - 140px));
+        overflow: auto;
+        padding: 18px 18px 14px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        backdrop-filter: blur(14px);
+        pointer-events: auto;
+      }
+      .replays h3 {
+        margin: 0 0 10px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 12px;
+        letter-spacing: 0.2em;
+      }
+      .replays kbd {
+        padding: 2px 6px;
+        border: 1px solid var(--line);
+        border-radius: 5px;
+        font:
+          500 11px 'JetBrains Mono',
+          monospace;
+        letter-spacing: 0;
+        color: var(--muted);
+      }
+      .replays h4 {
+        margin: 14px 0 6px;
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        color: var(--muted);
+      }
+      .replays p {
+        margin: 0;
+        font-size: 13px;
+        color: var(--muted);
+      }
+      .replays .kill {
+        width: 100%;
+        display: flex;
+        gap: 8px;
+        align-items: baseline;
+        padding: 7px 8px;
+        border: 0;
+        border-radius: 7px;
+        background: none;
+        color: var(--ink);
+        font:
+          600 13px Inter,
+          system-ui,
+          sans-serif;
+        text-align: left;
+        cursor: pointer;
+      }
+      .replays .kill:hover {
+        background: var(--line);
+      }
+      .replays .kill:disabled {
+        opacity: 0.4;
+        cursor: default;
+      }
+      .replays .kill .t {
+        width: 36px;
+        font:
+          500 11px 'JetBrains Mono',
+          monospace;
+        color: var(--muted);
+      }
+      .replays .kill .x {
+        font-weight: 500;
+        color: var(--muted);
+      }
+      .replays .earlier {
+        margin-top: 12px;
+        width: 100%;
+        padding: 8px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: none;
+        color: var(--muted);
+        font:
+          600 12px Inter,
+          system-ui,
+          sans-serif;
+        cursor: pointer;
+      }
+      .replays .earlier:hover {
+        color: var(--ink);
+      }
+      .replays .note {
+        margin-top: 8px;
+        min-height: 1em;
+        font-size: 12px;
+        color: var(--muted);
+        text-align: center;
+      }
+      .open-replays {
+        margin-left: 12px;
+        padding: 3px 8px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: var(--panel);
+        color: var(--ink);
+        font: inherit;
+        pointer-events: auto;
+        cursor: pointer;
+      }
+      body.replaying .replays {
+        opacity: 0;
+        pointer-events: none;
+      }
       .gone {
         position: absolute;
         top: 24%;
@@ -638,8 +774,15 @@
         </div>
       </div>
       <div class="gone" id="replay-gone" hidden>Replay no longer available</div>
+      <div class="replays" id="replays" hidden>
+        <h3>REPLAYS <kbd>R</kbd></h3>
+        <div id="replays-list"></div>
+        <button class="earlier" id="replays-earlier">Earlier match</button>
+        <div class="note" id="replays-note"></div>
+      </div>
       <div class="tag">
         <i></i><span id="where">felix-arena</span>
+        <button class="open-replays" id="open-replays">Replays</button>
         <label class="quality"
           >Quality
           <select id="quality">
