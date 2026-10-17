@@ -192,7 +192,12 @@ while (!done && Date.now() - started < LIMIT_MS) {
 }
 
 const who = async (page: Page) =>
-  page.evaluate(() => ({ slot: window.arena!.slot, ticks: window.arena!.ticks, hidden: document.hidden }));
+  page.evaluate(() => ({
+    slot: window.arena!.slot,
+    ticks: window.arena!.ticks,
+    reconnects: window.arena!.reconnects,
+    hidden: document.hidden,
+  }));
 console.log('ana:', await who(ana), 'ben:', await who(ben), 'bots:', Object.fromEntries(botSlots));
 const board = await ana.evaluate(() => ({
   title: document.getElementById('board-title')?.textContent,
