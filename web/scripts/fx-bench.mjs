@@ -7,6 +7,7 @@
 import { appendFileSync } from 'node:fs';
 import { chromium } from 'playwright';
 import { isolateRenderer } from './isolate.mjs';
+import { analyse, CATEGORIES } from './trace-diag.mjs';
 
 const [url] = process.argv.slice(2);
 if (!url) throw new Error('usage: fx-bench.mjs <fx-bench.html url>');
@@ -26,7 +27,13 @@ const isolation = await isolateRenderer(browser);
 
 // Warm up first, so shader compiles and the JIT's first passes are not counted as either cost.
 await page.evaluate(() => window.fxBench.run(120));
+await browser.startTracing(page, { categories: CATEGORIES });
 const { update, render } = await page.evaluate((n) => window.fxBench.run(n), FRAMES);
+{
+  const trace = await browser.stopTracing();
+  const r = analyse(trace, 'fx-render', 15);
+  console.log('DIAG', JSON.stringify(r));
+}
 const total = update.map((u, i) => u + render[i]);
 const pct = (xs, p) => [...xs].sort((a, b) => a - b)[Math.min(xs.length - 1, Math.floor((p / 100) * xs.length))];
 const ms = (x) => Number(x.toFixed(3));
