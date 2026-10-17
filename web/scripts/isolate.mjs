@@ -17,14 +17,19 @@ export async function isolateRenderer(browser) {
   // Without -a, taskset pins only the thread whose id is the process id: a renderer's main thread.
   const pin = (cpus, pid, all = true) =>
     execFileSync('taskset', [...(all ? ['-a'] : []), '-p', '-c', cpus, String(pid)], { stdio: 'ignore' });
-  for (const { type, id } of processInfo) {
-    if (type !== 'renderer') {
-      pin(rest, id);
-      continue;
+  try {
+    for (const { type, id } of processInfo) {
+      if (type !== 'renderer') {
+        pin(rest, id);
+        continue;
+      }
+      pin('1', id);
+      pin('0', id, false);
     }
-    pin('1', id);
-    pin('0', id, false);
+    pin(rest, process.pid);
+  } catch (e) {
+    // Timed anyway, and the report says so: no taskset, a process gone, or cores this job may not use.
+    return `renderer not isolated: ${e.message.split('\n')[0]}`;
   }
-  pin(rest, process.pid);
   return `renderer main thread on core 0, its other threads on 1, the rest of the browser on ${rest}`;
 }
