@@ -109,10 +109,10 @@ Each release on GitHub carries the built web client as
 static file server:
 
 ```bash
-gh release download v0.1.0 -R GetFelix/felix-arena -p 'felix-arena-web-*'
-shasum -a 256 -c felix-arena-web-v0.1.0.tar.gz.sha256
-tar -xzf felix-arena-web-v0.1.0.tar.gz
-cd felix-arena-web-v0.1.0 && python3 -m http.server 5173
+gh release download v0.1.2 -R GetFelix/felix-arena -p 'felix-arena-web-*'
+shasum -a 256 -c felix-arena-web-v0.1.2.tar.gz.sha256
+tar -xzf felix-arena-web-v0.1.2.tar.gz
+cd felix-arena-web-v0.1.2 && python3 -m http.server 5173
 # open http://localhost:5173/play.html?offline
 ```
 
