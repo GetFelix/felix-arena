@@ -91,6 +91,10 @@ export interface ArenaDebug {
   tier: string;
   /** The benchmark's report, once it has run. */
   bench: BenchReport | null;
+  /** Offline only: holds the page's own sim still, or lets it run, so a moment can be photographed. */
+  pause?: (paused: boolean) => void;
+  /** For screenshots: a slot whose shield is shown absorbing a shot from `(x, z)`, `ago` seconds in, every frame. */
+  absorbing: { slot: number; x: number; z: number; ago: number } | null;
 }
 
 declare global {
@@ -123,6 +127,7 @@ async function main(): Promise<void> {
     screenOf: () => ({ x: 0, y: 0 }),
     tier: '',
     bench: null,
+    absorbing: null,
   };
   window.arena = debug;
 
@@ -203,7 +208,16 @@ async function main(): Promise<void> {
   const inputs = new Inputs(Math.floor(Math.random() * 65536));
   let own: Own | null = null;
   /** Events waiting for the render time to reach their tick, oldest first. */
-  const due: { tick: number; kind: string; slot: number; by: number; x: number; z: number; target?: number }[] = [];
+  const due: {
+    tick: number;
+    kind: string;
+    slot: number;
+    by: number;
+    x: number;
+    z: number;
+    target?: number;
+    damage: number;
+  }[] = [];
   /** When your craft respawns, on the page's clock, while it is destroyed. */
   let respawnAt: number | null = null;
   /** The tick each slot last respawned in, for how much of its spawn protection is left. */
@@ -232,7 +246,16 @@ async function main(): Promise<void> {
     pacer.tick(s.tick, arrivedMs, mine ? mine.lastInput : null);
     for (const e of tick.events) {
       if (!(e.kind === 'fired' && e.slot === own?.slot)) {
-        due.push({ tick: s.tick, kind: e.kind, slot: e.slot, by: e.by, x: e.x, z: e.z, target: e.target });
+        due.push({
+          tick: s.tick,
+          kind: e.kind,
+          slot: e.slot,
+          by: e.by,
+          x: e.x,
+          z: e.z,
+          target: e.target,
+          damage: e.damage,
+        });
       }
       if (e.kind === 'killed' && e.slot === own?.slot) respawnAt = arrivedMs + (respawnTicks() * 1000) / 30;
       e.free();
@@ -315,9 +338,13 @@ async function main(): Promise<void> {
 
   if (OFFLINE) {
     const seconds = (name: string, fallback: number) => Number(params.get(name) ?? fallback);
-    gateway = BENCH
+    const offline = BENCH
       ? new Offline(2, seconds('length', 600), 15)
       : new Offline(seconds('warmup', 10), seconds('length', 300), seconds('results', 15));
+    debug.pause = (paused) => {
+      offline.paused = paused;
+    };
+    gateway = offline;
     key = playerKey(OFFLINE_PRINCIPAL);
     await gateway.subscribe('ticks', 'live', 'live', onFrame);
   } else {
@@ -403,6 +430,10 @@ async function main(): Promise<void> {
       const nose = [at.x + Math.cos(angle) * 130, at.z + Math.sin(angle) * 130] as const;
       if (e.kind === 'fired') {
         effects.fired(at.violet, nose[0], nose[1], t);
+      } else if (e.kind === 'hit' && e.damage === 0) {
+        // A shot the spawn shield stopped.
+        const from = crafts.find((c) => c.slot === e.by);
+        effects.absorbed(e.slot, from?.x ?? 0, from?.z ?? 0, t);
       } else if (e.kind === 'hit') {
         effects.hit(violet.get(e.by) ?? !at.violet, at.x, at.z, t);
       } else if (e.kind === 'railed') {
@@ -419,9 +450,13 @@ async function main(): Promise<void> {
     for (const c of crafts) {
       if (!c.alive || !c.protected) continue;
       const since = spawnedIn.get(c.slot);
-      const left = since === undefined || !frame ? protection : protection - (frame.renderTick - since);
+      // Counted to the newest tick at most: past it, nothing says the protection is still running down.
+      const at = frame ? Math.min(frame.renderTick, interpolator.newest?.tick ?? frame.renderTick) : 0;
+      const left = since === undefined || !frame ? protection : protection - (at - since);
       effects.shield(c.slot, c.violet, c.x, c.z, left);
     }
+    const posed = debug.absorbing;
+    if (posed) effects.absorbed(posed.slot, posed.x, posed.z, t - posed.ago);
     effects.update(t);
 
     arena.crystal.rotation.y = t * 0.2;

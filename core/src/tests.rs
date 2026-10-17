@@ -833,26 +833,30 @@ fn respawned_under_fire() -> World {
 fn spawn_protection_stops_shots_then_runs_out() {
     let mut world = respawned_under_fire();
     let fire = input(1, 0, 0, 32768, FIRE);
+    let mut absorbed = 0;
     // The respawn tick was the first of the protection.
     for step in 1..SPAWN_PROTECTION {
         world.step(|slot| (slot == 1).then_some(fire));
         let craft = world.crafts()[0];
         assert!(craft.protected, "step {step}");
         assert_eq!(craft.health, MAX_HEALTH, "step {step}");
-        assert!(
-            !world
-                .snapshot(0)
-                .events
-                .iter()
-                .any(|e| matches!(e, Event::Hit { target: 0, .. })),
-            "step {step}"
-        );
+        // Each stopped shot is told as a hit for nothing.
+        for e in world.snapshot(0).events {
+            if let Event::Hit {
+                target: 0, damage, ..
+            } = e
+            {
+                assert_eq!(damage, 0, "step {step}");
+                absorbed += 1;
+            }
+        }
         // Stopped by the shield, not passed through.
         assert!(
             world.snapshot(0).bolts.iter().all(|b| b.x > -150),
             "step {step}"
         );
     }
+    assert!(absorbed > 5, "{absorbed}");
     world.step(|slot| (slot == 1).then_some(fire));
     assert!(!world.crafts()[0].protected);
     let mut hit = false;

@@ -37,6 +37,8 @@ export class Offline implements Link {
   private heardMs = -Infinity;
   private offset = 0;
   private readonly bots = BOTS.map((_, i) => ({ turn: i % 2 ? 1 : -1, seq: 0 }));
+  /** Holds the world still: no steps and no ticks, for screenshots. */
+  paused = false;
 
   /** Match lengths in seconds. */
   constructor(warmup: number, length: number, results: number) {
@@ -61,6 +63,7 @@ export class Offline implements Link {
   }
 
   private step(): void {
+    if (this.paused) return;
     const tick = decodeTick(this.world.record());
     const crafts = tick.crafts.map((c) => ({
       slot: c.slot,
@@ -110,7 +113,7 @@ export class Offline implements Link {
 /**
  * A bot's stick, aim and buttons: close on the nearest enemy, circle it and fire; the bot in slot 2 fetches the rail
  * when it is up. `bot.turn` is which way it circles. An enemy under spawn protection is chased only when there is no
- * other, and not fired at, since shots cannot hurt it.
+ * other.
  */
 export function drive(
   me: { slot: number; violet: boolean; x: number; z: number; rail: number },
@@ -134,7 +137,7 @@ export function drive(
     // Close in from afar, circle at fighting range.
     const closing = distance > 1100 ? 1 : distance < 600 ? -0.5 : 0;
     [mx, mz] = [dx * closing - dz * bot.turn * 0.8, dz * closing + dx * bot.turn * 0.8];
-    if (distance < 1800 && !target.protected && Math.random() < 0.8) buttons |= 1;
+    if (distance < 1800 && Math.random() < 0.8) buttons |= 1;
     if (Math.random() < 0.004) buttons |= 2;
   }
   const length = Math.hypot(mx, mz) || 1;

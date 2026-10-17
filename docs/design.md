@@ -63,7 +63,8 @@ nearest live enemy, where an enemy within 15 m with a clear line to the point
 in the grid's order, so the choice is the same in the sim and in the browser.
 With no enemy alive the craft goes back to its spawn zone. For 60 ticks after
 it appears the craft takes no damage: bolts that reach it stop there and a rail
-ends on it, both harmlessly. Firing gives the protection up at once. The tick
+ends on it, each told as a hit for no damage so clients can draw the shield
+taking it. Firing gives the protection up at once. The tick
 carries it as a craft flag, so every client draws the shield.
 
 **The rail.** The crystal stands on a plinth 4.6 m across at its foot, which
