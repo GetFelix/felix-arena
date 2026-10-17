@@ -81,7 +81,7 @@ services:
         condition: service_completed_successfully
 
   gateway:
-    image: ghcr.io/getfelix/felix-gateway:0.4.0
+    image: ghcr.io/getfelix/felix-gateway:0.5.0
     environment:
       GATEWAY_FELIX_BROKERS: broker:5000
       GATEWAY_FELIX_CA_FILE: /state/broker-cert.pem

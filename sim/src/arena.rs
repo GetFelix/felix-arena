@@ -17,10 +17,21 @@ const REPORT_EVERY: Duration = Duration::from_secs(5);
 /// A commit still unanswered after this is counted as failed, so a hung
 /// broker cannot stop the arena's clock or its reports.
 const COMMIT_TIMEOUT: Duration = Duration::from_secs(1);
+/// The tick record's header: epoch, flags, match and tick number.
+const HEADER_LEN: usize = 12;
+
+/// The stream state key a keyframe's commit writes, and the key a match's
+/// first tick writes. Each value is the tick record's 12-byte header, and its
+/// version is the tick's offset.
+pub(crate) const KEYFRAME_KEY: &str = "keyframe";
+
+pub(crate) fn match_key(number: u32) -> String {
+    format!("match/{number}")
+}
 
 /// Step `arena`'s world on a 30 Hz timer forever with the inputs arriving in
-/// `inbox`, handing each tick's record to `commit`, which answers with the
-/// tick's log offset.
+/// `inbox`, handing each tick's record and the state keys it writes to
+/// `commit`, which answers with the tick's log offset.
 ///
 /// A commit finishes before the next tick starts, so ticks land in order. A
 /// tick that is due while a commit is still running is skipped rather than
@@ -32,7 +43,7 @@ pub(crate) async fn run<C, F>(
     inbox: Arc<Mutex<Inbox>>,
     mut commit: C,
 ) where
-    C: FnMut(Vec<u8>) -> F,
+    C: FnMut(Vec<u8>, Vec<(String, Vec<u8>)>) -> F,
     F: Future<Output = Result<u64>>,
 {
     let mut timer = tokio::time::interval(TICK);
@@ -42,6 +53,10 @@ pub(crate) async fn run<C, F>(
     let mut last_due: Option<Instant> = None;
     let mut previous_commit: Option<Duration> = None;
     let mut report = Report::new(Instant::now());
+    // The match whose start is committed. A start whose commit failed or
+    // timed out is written again with the next tick; a timed-out commit may
+    // have landed, so the key can end up a tick late, never missing.
+    let mut started_match: Option<u32> = None;
     loop {
         let due = timer.tick().await;
         if let Some(last) = last_due {
@@ -67,7 +82,16 @@ pub(crate) async fn run<C, F>(
             step_us: micros(started - due),
             previous_commit_us: previous_commit.map_or(0, micros),
         };
-        let answer = tokio::time::timeout(COMMIT_TIMEOUT, commit(tick.encode(Some(&timing))))
+        let record = tick.encode(Some(&timing));
+        let header = record[..HEADER_LEN].to_vec();
+        let mut keys = Vec::new();
+        if tick.is_keyframe() {
+            keys.push((KEYFRAME_KEY.to_owned(), header.clone()));
+        }
+        if started_match != Some(tick.match_number) {
+            keys.push((match_key(tick.match_number), header));
+        }
+        let answer = tokio::time::timeout(COMMIT_TIMEOUT, commit(record, keys))
             .await
             .unwrap_or_else(|_| Err(anyhow::anyhow!("no answer within {COMMIT_TIMEOUT:?}")));
         previous_commit = None;
@@ -77,6 +101,7 @@ pub(crate) async fn run<C, F>(
                 report.latency.record(took);
                 report.offset = Some(offset);
                 previous_commit = Some(took);
+                started_match = Some(tick.match_number);
                 // Readers compare this hash with their own decoding of the tick.
                 if tick.is_keyframe() {
                     info!(arena = %arena, epoch, tick = tick.tick, hash = %format!("{:016x}", tick.hash()), offset, "keyframe");
@@ -173,7 +198,7 @@ mod tests {
 
     use felix_arena_core::{Rules, Tick, Timing};
 
-    use super::{TICK, run};
+    use super::{KEYFRAME_KEY, TICK, run};
 
     /// What the tests read back from a record.
     #[derive(Clone, Copy)]
@@ -200,6 +225,19 @@ mod tests {
         length: Duration,
         latency: impl Fn(u32) -> Duration + Send + 'static,
     ) -> Vec<(Header, Instant)> {
+        keyed_commits(length, move |tick| Ok(latency(tick)))
+            .await
+            .into_iter()
+            .map(|(header, at, _)| (header, at))
+            .collect()
+    }
+
+    /// As [`commits`], with the state keys each commit wrote; `answer(n)`
+    /// failing fails tick `n`'s commit.
+    async fn keyed_commits(
+        length: Duration,
+        answer: impl Fn(u32) -> Result<Duration, ()> + Send + 'static,
+    ) -> Vec<(Header, Instant, Vec<(String, Vec<u8>)>)> {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let log = Arc::clone(&seen);
         let arena = tokio::spawn(run(
@@ -207,12 +245,16 @@ mod tests {
             1,
             Rules::default(),
             Arc::default(),
-            move |record: Vec<u8>| {
+            move |record: Vec<u8>, keys: Vec<(String, Vec<u8>)>| {
                 let header = header(&record);
                 assert_eq!(Timing::of(&record).is_some(), header.timed);
-                log.lock().unwrap().push((header, Instant::now()));
-                let wait = latency(header.tick);
+                for (_, value) in &keys {
+                    assert_eq!(value[..], record[..12]);
+                }
+                log.lock().unwrap().push((header, Instant::now(), keys));
+                let answer = answer(header.tick);
                 async move {
+                    let wait = answer.map_err(|()| anyhow::anyhow!("refused"))?;
                     tokio::time::sleep(wait).await;
                     Ok(u64::from(header.tick))
                 }
@@ -233,6 +275,39 @@ mod tests {
             assert_eq!(header.epoch, 1);
             assert_eq!(header.keyframe, (i + 1) % 30 == 0);
         }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_keyframe_writes_its_key_and_a_match_start_writes_its_own() {
+        let seen = keyed_commits(Duration::from_secs(2), |_| Ok(Duration::from_millis(2))).await;
+        assert_eq!(seen.len(), 60);
+        for (header, _, keys) in &seen {
+            let mut expected = Vec::new();
+            if header.keyframe {
+                expected.push(KEYFRAME_KEY.to_owned());
+            }
+            if header.tick == 1 {
+                expected.push("match/0".to_owned());
+            }
+            let names: Vec<String> = keys.iter().map(|(name, _)| name.clone()).collect();
+            assert_eq!(names, expected, "tick {}", header.tick);
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_match_start_whose_commit_failed_is_written_again() {
+        let seen = keyed_commits(Duration::from_millis(200), |tick| {
+            if tick == 1 {
+                Err(())
+            } else {
+                Ok(Duration::from_millis(2))
+            }
+        })
+        .await;
+        let names = |i: usize| -> Vec<&str> { seen[i].2.iter().map(|(n, _)| n.as_str()).collect() };
+        assert_eq!(names(0), ["match/0"]);
+        assert_eq!(names(1), ["match/0"]);
+        assert!(names(2).is_empty());
     }
 
     #[tokio::test(start_paused = true)]

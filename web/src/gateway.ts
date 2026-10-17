@@ -1,9 +1,9 @@
 // The browser end of felix-gateway's protocol, as much of it as the game uses:
-// join, and subscriptions in named slots whose events arrive as binary frames.
+// join, subscriptions in named slots whose events arrive as binary frames, and stream state reads.
 // felix-gateway's docs/protocol.md is the reference.
 
 /** The optional protocol features the game needs. */
-export const FEATURES = ['binary_events', 'slots'] as const;
+export const FEATURES = ['binary_events', 'slots', 'state'] as const;
 
 /** One event frame from the gateway. Times are µs since the Unix epoch. */
 export interface EventFrame {
@@ -62,6 +62,23 @@ export interface Subscribed {
   liveOffset: number | null;
 }
 
+/** A key of a stream's state, as `state_value` reports it. */
+export interface StateValue {
+  /** `null` when the key was never written or was deleted. */
+  payload: Uint8Array | null;
+  /** The offset of the commit that wrote the value. */
+  version: number | null;
+  /** The offset of the last commit the answer reflects. */
+  asOf: number | null;
+}
+
+function unbase64(text: string): Uint8Array {
+  const binary = atob(text);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
 /** An error the gateway answered with. */
 export class GatewayError extends Error {
   override name = 'GatewayError';
@@ -89,8 +106,8 @@ export class Gateway {
   private readonly slots = new Map<string, number>();
   /** Subscribes waiting for an answer, oldest first, by `stream/slot`. */
   private readonly pending = new Map<string, Pending[]>();
-  /** Publishes waiting for an `ack`, by id. */
-  private readonly publishes = new Map<number, { resolve: () => void; reject: (err: Error) => void }>();
+  /** Requests waiting for their answer by id: publishes for an `ack`, state reads for a `state_value`. */
+  private readonly requests = new Map<number, { resolve: (answer: Json) => void; reject: (err: Error) => void }>();
   private nextId = 1;
   private closing = false;
   /** Called with errors that answer no pending request, such as `subscription_ended`. */
@@ -103,7 +120,11 @@ export class Gateway {
   ) {
     socket.addEventListener('message', (message) => this.receive(message));
     socket.addEventListener('close', () => {
-      if (!this.closing) this.onError(new GatewayError('closed', 'the gateway closed the session'));
+      const closed = new GatewayError('closed', 'the gateway closed the session');
+      // Nothing more will answer what is still waiting.
+      for (const request of this.requests.values()) request.reject(closed);
+      this.requests.clear();
+      if (!this.closing) this.onError(closed);
     });
   }
 
@@ -168,11 +189,25 @@ export class Gateway {
   }
 
   /** Publish `payload` to `stream` and wait for Felix to take it. */
-  publish(stream: string, payload: Uint8Array): Promise<void> {
+  async publish(stream: string, payload: Uint8Array): Promise<void> {
+    await this.request({ type: 'publish', stream, payload: base64(payload), ack: true });
+  }
+
+  /** Read `key` of `stream`'s state: the value a commit wrote with its event, and that commit's offset. */
+  async stateGet(stream: string, key: string): Promise<StateValue> {
+    const answer = await this.request({ type: 'state_get', stream, key });
+    return {
+      payload: typeof answer.payload === 'string' ? unbase64(answer.payload) : null,
+      version: (answer.version as number | null) ?? null,
+      asOf: (answer.as_of as number | null) ?? null,
+    };
+  }
+
+  private request(message: Json): Promise<Json> {
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
-      this.publishes.set(id, { resolve, reject });
-      this.socket.send(JSON.stringify({ type: 'publish', stream, payload: base64(payload), ack: true, id }));
+      this.requests.set(id, { resolve, reject });
+      this.socket.send(JSON.stringify({ ...message, id }));
     });
   }
 
@@ -224,19 +259,19 @@ export class Gateway {
         startOffset: json.start_offset as number | null,
         liveOffset: json.live_offset as number | null,
       });
-    } else if (json.type === 'ack') {
+    } else if (json.type === 'ack' || json.type === 'state_value') {
       const id = json.id as number;
-      this.publishes.get(id)?.resolve();
-      this.publishes.delete(id);
+      this.requests.get(id)?.resolve(json);
+      this.requests.delete(id);
     } else if (json.type === 'error') {
       const err = new GatewayError(String(json.code), String(json.message));
-      const publish = typeof json.id === 'number' ? this.publishes.get(json.id) : undefined;
-      if (publish) {
-        this.publishes.delete(json.id as number);
-        return publish.reject(err);
+      const request = typeof json.id === 'number' ? this.requests.get(json.id) : undefined;
+      if (request) {
+        this.requests.delete(json.id as number);
+        return request.reject(err);
       }
       // `subscription_ended` follows a `subscribed`, and an error with an id
-      // answers a publish, so neither answers a subscribe.
+      // answers a request, so neither answers a subscribe.
       const answer = json.code === 'subscription_ended' || json.id !== undefined ? null : this.answered(json);
       if (answer) answer.request.reject(err);
       else this.onError(err);

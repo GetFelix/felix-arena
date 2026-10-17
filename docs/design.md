@@ -257,7 +257,7 @@ and never per match. That sidesteps the lack of an all-or-nothing create
 |---|---|---|---|
 | Ticks: the match | Durable stream, 1 shard, `Quorum`, 3 replicas | `arena.ticks.<arena>` | Log-backed, until broker-wide retention trims it |
 | Latest keyframe | Stream state key on the tick stream | `keyframe` | Written atomically with the keyframe tick |
-| Match start offsets | Stream state keys on the tick stream | `match/<n>` | Same |
+| Match start offsets | Stream state keys on the tick stream | `match/<n>` | Written atomically with the match's first tick |
 | Player inputs | Ephemeral stream | `arena.input.<arena>` | None, at most once by design |
 | Who is connected | Cache keys with TTL | `arena.members.<arena>` / `<session>` | TTL 30 s, refreshed every 10 s |
 | Simulation epoch | Counter | `arena.epoch.<arena>` / `sim` | Log-backed |
@@ -319,7 +319,7 @@ Each tick is one atomic commit on the tick stream (`Client::commit`,
 than a plain publish:
 
 1. **The answer carries the offset.** `CommitOk { offset }` comes back on every commit. A plain acked publish returns its offset only when the whole broker runs with ack-on-commit ([felix#956](https://github.com/GetFelix/felix/issues/956)); the sim needs the offset of every tick for the kill cam, without making every stream on the broker pay for it.
-2. **A keyframe and its pointer land together.** Every 30th tick is a keyframe, and its commit also writes the stream state key `keyframe`. A reader of that key gets the keyframe's offset as the value's version, and on a `Quorum` stream a state read never reflects a commit a failover could take back.
+2. **A keyframe and its pointer land together.** Every 30th tick is a keyframe, and its commit also writes the stream state key `keyframe`. A reader of that key gets the keyframe's offset as the value's version, and on a `Quorum` stream a state read never reflects a commit a failover could take back. The first tick of each match writes `match/<n>` the same way, so a replay can find where match `n` began. Both values are the tick's 12-byte header, so a reader knows the match and tick number without reading the record. A start whose commit failed or timed out is written again with the next tick. A commit that timed out may still have landed, so `match/<n>` can point a tick or two after the true start, during the warmup; a missing key would be worse. A sim that restarts starts its world again at match 0 and rewrites `match/0`.
 3. **Order.** The sim waits for each commit's answer before sending the next, so ticks land in tick order. A commit takes a few milliseconds in-region, well inside the 33 ms tick. A tick that falls due while a commit is still running is skipped, not made up later, so a slow commit never sends a burst of ticks.
 
 A tick record holds the whole dynamic state, so any single tick can be drawn
@@ -389,6 +389,7 @@ and is the place the browser's WebSocket ends. It differs in three ways:
 - **Binary frames for events.** Ticks go to the browser as binary WebSocket messages, an offset plus the payload. JSON with base64, as felix-canvas uses, would cost a third more bytes and a parse per tick. This is felix-gateway's `binary_events` feature (0.4.0).
 - **Two subscription slots per connection on the tick stream:** `live` and `replay`, so a kill cam never disturbs the live view. This is felix-gateway's `slots` feature (0.4.0).
 - **The sender stamp** on inputs, above.
+- **State reads.** The join path's `state_get` is felix-gateway's `state` feature (0.5.0), authorized as a subscribe to the tick stream.
 
 The [throttle](https://github.com/GetFelix/felix-gateway/blob/main/docs/protocol.md#throttle)
 message carries over unchanged, for demonstration 3.
