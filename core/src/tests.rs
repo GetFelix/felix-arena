@@ -76,6 +76,25 @@ fn a_tick_round_trips_through_its_record() {
 }
 
 #[test]
+fn a_kill_carries_its_replay_offset_through_the_record() {
+    let mut tick = free_play(0).snapshot(0);
+    for replay_from in [Some(0), Some(1 << 40), Some(u64::MAX - 1), None] {
+        tick.events = vec![Event::Killed {
+            victim: 1,
+            killer: 2,
+            replay_from,
+        }];
+        let record = tick.encode(None);
+        assert_eq!(Tick::decode(&record), Some((tick.clone(), None)));
+        // The event is the kind byte, the two slots and the offset.
+        assert_eq!(
+            record.len(),
+            free_play(0).snapshot(0).encode(None).len() + 11
+        );
+    }
+}
+
+#[test]
 fn the_header_matches_the_design() {
     let mut world = free_play(3);
     for _ in 0..30 {
@@ -271,6 +290,7 @@ fn bolts_hit_damage_and_kill() {
                 Event::Killed {
                     victim: 1,
                     killer: 0,
+                    replay_from: None,
                 } => killed = true,
                 _ => {}
             }

@@ -2,6 +2,7 @@
 // two bots (dan and eve) make it two a side through the gateway, and the match must run from warmup through play
 // and results into the next match's warmup. Screenshots of the live game and the results go to `out`, at 1920x1080.
 // The sim must run a short match (SIM_* settings); see the `match` job in CI.
+// A watcher checks the replay offset every kill names (scripts/kill-offsets.ts).
 // Usage: npx vite-node scripts/match.ts -- <play page url> <out dir>
 import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -9,6 +10,7 @@ import { chromium, type Page } from 'playwright';
 import { loadCore } from '../src/core';
 import type { ArenaDebug } from '../src/play';
 import { bot, botSlots } from './bot';
+import { watchKills } from './kill-offsets';
 
 const [base, out] = process.argv.slice(2).filter((arg) => arg !== '--');
 if (!base || !out) throw new Error('usage: match.ts <play page url> <out dir>');
@@ -75,6 +77,7 @@ async function play(page: Page, a: Arena, circle: number): Promise<void> {
   else await page.mouse.up();
 }
 
+const kills = await watchKills('cleo', ARENA);
 const browser = await chromium.launch({
   args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'],
 });
@@ -163,6 +166,7 @@ const board = await ana.evaluate(() => ({
 }));
 for (const stop of stopBots) stop();
 await browser.close();
+const checkedKills = await kills.check();
 console.log('phases:', seen.join(' → '));
 console.log('last scoreboard:', board);
 if (errors.length) throw new Error(errors.join('\n'));
@@ -171,4 +175,6 @@ if (!shotLive || !shotResults) throw new Error('a screenshot is missing');
 console.log(`${players.size} crafts flew, ${scored} kills in the match`);
 if (players.size < 4) throw new Error(`only ${players.size} crafts joined; the bots should make four`);
 if (scored === 0) throw new Error('nobody was destroyed in the whole match');
+if (checkedKills === 0) throw new Error('no kill had its replay offset checked');
+console.log(`${checkedKills} kills named the offset of the tick 3 s earlier`);
 process.exit(0);

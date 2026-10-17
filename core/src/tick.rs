@@ -124,9 +124,14 @@ pub enum Event {
         bolt: u16,
         damage: u8,
     },
+    /// `replay_from` is the log offset of the tick to start the kill cam
+    /// from, about 3 seconds earlier. Only the sim knows offsets, so a world
+    /// stepped anywhere else leaves it `None`, as does a kill with no earlier
+    /// tick committed in the same phase.
     Killed {
         victim: u8,
         killer: u8,
+        replay_from: Option<u64>,
     },
     /// `slot` took the rail from the centre crystal.
     PickedUp {
@@ -183,6 +188,8 @@ const FIRE_SHIFT: u8 = 3;
 const CHARGE_SHIFT: u8 = 2;
 /// A railed event's target when the beam hit no craft.
 const NO_TARGET: u8 = 255;
+/// A killed event's `replay_from` when there is none.
+const NO_OFFSET: u64 = u64::MAX;
 
 impl Craft {
     pub(crate) fn spawned(slot: u8, team: Team, x: i16, z: i16, heading: u16) -> Self {
@@ -450,7 +457,14 @@ impl Event {
                 out.extend_from_slice(&bolt.to_le_bytes());
                 out.push(damage);
             }
-            Event::Killed { victim, killer } => out.extend_from_slice(&[6, victim, killer]),
+            Event::Killed {
+                victim,
+                killer,
+                replay_from,
+            } => {
+                out.extend_from_slice(&[6, victim, killer]);
+                out.extend_from_slice(&replay_from.unwrap_or(NO_OFFSET).to_le_bytes());
+            }
             Event::PickedUp { slot } => out.extend_from_slice(&[7, slot]),
             Event::Railed { slot, target, x, z } => {
                 out.extend_from_slice(&[8, slot, target.unwrap_or(NO_TARGET)]);
@@ -483,6 +497,7 @@ impl Event {
             6 => Event::Killed {
                 victim: r.u8()?,
                 killer: r.u8()?,
+                replay_from: Some(r.u64()?).filter(|o| *o != NO_OFFSET),
             },
             7 => Event::PickedUp { slot: r.u8()? },
             8 => Event::Railed {

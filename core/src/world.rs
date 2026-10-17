@@ -562,6 +562,7 @@ impl World {
         self.events.push(Event::Killed {
             victim: slot,
             killer: attacker,
+            replay_from: None,
         });
         let killer_team = self
             .players
