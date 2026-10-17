@@ -6,6 +6,7 @@
 // Usage: node scripts/input-to-pixel.mjs <play page url>. The page and the dev stack must already be up.
 import { appendFileSync } from 'node:fs';
 import { chromium } from 'playwright';
+import { analyse, CATEGORIES } from './trace-diag.mjs';
 
 const url = process.argv[2];
 if (!url) throw new Error('usage: input-to-pixel.mjs <play page url>');
@@ -24,6 +25,7 @@ await page.waitForTimeout(1000);
 
 const start = await page.evaluate(() => ({ ...window.arena.own }));
 await page.evaluate(() => (window.arena.inputToPixel.length = 0));
+if (process.env.DIAG) await browser.startTracing(page, { categories: CATEGORIES });
 // Hold D for a second while sweeping the mouse, then tap keys and move the mouse in single steps.
 await page.keyboard.down('KeyD');
 for (let i = 0; i < 20; i++) {
@@ -43,6 +45,13 @@ for (const key of ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyW', 'KeyA', 'KeyS', 'KeyD
   await page.waitForTimeout(90);
 }
 const samples = await page.evaluate(() => [...window.arena.inputToPixel]);
+if (process.env.DIAG) {
+  const trace = await browser.stopTracing();
+  const diag = { updates: samples.map((s) => Number(s.update.toFixed(2))),
+    input: analyse(trace, 'input-update'), page: analyse(trace, 'page-update') };
+  appendFileSync('diag-itp.json', JSON.stringify(diag, null, 1));
+  console.log('DIAG', JSON.stringify(diag));
+}
 const frames = await page.evaluate(
   () =>
     new Promise((resolve) => {

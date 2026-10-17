@@ -1,0 +1,88 @@
+# TEMPORARY: repeated runs of the three timing gates, for the perf-gates PR. Removed before merge.
+name: diag perf gates
+on:
+  push:
+    branches: [ci-sound-perf-gates]
+jobs:
+  fx:
+    name: fx bench ${{ matrix.run }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        run: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@0.2.129
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm run core
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - name: fx bench
+        env:
+          DIAG: '1'
+        run: |
+          npx vite preview --host 127.0.0.1 --port 4175 --strictPort &
+          for _ in $(seq 1 30); do curl -sf http://127.0.0.1:4175/fx-bench.html >/dev/null && break; sleep 1; done
+          node scripts/fx-bench.mjs http://127.0.0.1:4175/fx-bench.html
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: diag-fx-${{ matrix.run }}
+          path: web/diag-*.json
+  dev:
+    name: dev stack ${{ matrix.run }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        run: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    steps:
+      - uses: actions/checkout@v4
+      - run: dev/up.sh
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@0.2.129
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: interpolation smoke
+        working-directory: web
+        env:
+          DIAG: '1'
+        run: |
+          npm ci
+          npm run core
+          npx vitest run --config vitest.smoke.config.ts smoke/interpolation.test.ts
+      - name: input to pixel
+        if: always()
+        working-directory: web
+        env:
+          DIAG: '1'
+        run: |
+          npm run build
+          npx playwright install --with-deps chromium
+          npx vite preview --host 127.0.0.1 --port 4173 --strictPort &
+          for _ in $(seq 1 30); do curl -sf http://127.0.0.1:4173/play.html >/dev/null && break; sleep 1; done
+          node scripts/input-to-pixel.mjs 'http://127.0.0.1:4173/play.html?arena=alpha&as=ana&quality=low'
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: diag-dev-${{ matrix.run }}
+          path: web/diag-*.json
