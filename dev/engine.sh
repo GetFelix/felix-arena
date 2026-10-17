@@ -14,6 +14,10 @@ if [[ -z "$engine" ]]; then
   fi
 fi
 compose=("$engine" compose -f compose.yml)
+# ARENA_COMPOSE_EXTRA names a file of overrides on top, such as retention.yml.
+if [[ -n "${ARENA_COMPOSE_EXTRA:-}" ]]; then
+  compose+=(-f "$ARENA_COMPOSE_EXTRA")
+fi
 
 # podman compose hands off to docker-compose, which reads ~/.docker/config.json.
 # A credsStore left there by Docker Desktop names a helper that is gone, and

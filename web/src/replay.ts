@@ -1,6 +1,7 @@
 // The kill cam's ticks (docs/design.md, "The kill cam"): a fresh read of the log from the offset the kill names, and
 // a playback clock over it that slows for the half second before the kill.
 import { decodeTick, type Tick } from './core';
+import type { StateValue } from './gateway';
 import { boltsBetween, between, type BoltState, type CraftState, snapshot, type Snapshot } from './interpolation';
 
 /** Ticks a second. */
@@ -272,4 +273,90 @@ export class Playback {
       done: r >= this.replay.end && this.replay.times.afterMs !== null,
     };
   }
+}
+
+/** A kill found in the log, as the kill feed lists it. */
+export interface LoggedKill {
+  killer: number;
+  victim: number;
+  rail: boolean;
+  matchNumber: number;
+  /** Seconds left on the match's clock. */
+  seconds: number;
+  replay: KillRef | null;
+}
+
+/** The most records one scan reads: a 10-minute match. */
+const SCAN_MAX = 18_000;
+
+/**
+ * Every kill of match `number`, read from its log: from the offset the `match/<n>` state key names to the one
+ * `match/<n+1>` names. Where retention has taken the match's start, the scan starts at the oldest record left, so
+ * the answer is the kills still in the log. `null` when the match never started or is entirely gone.
+ */
+export async function killsOf(
+  log: Reader & { stateGet(stream: string, key: string): Promise<StateValue> },
+  number: number,
+): Promise<LoggedKill[] | null> {
+  const [start, next] = await Promise.all([
+    log.stateGet('ticks', `match/${number}`),
+    log.stateGet('ticks', `match/${number + 1}`),
+  ]);
+  if (start.version === null) return null;
+  const end = next.version;
+  let from = start.version;
+  const kills: LoggedKill[] = [];
+  let read = 0;
+  while ((end === null || from < end) && read < SCAN_MAX) {
+    let page: Page;
+    try {
+      page = await log.read('ticks', from, end);
+    } catch (err) {
+      const oldest = (err as { code?: string; oldest?: number | null }).oldest;
+      if ((err as { code?: string }).code !== 'trimmed' || oldest == null || oldest <= from) throw err;
+      if (end !== null && oldest >= end) return null;
+      from = oldest;
+      continue;
+    }
+    if (page.records.length === 0) break;
+    read += page.records.length;
+    for (const record of page.records) {
+      let tick: Tick;
+      try {
+        tick = decodeTick(record.payload);
+      } catch {
+        continue;
+      }
+      const events = tick.events;
+      const railed = new Set<number>();
+      for (const e of events) if (e.kind === 'railed' && e.target !== undefined) railed.add(e.target);
+      for (const e of events) {
+        if (e.kind === 'killed' && tick.matchNumber === number) {
+          kills.push({
+            killer: e.by,
+            victim: e.slot,
+            rail: railed.has(e.slot),
+            matchNumber: number,
+            seconds: Math.ceil(tick.phaseLeft / 30),
+            replay:
+              e.replayFrom === undefined
+                ? null
+                : {
+                    matchNumber: number,
+                    tick: tick.tick,
+                    offset: record.offset,
+                    replayFrom: e.replayFrom,
+                    victim: e.slot,
+                    killer: e.by,
+                    epoch: tick.epoch,
+                  },
+          });
+        }
+      }
+      for (const e of events) e.free();
+      tick.free();
+    }
+    from = page.nextOffset;
+  }
+  return kills;
 }

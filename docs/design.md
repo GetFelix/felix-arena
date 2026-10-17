@@ -563,13 +563,26 @@ replay, and the headline feature would stop demonstrating anything about the
 log.
 
 **Replays from the feed.** Each kill in the kill feed carries its
-`replay_from`, so any viewer can replay any kill of the match, or of earlier
-matches through the `match/<n>` state keys, for as long as retention keeps the
-log. Felix keeps durable logs until a broker-wide limit trims them, and
-per-stream retention is not applied yet
+`replay_from`, so any viewer can replay any kill: click it in the feed, or open
+the replays panel (R, or the Replays button), which lists every kill the page
+has seen, by match, for the last five matches. A replay from the feed has no
+death beat; it starts as soon as it is read. Kills of a match the page did not
+see are found through the `match/<n>` state keys: the panel's "Earlier match"
+reads `match/<n>` and `match/<n+1>` and scans that stretch of the log with
+range reads for killed events (`killsOf` in `web/src/replay.ts`), about 3 MB
+for a 5-minute match. Where retention has taken the match's start, the scan
+starts at the oldest record left, which the refusal names.
+
+Felix keeps durable logs until a broker-wide limit trims them, and per-stream
+retention is not applied yet
 ([felix#964](https://github.com/GetFelix/felix/issues/964)). A replay whose
-offset has been trimmed is refused as `CursorTooOld`, and the client says
-"Replay no longer available".
+offset has been trimmed is refused as `CursorTooOld`, which the gateway answers
+as `trimmed`, and the client says "Replay no longer available". CI's `kill
+feed` job runs a broker that keeps about a minute of each log
+(`dev/retention.yml`): a spectator replays the last match's final kill from the
+panel, a fresh page finds that match's kills through `match/<n>` and replays
+one, and once retention has passed the match's first kill, replaying it shows
+the message.
 
 **Cost.** One kill cam is two or three range reads and about 40 KB of the
 log. A match with 8 players averages about one kill every 6 seconds, so the

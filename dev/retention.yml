@@ -1,0 +1,10 @@
+# Broker-wide retention short enough to watch it trim a tick log: 64 KB
+# segments and about 512 KB kept per log, a little over a minute of ticks at
+# 30 Hz. CI's `kill feed` job uses it to see a replay refused as trimmed.
+# Use: ARENA_COMPOSE_EXTRA=retention.yml dev/up.sh
+services:
+  broker:
+    environment:
+      FELIX_DURABLE_SEGMENT_BYTES: "65536"
+      FELIX_DURABLE_RETENTION_BYTES: "524288"
+      FELIX_DURABLE_RETENTION_INTERVAL_SECONDS: "1"

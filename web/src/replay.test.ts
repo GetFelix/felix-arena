@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { loadCore } from './core';
+import { decodeTick, loadCore } from './core';
 import { botMatch, type Fixture } from './kills.fixture';
-import { AFTER, fetchReplay, Playback, type Reader, Replay, speedAt } from './replay';
+import { AFTER, fetchReplay, killsOf, Playback, type Reader, Replay, speedAt } from './replay';
 
 let match: Fixture;
 beforeAll(() => {
@@ -94,5 +94,29 @@ describe('a replay', () => {
     expect(ms / 1000).toBeLessThan(4.8);
     expect(seen).toContain(`${kill.tick}:killed`);
     expect(frame.crafts.find((c) => c.slot === kill.victim)?.alive).toBe(false);
+  });
+
+  it('finds the kills of a match in its log, from the oldest record left when its start was trimmed', async () => {
+    const oldest = 500;
+    const inner = log(match.records, () => match.records.length, 300);
+    const scanned = {
+      read: (stream: string, from: number, end: number | null, max?: number) =>
+        from < oldest
+          ? Promise.reject(Object.assign(new Error('gone'), { code: 'trimmed', oldest }))
+          : inner.read(stream, from, end, max),
+      stateGet: async (_stream: string, key: string) =>
+        key === 'match/0' ? { payload: null, version: 0, asOf: null } : { payload: null, version: null, asOf: null },
+    };
+    const kills = await killsOf(scanned, 0);
+    // Every kill from the oldest record on; the records come from core's world, which names no replay offsets.
+    const expected = match.records.slice(oldest).flatMap((record) => {
+      const tick = decodeTick(record);
+      const found = tick.events.filter((e) => e.kind === 'killed').map((e) => [e.by, e.slot]);
+      tick.free();
+      return found;
+    });
+    expect(expected.length).toBeGreaterThan(3);
+    expect(kills?.map((k) => [k.killer, k.victim])).toEqual(expected);
+    expect(await killsOf(scanned, 1)).toBeNull();
   });
 });
