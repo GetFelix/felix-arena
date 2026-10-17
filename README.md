@@ -116,7 +116,9 @@ cd felix-arena-web-v0.1.0 && python3 -m http.server 5173
 # open http://localhost:5173/play.html?offline
 ```
 
-`play.html?offline` runs the game in the page against three bots. With the
+`play.html?offline` runs the game in the page against three bots;
+`&bots=easy|normal|hard` and `&botcount=1..3` set how many and how well they
+play. With the
 development stack below running, `play.html?arena=alpha&as=ana` plays through
 Felix instead.
 
@@ -164,6 +166,10 @@ the scoreboard. `dev/compose.yml` lets `ana`, `ben`, `dan` and `eve` play.
 
 `play.html?offline` needs no dev stack: core's world runs in the page as the
 sim, with three bots, so the game can be seen and played anywhere.
+`&bots=easy|normal|hard` (normal by default) sets how well the bots aim, how
+quickly they react, how they pace their fire and whether they chase across the
+arena; `&botcount=1..3` (3 by default) sets how many. They steer through the
+same input path as a player.
 `&length=`, `&warmup=` and `&results=` shorten the match, in seconds.
 
 `npm run smoke` checks the same path from Node: ticks arrive at 30 Hz, the
