@@ -174,6 +174,35 @@ jobs:
       - if: failure()
         run: docker compose -f dev/compose.yml logs --no-color
 
+  join:
+    name: join mid-match
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: dev/up.sh
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@0.2.129
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Cold spectators join a match being played, draw within 500 ms p50, and fold to the player's state
+        working-directory: web
+        run: |
+          npm ci
+          npm run core
+          npm run build
+          npx playwright install --with-deps chromium
+          npx vite preview --host 127.0.0.1 --port 4173 --strictPort &
+          for _ in $(seq 1 30); do curl -sf http://127.0.0.1:4173/play.html >/dev/null && break; sleep 1; done
+          npx vite-node scripts/join.ts -- http://127.0.0.1:4173/play.html 20
+      - if: failure()
+        run: docker compose -f dev/compose.yml logs --no-color
+
   match:
     name: match
     runs-on: ubuntu-latest

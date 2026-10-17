@@ -2,7 +2,7 @@
 // its ticks reach the page as they would through Felix. `play.html?offline` uses it, so the game can be seen and
 // played without the dev stack. It is not part of the game.
 import { decodeInput, decodeTick, World } from './core';
-import type { EventFrame, GatewayError } from './gateway';
+import type { EventFrame, GatewayError, StateValue, Subscribed } from './gateway';
 import { TICK_MS } from './interpolation';
 
 /** The principal the page plays as. */
@@ -16,12 +16,13 @@ const LATENCY_MS = 25;
 export interface Link {
   readonly missing: readonly string[];
   onError: (err: GatewayError) => void;
+  stateGet(stream: string, key: string): Promise<StateValue>;
   subscribe(
     stream: string,
     slot: string,
     from: number | 'live',
     onEvent: (frame: EventFrame) => void,
-  ): Promise<unknown>;
+  ): Promise<Subscribed>;
   send(stream: string, payload: Uint8Array): void;
 }
 
@@ -48,9 +49,14 @@ export class Offline implements Link {
     setInterval(() => this.step(), TICK_MS);
   }
 
+  /** The page's sim keeps no log, so there is no keyframe to start from and a join starts live. */
+  stateGet(): Promise<StateValue> {
+    return Promise.resolve({ payload: null, version: null, asOf: null });
+  }
+
   subscribe(_stream: string, _slot: string, _from: number | 'live', onEvent: (frame: EventFrame) => void) {
     this.listener = onEvent;
-    return Promise.resolve();
+    return Promise.resolve({ sub: 0, startOffset: null, liveOffset: null });
   }
 
   send(_stream: string, payload: Uint8Array): void {

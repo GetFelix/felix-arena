@@ -366,7 +366,26 @@ A player or spectator reads the `keyframe` state key, whose version is the
 keyframe's offset `K` (`StateValue.version`, see `docs/atomic-commit.md`), and
 subscribes from `K`. The first event is the keyframe, followed by at most 29
 ticks of catch-up, then live ticks. The client applies the catch-up without
-drawing it and starts rendering at the newest tick.
+drawing it and starts rendering at the newest tick. The subscription's answer
+names the log's tail when it was registered, so the client knows which ticks
+are catch-up: every one before the last record under that tail. Catch-up
+ticks only feed the match's tally; kills in them do not reach the kill feed,
+the page draws nothing from the state read until the fold reaches the newest
+tick, so no frame holds its thread off the ticks, and the interpolator starts
+from the newest tick
+(`web/src/join.ts`). A stream with no keyframe yet is joined live.
+
+The page exposes the join's timings and, for each recent tick, the state it
+folded to: the tick's hash and the match's digest (phase, clock, scores, rail
+timer, every player's kills and deaths). CI's `join mid-match` job has `ana`
+play with three bots and has `cleo` join twenty times mid-match, each in a
+fresh browser context. It times each step of each join: the `state_get`, the
+subscription's first event, and the catch-up fold to the newest tick, which
+together are the Felix and client path and must stay under 500 ms at p50; and
+signing in and the first draw, which it reports only. CI draws with SwiftShader,
+at about a frame a second, so the first frame on a real GPU is measured on real
+hardware with the benchmark page instead. The job also requires every tick both
+pages folded to agree, and the first frame to be the match as it was.
 
 felix-canvas's rule is subscribe before you read, because its snapshot is a
 separate value and ops published during the fetch would be lost. Here the

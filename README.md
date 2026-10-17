@@ -178,6 +178,12 @@ craft moves smoothly. Finally, it checks that the `keyframe` state key's
 version is the newest keyframe's offset, and that a subscription from that
 offset starts at the keyframe.
 
+CI's `join mid-match` job joins `cleo` to a match being played twenty times
+from a cold browser. It gates the state read, first event and catch-up fold
+at 500 ms p50, reports signing in and the first draw (on CI's software
+renderer; real-GPU frame times come from the benchmark page), and checks that
+its folded state matches the player's at every tick.
+
 ## Frame time
 
 The target is 60 frames a second at 1080p on a laptop iGPU at High or Medium.

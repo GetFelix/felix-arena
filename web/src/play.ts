@@ -26,6 +26,7 @@ import { type CraftView, Fleet, GUN_HEIGHT } from './fleet';
 import { type EventFrame, Gateway, GatewayError } from './gateway';
 import { type Link, Offline, OFFLINE_PRINCIPAL } from './offline';
 import { Hud } from './hud';
+import { joinFromKeyframe, type JoinTimes } from './join';
 import { Interpolator, snapshot } from './interpolation';
 import { addLights, loadEnvironment } from './lighting';
 import { Match } from './match';
@@ -95,6 +96,25 @@ export interface ArenaDebug {
   pause?: (paused: boolean) => void;
   /** For screenshots: a slot whose shield is shown absorbing a shot from `(x, z)`, `ago` seconds in, every frame. */
   absorbing: { slot: number; x: number; z: number; ago: number } | null;
+  /**
+   * The first join, in milliseconds on the page's clock: signing in, each step of {@link joinFromKeyframe} from the
+   * state read on, the first event, the newest tick taken after the catch-up, and the first frame drawn.
+   */
+  join:
+    | (JoinTimes & {
+        signInMs: number;
+        firstEventMs: number | null;
+        liveMs: number | null;
+        catchUp: number;
+        drawnMs: number | null;
+        drawnTick: number | null;
+        drawnAtUnixMs: number | null;
+      })
+    | null;
+  /** The newest tick taken, live or folded. */
+  newestTick: number | null;
+  /** The state each recent tick folded to, by `epoch/tick`: the tick's hash and the match's digest. */
+  states: Record<string, string>;
 }
 
 declare global {
@@ -128,6 +148,9 @@ async function main(): Promise<void> {
     tier: '',
     bench: null,
     absorbing: null,
+    join: null,
+    states: {},
+    newestTick: null,
   };
   window.arena = debug;
 
@@ -195,6 +218,8 @@ async function main(): Promise<void> {
   // GPU. A page held that long after joining sends no inputs and leaves its socket unread, so it is drawn first.
   renderer.compile(scene, view.camera);
   pipeline.render(0);
+  // Wait for that frame here, so the join's reads do not queue behind it.
+  renderer.getContext().finish();
 
   const status = document.getElementById('loading')!;
   status.textContent = `Joining ${ARENA}`;
@@ -202,6 +227,7 @@ async function main(): Promise<void> {
   const place = OFFLINE ? 'offline, against bots' : `${ARENA} · playing as ${USER}`;
   let gateway: Link;
   let key: string;
+  const joinStartMs = performance.now();
 
   const interpolator = new Interpolator();
   let pacer = new Pacer();
@@ -222,6 +248,24 @@ async function main(): Promise<void> {
   let respawnAt: number | null = null;
   /** The tick each slot last respawned in, for how much of its spawn protection is left. */
   const spawnedIn = new Map<number, number>();
+
+  /** Recent `epoch/tick` keys of {@link ArenaDebug.states}, oldest first. */
+  const stateKeys: string[] = [];
+  const recordState = (tick: Tick) => {
+    const at = `${tick.epoch}/${tick.tick}`;
+    debug.newestTick = tick.tick;
+    if (!(at in debug.states)) stateKeys.push(at);
+    debug.states[at] = `${tick.hash}|${match.digest()}`;
+    if (stateKeys.length > 1800) delete debug.states[stateKeys.shift()!];
+  };
+  let catchUp = 0;
+  /** A tick that was in the log before the join: only the match's tally takes it, and nothing is drawn. */
+  const foldTick = (tick: Tick) => {
+    debug.ticks++;
+    catchUp++;
+    match.update(tick, performance.now(), false);
+    recordState(tick);
+  };
 
   const onTick = (tick: Tick, arrivedMs: number) => {
     debug.ticks++;
@@ -262,20 +306,38 @@ async function main(): Promise<void> {
     }
     if (mine?.alive) respawnAt = null;
     match.update(tick, arrivedMs);
+    recordState(tick);
     const phase = `${match.number}:${match.phase}`;
     if (debug.phases.at(-1) !== phase) debug.phases.push(phase);
     if (own) own.frozen = match.phase === 'results';
     own?.reconcile(tick, arrivedMs);
   };
-  const onFrame = (frame: EventFrame) => {
+  // When the first join's first event, and its first tick after the catch-up, arrived.
+  let firstEventMs: number | null = null;
+  let liveMs: number | null = null;
+  /**
+   * When the join in flight began, from its state read until the fold reaches the newest tick. Nothing is drawn
+   * meanwhile: the catch-up is folded without drawing, and a frame would hold the page's thread off the ticks.
+   */
+  let joiningSince: number | null = null;
+  /** A join whose ticks never come still lets the page draw after this long. */
+  const JOIN_HOLD_MS = 2000;
+  const onFrame = (frame: EventFrame, catchingUp = false) => {
+    firstEventMs ??= performance.now();
     let tick: Tick;
     try {
       tick = decodeTick(frame.payload);
     } catch {
       return;
     }
-    onTick(tick, performance.now());
+    if (catchingUp) foldTick(tick);
+    else onTick(tick, performance.now());
     tick.free();
+    if (!catchingUp) joiningSince = null;
+    if (!catchingUp && liveMs === null) {
+      liveMs = performance.now();
+      if (debug.join) [debug.join.firstEventMs, debug.join.liveMs] = [firstEventMs, liveMs];
+    }
   };
 
   const signIn = async () =>
@@ -300,7 +362,19 @@ async function main(): Promise<void> {
       };
     });
     try {
-      await within(Promise.race([link.subscribe('ticks', 'live', 'live', onFrame), lost]));
+      // Every join, the first and each after a lost session, starts from the newest keyframe.
+      joiningSince = performance.now();
+      const times = await within(Promise.race([joinFromKeyframe(link, onFrame), lost]));
+      debug.join ??= {
+        ...times,
+        signInMs: joinStartMs,
+        firstEventMs,
+        liveMs,
+        catchUp: 0,
+        drawnMs: null,
+        drawnTick: null,
+        drawnAtUnixMs: null,
+      };
     } catch (err) {
       link.close();
       throw err;
@@ -346,7 +420,7 @@ async function main(): Promise<void> {
     };
     gateway = offline;
     key = playerKey(OFFLINE_PRINCIPAL);
-    await gateway.subscribe('ticks', 'live', 'live', onFrame);
+    await gateway.subscribe('ticks', 'live', 'live', (frame) => onFrame(frame));
   } else {
     const token = await signIn();
     key = playerKey(await principal(token));
@@ -371,6 +445,8 @@ async function main(): Promise<void> {
   let shown: number | null = null;
   let lastT = 0;
   renderer.setAnimationLoop((frameAt: number) => {
+    if (joiningSince !== null && performance.now() - joiningSince < JOIN_HOLD_MS) return;
+    const frameStartUnixMs = Date.now();
     const settled = !chooser || chooser.done;
     chooser?.frame(frameAt);
     if (debug.tier !== pipeline.tier) {
@@ -507,6 +583,13 @@ async function main(): Promise<void> {
       const out = document.getElementById('bench')!;
       out.textContent = JSON.stringify(bench.report, null, 2);
       out.hidden = false;
+    }
+    if (frame && debug.join && debug.join.drawnMs === null) {
+      debug.join.drawnMs = performance.now();
+      debug.join.drawnTick = interpolator.newest?.tick ?? null;
+      // The state drawn is the newest tick as the frame began; drawing it can take long on a software renderer.
+      debug.join.drawnAtUnixMs = frameStartUnixMs;
+      debug.join.catchUp = catchUp;
     }
     if (controls.changedAt !== null) {
       const rendered = performance.now();
