@@ -53,8 +53,9 @@ pub(crate) async fn run<C, F>(
     let mut last_due: Option<Instant> = None;
     let mut previous_commit: Option<Duration> = None;
     let mut report = Report::new(Instant::now());
-    // The match whose start is committed. A start whose commit failed is
-    // written again with the next tick.
+    // The match whose start is committed. A start whose commit failed or
+    // timed out is written again with the next tick; a timed-out commit may
+    // have landed, so the key can end up a tick late, never missing.
     let mut started_match: Option<u32> = None;
     loop {
         let due = timer.tick().await;

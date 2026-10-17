@@ -61,7 +61,7 @@ it("state_get answers the latest keyframe's offset as the key's version", async 
 
   // The match's first tick wrote `match/<n>`, at or before the keyframe.
   const start = await gateway.stateGet('ticks', `match/${match}`);
-  expect(start.version).not.toBeNull();
+  expect(start.version, `match/${match} is missing; was the sim started before this build?`).not.toBeNull();
   expect(start.version!).toBeLessThanOrEqual(at);
   expect(header(start.payload!).match).toBe(match);
   const none = await gateway.stateGet('ticks', `match/${match + 1000}`);

@@ -120,7 +120,11 @@ export class Gateway {
   ) {
     socket.addEventListener('message', (message) => this.receive(message));
     socket.addEventListener('close', () => {
-      if (!this.closing) this.onError(new GatewayError('closed', 'the gateway closed the session'));
+      const closed = new GatewayError('closed', 'the gateway closed the session');
+      // Nothing more will answer what is still waiting.
+      for (const request of this.requests.values()) request.reject(closed);
+      this.requests.clear();
+      if (!this.closing) this.onError(closed);
     });
   }
 
