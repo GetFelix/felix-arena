@@ -106,13 +106,14 @@ the `style frame` CI job runs it and uploads them as the `frames` artifact.
 
 Each release on GitHub carries the built web client as
 `felix-arena-web-<version>.tar.gz`, so playing it needs no Node or npm, only a
-static file server:
+static file server. With no tag, `gh release download` fetches the newest
+release, so run this in an empty directory:
 
 ```bash
-gh release download v0.1.2 -R GetFelix/felix-arena -p 'felix-arena-web-*'
-shasum -a 256 -c felix-arena-web-v0.1.2.tar.gz.sha256
-tar -xzf felix-arena-web-v0.1.2.tar.gz
-cd felix-arena-web-v0.1.2 && python3 -m http.server 5173
+gh release download -R GetFelix/felix-arena -p 'felix-arena-web-*'
+shasum -a 256 -c felix-arena-web-*.tar.gz.sha256
+tar -xzf felix-arena-web-*.tar.gz
+cd felix-arena-web-*/ && python3 -m http.server 5173
 # open http://localhost:5173/play.html?offline
 ```
 
