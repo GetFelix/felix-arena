@@ -12,43 +12,60 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license"></a>
 </p>
 
-Felix Arena is a planned team deathmatch for up to eight players, Coral
-against Violet, flying low-poly hover-craft in a walled arena seen from a
-tilted top-down camera. The project is at the design stage: there is a design,
-an art direction and a style frame, and no game code yet. In the design, when
-you die the last few seconds will replay from your view, your killer's, or a
-camera that orbits the fight, and spectators will be able to join a match in
-progress. It is meant for people who want a small multiplayer game they can
+Felix Arena is a team deathmatch for up to eight players, Coral against
+Violet, flying low-poly hover-craft in a walled arena seen from a top-down
+camera. It is playable: a match runs through Felix from warmup to results,
+with the simulation deciding every hit. Still to come are the kill cam, which
+will replay the last seconds from your view, your killer's, or a camera that
+orbits the fight, joining a match in progress, and per-arena sign-in. It is meant for people who want a small multiplayer game they can
 host themselves, and for game developers evaluating Felix as the backend for
 live play, spectating and replays.
 
-In the design, each arena's simulation commits every tick to a durable Felix
+Each arena's simulation commits every tick to a durable Felix
 stream as an
 [atomic commit](https://github.com/GetFelix/felix/blob/main/docs/atomic-commit.md),
 and every 30th tick also updates a stream state key that points at it as a
-keyframe. Players and spectators join by reading that key and subscribing from
-its offset, and the kill cam is a read of the same stream from an offset named
-in the kill event. Inputs go on an in-memory stream with
+keyframe. In the design, players and spectators join by reading that key and
+subscribing from its offset, and the kill cam is a read of the same stream from
+an offset named in the kill event. Inputs go on an in-memory stream with
 [drop-new delivery](https://github.com/GetFelix/felix/blob/main/docs/semantics.md#delivery-to-subscribers),
 presence and the lobby are
 [cache](https://github.com/GetFelix/felix/blob/main/docs/cache-on-log.md) keys with
 a TTL, and who may play or watch is a Felix RBAC role, enforced through tokens
 the control plane
 [narrows](https://github.com/GetFelix/felix/blob/main/docs/auth.md#control-plane-token-exchange-flow)
-to one arena. Tick streams are replicated across three brokers, so a match can
-continue after its broker
+to one arena. Tick streams are to be replicated across three brokers, so a
+match can continue after its broker
 [fails](https://github.com/GetFelix/felix/blob/main/docs/semantics.md#failover).
 
 ![The style frame: two teams of hover-craft trading fire around a glowing crystal in a walled arena](docs/screenshots/style-frame.jpg)
 
 ## Features
 
-Nothing is playable yet. What exists today is the style frame, one HTML page
-that renders a moment of a match in the final look: the arena, two teams of
-craft from Kenney's Space Kit, bolts, hits, the centre crystal, the lighting
-and the post processing. It is the reference every later milestone is built
-against.
+- **A full match through Felix.** Warmup, a timed team deathmatch to a kill
+  limit, results and the next match, with respawns, the rail pickup, the score,
+  clock, kill feed and scoreboard. The simulation in `sim/` is the only
+  authority and commits each tick to a durable Felix stream at 30 Hz; inputs
+  travel on an in-memory stream, stamped with the sender by the gateway.
+- **Rules written once.** Movement, collision, bolts, damage, spawns and the
+  tick encoding live in `core/`, linked by the simulation and compiled to
+  WebAssembly for the browser, which predicts your own craft and interpolates
+  the others.
+- **Fair respawns.** A destroyed craft comes back at the point on its side
+  farthest from the enemy and out of their sight, behind a two-second shield
+  that ends when it fires.
+- **Keyframes.** Every 30th tick's commit also writes the `keyframe` state key,
+  the starting point for joining a match in progress (in review).
+- **Offline play.** `play.html?offline` runs `core` in the page against three
+  bots, with no servers.
+- **Quality tiers.** High, Medium and Low, chosen from the first seconds of
+  frame times or picked in the HUD.
+- **Every hop timed.** `ticks.html` shows the p50 and p99 of each leg from the
+  simulation's commit to the page.
+- **Releases.** Each release carries the built web client, so it can be played
+  with a static file server and no Node.
 
+The style frame, `prototype/style-frame.html`, is the reference for the look.
 `web/` is that page rebuilt as the game's renderer: TypeScript and Three.js,
 built with Vite, with every model restyled through `web/src/models.ts`, every
 colour from `web/src/palette.ts`, and the walls, cover and prop positions taken
@@ -56,10 +73,9 @@ from the collision layout in `core/`. CI screenshots the app and the style
 frame at the same frozen moment in headless Chromium and fails when they
 differ.
 
-The simulation in `sim/` connects to Felix and commits an empty tick to each
-configured arena's tick stream at 30 Hz, waiting for each commit before the
-next. Every five seconds it logs, per arena, the ticks committed, the rate and
-the commit latency (p50, p99, max). Its settings are the `SIM_*` variables
+The simulation waits for each commit before the next, and every five seconds
+logs, per arena, the ticks committed, the rate and the commit latency (p50,
+p99, max). Its settings are the `SIM_*` variables
 documented in [sim/src/config.rs](sim/src/config.rs).
 
 ## Quick start
@@ -184,15 +200,15 @@ busy. Frame intervals cannot be shorter than the display's refresh, so a
 
 ## How it works
 
-Three processes will sit around Felix: the browser client, a stateless
+Three processes sit around Felix: the browser client, a stateless
 gateway that bridges WebSocket to Felix's QUIC protocol, and a Rust simulation
 that is the single authority for each arena, stepping it at 30 Hz. The client
 and the simulation are this project's own. The gateway is
 [felix-gateway](https://github.com/GetFelix/felix-gateway), whose
 `binary_events` and `slots` features carry the game's ticks as binary frames
 and let a replay run beside the live view, and whose `state` feature reads the
-keyframe pointer. It will ship in this project's own
-image, which also serves the web client. The game rules live in one Rust crate, linked by the simulation and
+keyframe pointer. The plan is to ship it in this project's own image, which
+will also serve the web client. The game rules live in one Rust crate, linked by the simulation and
 compiled to WebAssembly for the browser's prediction, so the two cannot
 disagree about the rules.
 
@@ -215,18 +231,19 @@ compares this with the usual way of building a session-based game.
 
 ## Status
 
-The design and art direction are written and the style frame is done. M0,
-locking the look in a real app, is in progress: the style frame is ported to
-`web/`. Each milestone is a
+The look is locked and the game is playable through Felix (M0 to M2). M3,
+joining a match in progress, is under way: keyframes are written, and the join
+path and the lobby are in review. The frame-time row for M0's 60 fps target
+waits for a run on an Intel Iris Xe or Apple M1. Each milestone is a
 [GitHub milestone](https://github.com/GetFelix/felix-arena/milestones) with an
 issue per piece of work.
 
 | M | Milestone | Status |
 |---|---|---|
-| [0](https://github.com/GetFelix/felix-arena/milestone/1) | The look, locked | In progress |
-| [1](https://github.com/GetFelix/felix-arena/milestone/2) | A browser reaches Felix | Planned |
-| [2](https://github.com/GetFelix/felix-arena/milestone/3) | One authority | Planned |
-| [3](https://github.com/GetFelix/felix-arena/milestone/4) | Join mid-match | Planned |
+| [0](https://github.com/GetFelix/felix-arena/milestone/1) | The look, locked | Done |
+| [1](https://github.com/GetFelix/felix-arena/milestone/2) | A browser reaches Felix | Done |
+| [2](https://github.com/GetFelix/felix-arena/milestone/3) | One authority | Done |
+| [3](https://github.com/GetFelix/felix-arena/milestone/4) | Join mid-match | In progress |
 | [4](https://github.com/GetFelix/felix-arena/milestone/5) | The kill cam | Planned |
 | [5](https://github.com/GetFelix/felix-arena/milestone/6) | Isolation and gaps | Planned |
 | [6](https://github.com/GetFelix/felix-arena/milestone/7) | Per-arena sign-in | Planned |
