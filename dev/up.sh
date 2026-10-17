@@ -20,6 +20,14 @@ if [[ -z "$engine" ]]; then
 fi
 compose=("$engine" compose -f compose.yml)
 
+# podman compose hands off to docker-compose, which reads ~/.docker/config.json.
+# A credsStore left there by Docker Desktop names a helper that is gone, and
+# every pull fails. The images are public, so use an empty config instead.
+if [[ "$engine" == podman && -z "${DOCKER_CONFIG:-}" ]]; then
+  DOCKER_CONFIG="$(mktemp -d)"
+  export DOCKER_CONFIG
+fi
+
 "${compose[@]}" down --volumes --remove-orphans >/dev/null 2>&1 || true
 rm -rf state
 mkdir -p state
