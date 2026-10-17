@@ -230,7 +230,7 @@ async function main(): Promise<void> {
       const c = crafts.find((craft) => craft.slot === slot);
       tag.hidden = !c?.alive;
       if (!c?.alive) continue;
-      const p = new Vector3(c.x / 100, 2.6, c.z / 100).project(view.camera);
+      const p = new Vector3(c.x / 100, 3, c.z / 100).project(view.camera);
       tag.style.transform = `translate(-50%, -100%) translate(${((p.x + 1) / 2) * innerWidth}px, ${((1 - p.y) / 2) * innerHeight}px)`;
       const name = tag.querySelector('b')!;
       name.textContent = callsign(slot);
