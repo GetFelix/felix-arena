@@ -11,6 +11,7 @@ use felix_arena_core::{Event, Phase, Rules, Tick, Timing, World};
 
 use crate::inputs::{Inbox, Players};
 use crate::latency::Window;
+use crate::lobby::Status;
 
 /// 30 Hz.
 pub(crate) const TICK: Duration = Duration::from_nanos(1_000_000_000 / 30);
@@ -46,6 +47,7 @@ pub(crate) async fn run<C, F>(
     epoch: u16,
     rules: Rules,
     inbox: Arc<Mutex<Inbox>>,
+    status: Arc<Mutex<Status>>,
     mut commit: C,
 ) where
     C: FnMut(Vec<u8>, Vec<(String, Vec<u8>)>) -> F,
@@ -90,6 +92,15 @@ pub(crate) async fn run<C, F>(
         }
         phase = Some(tick.state.phase);
         offsets.name_replays(&mut tick);
+        *status
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Status {
+            match_number: tick.match_number,
+            phase: Some(tick.state.phase),
+            left: tick.state.left,
+            scores: tick.state.scores,
+            players: tick.crafts.len(),
+        };
         let started = Instant::now();
         let timing = Timing {
             commit_start_us: unix_micros(),
@@ -324,6 +335,7 @@ mod tests {
             "a".into(),
             1,
             Rules::default(),
+            Arc::default(),
             Arc::default(),
             move |record: Vec<u8>, keys: Vec<(String, Vec<u8>)>| {
                 let header = header(&record);

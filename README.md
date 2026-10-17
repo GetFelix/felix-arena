@@ -218,6 +218,10 @@ at 500 ms p50, reports signing in and the first draw (on CI's software
 renderer; real-GPU frame times come from the benchmark page), and checks that
 its folded state matches the player's at every tick.
 
+`lobby.html` lists the live arenas from the `arena.lobby` cache, with each
+match's phase, clock, score, players and spectators and a button to join.
+`?as=` picks the user, as on the play page.
+
 ## Frame time
 
 The target is 60 frames a second at 1080p on a laptop iGPU at High or Medium.

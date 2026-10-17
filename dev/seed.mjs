@@ -1,6 +1,6 @@
 // Seeds the development stack: bootstrap a tenant that trusts dev/idp.mjs,
-// create each arena's tick and input streams, give each arena a play and a
-// watch role, and write the broker's and the sim's tokens to the state
+// create each arena's tick and input streams and member cache and the lobby
+// cache, give each arena a play and a watch role, and write the broker's and the sim's tokens to the state
 // directory. Safe to run again: existing objects are kept.
 import { createHash } from "node:crypto";
 import { chmod, mkdir, writeFile } from "node:fs/promises";
@@ -90,6 +90,16 @@ await request("POST", `${CONTROL_PLANE}/v1/tenants/${TENANT}/namespaces`, {
   body: { namespace: NAMESPACE, display_name: NAMESPACE },
 });
 
+// One shard each: a prefix watch reads a single shard.
+const createCache = (cache) =>
+  request("POST", `${CONTROL_PLANE}/v1/tenants/${TENANT}/namespaces/${NAMESPACE}/caches`, {
+    token: admin,
+    body: { cache, display_name: cache, shards: 1, replication_factor: 1, consistency: "Leader" },
+  });
+const LOBBY = "arena.lobby";
+console.log(`cache ${LOBBY}`);
+await createCache(LOBBY);
+
 const grant = (subject, kind, name, action) =>
   request("POST", `${CONTROL_PLANE}/v1/tenants/${TENANT}/rbac/policies`, {
     token: admin,
@@ -123,6 +133,13 @@ for (const arena of ARENAS) {
   await grant("role:sim", "stream", ticks, "stream.publish");
   await grant("role:sim", "stream", ticks, "stream.subscribe");
   await grant("role:sim", "stream", input, "stream.subscribe");
+  // Every session keeps a key in the member cache while it is open; the sim
+  // counts them for the lobby, which only it writes.
+  const members = `arena.members.${arena}`;
+  console.log(`cache ${members}`);
+  await createCache(members);
+  await grant("role:sim", "cache", members, "cache.read");
+  await grant("role:sim", "cache", LOBBY, "cache.write");
   // Exactly these actions: token exchange narrows by every action on every
   // resource a role holds (felix#968).
   const play = `role:arena-${arena}-play`;
@@ -130,6 +147,11 @@ for (const arena of ARENAS) {
   await grant(play, "stream", input, "stream.publish");
   await grant(play, "stream", ticks, "stream.subscribe");
   await grant(watch, "stream", ticks, "stream.subscribe");
+  for (const role of [play, watch]) {
+    await grant(role, "cache", members, "cache.read");
+    await grant(role, "cache", members, "cache.write");
+    await grant(role, "cache", LOBBY, "cache.read");
+  }
   for (const [role, names] of [
     [play, PLAYERS],
     [watch, WATCHERS],
@@ -149,7 +171,9 @@ await mkdir(STATE, { recursive: true });
 await chmod(STATE, 0o777).catch(() => {});
 const broker = await exchange("arena-broker", { audience: "felix-controlplane" });
 await writeFile(`${STATE}/node.token`, broker, { mode: 0o644 });
-const sim = await exchange("arena-sim", { requested: ["stream.publish", "stream.subscribe"] });
+const sim = await exchange("arena-sim", {
+  requested: ["stream.publish", "stream.subscribe", "cache.read", "cache.write"],
+});
 await writeFile(`${STATE}/sim.token`, sim, { mode: 0o644 });
 console.log(`wrote node.token and sim.token to ${STATE}`);
 
