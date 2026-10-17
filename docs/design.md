@@ -407,9 +407,10 @@ one Felix connection per browser session with that session's narrowed token,
 and is the place the browser's WebSocket ends. It differs in three ways:
 
 - **Binary frames for events.** Ticks go to the browser as binary WebSocket messages, an offset plus the payload. JSON with base64, as felix-canvas uses, would cost a third more bytes and a parse per tick. This is felix-gateway's `binary_events` feature (0.4.0).
-- **Two subscription slots per connection on the tick stream:** `live` and `replay`, so a kill cam never disturbs the live view. This is felix-gateway's `slots` feature (0.4.0).
+- **Subscription slots per connection on the tick stream,** so a second subscription never disturbs the live one. This is felix-gateway's `slots` feature (0.4.0).
 - **The sender stamp** on inputs, above.
 - **State reads.** The join path's `state_get` is felix-gateway's `state` feature (0.5.0), authorized as a subscribe to the tick stream.
+- **Range reads.** The kill cam's fetch is felix-gateway's `read` feature (0.6.0), Felix's `Client::read` from one offset to another, also authorized as a subscribe.
 
 The [throttle](https://github.com/GetFelix/felix-gateway/blob/main/docs/protocol.md#throttle)
 message carries over unchanged, for demonstration 3.
@@ -475,8 +476,10 @@ sequenceDiagram
     S->>B: commit tick T: kill event, replay_from = offset of tick T-90
     B-->>V: tick T, live
     Note over V: 0.6 s live death beat begins
-    V->>B: subscribe replay slot from replay_from
-    B-->>V: ticks T-90 .. T from the replay ring, then T+1 .. live
+    V->>B: read from replay_from to the kill's offset
+    B-->>V: ticks T-90 .. T
+    V->>B: read on from T+1 as it is committed
+    B-->>V: ticks T+1 .. T+30
     Note over V: play 3 s before the kill and 1 s after, then respawn
 ```
 
@@ -496,22 +499,26 @@ tick: after a failover the new leader's generation-start record takes an offset
 a retried commit can land twice. The sim knows each tick's real offset, so it
 names it.
 
-**Reading it.** The client sends `subscribe` on its `replay` slot from
-`replay_from`. Felix serves recent records from each stream's in-memory replay
-ring, 1,024 records by default (`DEFAULT_LOG_CAPACITY`,
-`crates/server/felix-broker/src/broker.rs:47`), which at 30 Hz is 34 seconds.
-A kill cam therefore reads memory, not disk. Older kills, replayed from the
-feed, read the log through the segment reader. The subscription carries on
-into live ticks, which supplies the second after the kill; the client closes
-it once it has tick `T + 30`. The replay holds a live subscription for those
-few seconds. Felix 0.6.0-preview.3 added a bounded range read (`Client::read`,
-from an offset to an end offset, without subscribing), so the kill cam could
-fetch exactly `replay_from` to `T + 30` instead. That needs a read message in
-the gateway, which felix-gateway does not have yet.
+**Reading it.** The client reads the tick stream from `replay_from` to the
+kill's own offset, which it knows from the frame that carried the kill, with
+the gateway's `read` (Felix's bounded range read, `Client::read`, added in
+0.6.0-preview.3). It is one request and one answer: about 90 records, with no
+subscription registered and nothing to close afterwards. The second after the
+kill is still being played when the kill arrives, so the client reads on from
+the kill's offset plus one, again each time a page comes back short, until it
+holds tick `T + 30`; playback reaches the kill no sooner than 3 seconds later,
+so those ticks are always there in time. A read answers only committed
+records, so a replay never shows a tick a failover could take back.
+
+The alternative was a subscription on a `replay` slot from `replay_from`,
+closed once it delivered `T + 30`. It reaches the same records, but it holds a
+live subscription for a few seconds, and a replay of an older kill from the
+feed would stream every tick from that kill up to live before it could be
+closed. A range read is bounded by construction.
 
 **Playing it.** The window is 3 seconds before the kill and 1 second after:
-120 ticks, about 40 KB. The replay world is a second instance of the client's
-world state, fed by the replay subscription and drawn by the same scene. The
+120 ticks, about 40 KB. The replay is its own copy of the match's state, fed by
+the read and drawn by the same scene (`web/src/replay.ts`, `web/src/killcam.ts`). The
 live world keeps updating underneath, so leaving the kill cam is instant. The
 last half second before the kill plays at half speed, then the hit, then the
 explosion at full speed.
@@ -527,10 +534,21 @@ works:
 
 **Timing.** The victim sees the kill live and gets a 0.6 second death beat (the
 explosion, the camera easing in) before the replay starts. The fetch runs
-inside that beat: one round trip to the gateway plus 90 records from the
-broker's memory. On a 40 ms link that is about 100 ms, so the replay is
-buffered before it is needed. The target is a fetch under 250 ms p95 and the
-replay on screen within 800 ms of the kill's commit.
+inside that beat: one round trip to the gateway plus 90 records. On a 40 ms
+link that is about 100 ms, so the replay is buffered before it is needed. The
+target is a fetch under 250 ms p95 and the replay on screen within 800 ms of
+the kill's commit. The replay starts at the later of the beat's end and the
+fetch, so it is on screen about 600 ms after the commit whenever the fetch
+takes less than the beat.
+
+CI's `kill cam` job times both on the dev stack. Two bots fight a player who
+flies at them without firing, and a watcher replays every kill with the page's
+own code (`fetchReplay`), timing the commit to the kill's arrival, the read,
+and when the replay would be on screen. The job requires 20 kills with the
+read under 250 ms at p95 and every replay on screen within 800 ms of its
+commit. The player's page plays its own kill cams too, drawn by SwiftShader at
+about a frame a second, so its times are reported and only its replay's ticks
+are checked.
 
 **Every viewer sees the same replay.** The replay is the bytes in the log, not
 whatever each client happened to receive, so a spectator, the killer and the
@@ -779,7 +797,7 @@ and saying so is honest, and it is what demonstration 4 shows.
 | Felix share of the server path | Under 3 ms p50 each way | Gateway and sim log both legs separately |
 | Gateway hop | Under 2 ms each way | Gateway timings |
 | Kill cam fetch | Under 250 ms p95 | Kill event arrival to the 90th replay tick decoded |
-| Kill cam on screen | Under 800 ms after the kill's commit | Commit time in the sim against the first replay frame |
+| Kill cam on screen | Under 800 ms after the kill's commit | Commit time in the sim against the replay being ready: the death beat over and the read decoded |
 | Spectator join | Under 500 ms p50 to a correct frame | Cold client, mid-match |
 | Frame time | 16.7 ms p95 at 1080p, High or Medium tier, laptop iGPU | Frame timing over a scripted 2-minute match |
 | Sim step | Under 2 ms for 8 players and 64 bolts | Sim timings |
@@ -852,7 +870,7 @@ listed here until they are.
 
 1. **An event did not carry its publisher; now it does.** Felix 0.6.0-preview.3 added a broker-vouched `publisher` to delivered events. The sim requires it to match the gateway's stamp, so the stamp is now a second witness rather than the only one.
 2. **No conditional append or writer fencing.** Felix has no way to say "append only if I still own this stream", so a stale sim is fenced by readers comparing epochs. An expected-offset publish or a writer lease would fence it at the broker.
-3. **Bounded range read, now in Felix.** A kill cam wants ticks `a` to `b`. Felix 0.6.0-preview.3 added `Client::read` with an end offset, which makes that one request; the gateway would need to expose it. Until then the kill cam subscribes from `a`, receives live ticks too, and closes.
+3. **Bounded range read, now in Felix.** A kill cam wants ticks `a` to `b`. Felix 0.6.0-preview.3 added `Client::read` with an end offset, which makes that one request, and felix-gateway 0.6.0 exposes it as `read`.
 4. **A commit is not idempotent.** Documented in Felix's `docs/atomic-commit.md`. A retried tick can land twice; readers dedupe on `(epoch, tick)`.
 5. **The subscriber queue policy is broker-wide.** Low-delay batching and `drop_new` must be chosen together for the whole broker. A per-stream policy would let a game share a broker with workloads that want `block`.
 6. Already filed and relevant: per-stream retention ([#964](https://github.com/GetFelix/felix/issues/964)), silent tail drops ([#965](https://github.com/GetFelix/felix/issues/965)), cross-product narrowing ([#968](https://github.com/GetFelix/felix/issues/968)), one token per connection ([#969](https://github.com/GetFelix/felix/issues/969)), no all-or-nothing create ([#967](https://github.com/GetFelix/felix/issues/967)), TTL expiry invisible to watches ([#960](https://github.com/GetFelix/felix/issues/960)), broker-wide ack offsets ([#956](https://github.com/GetFelix/felix/issues/956)), and the dev-stack pair [#954](https://github.com/GetFelix/felix/issues/954) and [#955](https://github.com/GetFelix/felix/issues/955).
