@@ -370,7 +370,9 @@ drawing it and starts rendering at the newest tick. The subscription's answer
 names the log's tail when it was registered, so the client knows which ticks
 are catch-up: every one before the last record under that tail. Catch-up
 ticks only feed the match's tally; kills in them do not reach the kill feed,
-and the interpolator starts from the newest tick
+the page draws nothing from the state read until the fold reaches the newest
+tick, so no frame holds its thread off the ticks, and the interpolator starts
+from the newest tick
 (`web/src/join.ts`). A stream with no keyframe yet is joined live.
 
 The page exposes the join's timings and, for each recent tick, the state it

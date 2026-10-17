@@ -218,6 +218,8 @@ async function main(): Promise<void> {
   // GPU. A page held that long after joining sends no inputs and leaves its socket unread, so it is drawn first.
   renderer.compile(scene, view.camera);
   pipeline.render(0);
+  // Wait for that frame here, so the join's reads do not queue behind it.
+  renderer.getContext().finish();
 
   const status = document.getElementById('loading')!;
   status.textContent = `Joining ${ARENA}`;
@@ -313,6 +315,13 @@ async function main(): Promise<void> {
   // When the first join's first event, and its first tick after the catch-up, arrived.
   let firstEventMs: number | null = null;
   let liveMs: number | null = null;
+  /**
+   * When the join in flight began, from its state read until the fold reaches the newest tick. Nothing is drawn
+   * meanwhile: the catch-up is folded without drawing, and a frame would hold the page's thread off the ticks.
+   */
+  let joiningSince: number | null = null;
+  /** A join whose ticks never come still lets the page draw after this long. */
+  const JOIN_HOLD_MS = 2000;
   const onFrame = (frame: EventFrame, catchingUp = false) => {
     firstEventMs ??= performance.now();
     let tick: Tick;
@@ -324,6 +333,7 @@ async function main(): Promise<void> {
     if (catchingUp) foldTick(tick);
     else onTick(tick, performance.now());
     tick.free();
+    if (!catchingUp) joiningSince = null;
     if (!catchingUp && liveMs === null) {
       liveMs = performance.now();
       if (debug.join) [debug.join.firstEventMs, debug.join.liveMs] = [firstEventMs, liveMs];
@@ -353,6 +363,7 @@ async function main(): Promise<void> {
     });
     try {
       // Every join, the first and each after a lost session, starts from the newest keyframe.
+      joiningSince = performance.now();
       const times = await within(Promise.race([joinFromKeyframe(link, onFrame), lost]));
       debug.join ??= {
         ...times,
@@ -434,6 +445,7 @@ async function main(): Promise<void> {
   let shown: number | null = null;
   let lastT = 0;
   renderer.setAnimationLoop((frameAt: number) => {
+    if (joiningSince !== null && performance.now() - joiningSince < JOIN_HOLD_MS) return;
     const frameStartUnixMs = Date.now();
     const settled = !chooser || chooser.done;
     chooser?.frame(frameAt);
