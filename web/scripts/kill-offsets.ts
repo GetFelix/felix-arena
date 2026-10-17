@@ -44,9 +44,13 @@ export async function watchKills(user: string, arena: string): Promise<{ check: 
       // Each kill is checked against the ticks this watcher saw, so only those whose replay starts after it began;
       // the first is also read back from the log.
       const checked = kills.filter((k) => Math.max(k.tick - REPLAY_BEFORE, k.cut) > first!);
+      // When the expected tick is not in the log (its commit failed), the sim names a neighbour instead.
+      const logged = new Set(tickAt.values());
       const bad = checked.filter((k) => {
         const expected = Math.max(k.tick - REPLAY_BEFORE, k.cut);
-        return k.replayFrom === undefined || tickAt.get(k.replayFrom) !== expected;
+        const named = k.replayFrom === undefined ? undefined : tickAt.get(k.replayFrom);
+        if (named === expected) return false;
+        return named === undefined || logged.has(expected) || Math.abs(named - expected) > 3;
       });
       for (const k of checked) {
         console.log(
@@ -56,6 +60,7 @@ export async function watchKills(user: string, arena: string): Promise<{ check: 
       const back = checked.find((k) => k.replayFrom !== undefined);
       if (back) {
         const read = await new Promise<EventFrame>((resolve, reject) => {
+          setTimeout(() => reject(new Error(`nothing came back from offset ${back.replayFrom}`)), 10_000);
           gateway.subscribe('ticks', 'replay', back.replayFrom!, resolve).catch(reject);
         });
         const tick = decodeTick(read.payload).tick;

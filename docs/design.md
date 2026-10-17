@@ -484,7 +484,8 @@ sequenceDiagram
 last 10 seconds, filled from each commit's answer. When a kill happens at tick
 `T`, the kill event names `replay_from`, the offset of tick `T - 90` (3 seconds
 earlier). If tick `T - 90` has no offset, because its commit failed, the
-kill names the nearest earlier tick that has one. A replay never starts
+kill names the nearest earlier tick that has one, or the oldest it has since
+the cut below. A replay never starts
 before the first tick of the warmup or match the kill is in, since every craft
 jumps back to its spawn there; a kill in a match's first 3 seconds replays
 from its start. The sim logs every kill with its offsets, and CI's `match` job
