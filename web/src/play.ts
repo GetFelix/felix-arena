@@ -23,7 +23,7 @@ import {
 } from './core';
 import { Effects } from './effects';
 import { type CraftView, Fleet, GUN_HEIGHT } from './fleet';
-import { type EventFrame, Gateway } from './gateway';
+import { type EventFrame, Gateway, GatewayError } from './gateway';
 import { type Link, Offline, OFFLINE_PRINCIPAL } from './offline';
 import { Hud } from './hud';
 import { Interpolator, snapshot } from './interpolation';
@@ -285,22 +285,30 @@ async function main(): Promise<void> {
     joined = true;
     return link;
   };
+  /**
+   * Open sessions until one joins, waiting longer after each failed try. With `final`, a refusal from the gateway
+   * ends the tries, as a page that may not join cannot start.
+   */
+  const persist = async (token: string | null, final: (err: unknown) => boolean): Promise<Gateway> => {
+    for (let wait = 500; ; wait = Math.min(wait * 2, 8000)) {
+      try {
+        return await open(token ?? (await signIn()));
+      } catch (err) {
+        if (final(err)) throw err;
+      }
+      token = null;
+      await sleep(wait);
+    }
+  };
   let rejoining = false;
-  /** Join again after the gateway closed the session, waiting longer after each failed try. */
+  /** Join again after the gateway closed the session. */
   const rejoin = async () => {
     if (rejoining) return;
     rejoining = true;
     debug.reconnects++;
     where.textContent = 'Reconnecting';
-    for (let wait = 500; ; wait = Math.min(wait * 2, 8000)) {
-      await sleep(wait);
-      try {
-        gateway = await open(await signIn());
-        break;
-      } catch {
-        // Tried again after the next wait.
-      }
-    }
+    await sleep(500);
+    gateway = await persist(null, () => false);
     where.textContent = place;
     rejoining = false;
   };
@@ -315,7 +323,7 @@ async function main(): Promise<void> {
   } else {
     const token = await signIn();
     key = playerKey(await principal(token));
-    gateway = await open(token);
+    gateway = await persist(token, (err) => err instanceof GatewayError && err.code !== 'closed');
   }
 
   // Inputs go once a sim tick, on the sim's clock as the ticks show it; a short timer keeps the send close to it.
