@@ -802,7 +802,10 @@ grant exactly the actions above and no more: a role that also granted publish
 on the tick stream would put it in every narrowed token.
 
 Spectators write member keys too, so the lobby can count them; that is why
-the watch role writes the member cache.
+the watch role writes the member cache. Felix grants a cache as a whole, not
+per key, so any session in an arena can write or delete any member key and
+inflate or shrink the counts. The counts are a display; nothing decides on
+them, and players are counted from the sim's own roster.
 
 **The member list.** Every open page, playing or watching, writes a key in
 `arena.members.<arena>` under a random session key, holding `play:<name>` or

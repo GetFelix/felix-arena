@@ -46,6 +46,10 @@ export function joinMembers(
     navigator.sendBeacon(leaveUrl(gatewayWs), JSON.stringify({ arena, token, cache: CACHE, key }));
   };
   addEventListener('pagehide', leave, { once: true });
+  // A page kept in the back-forward cache has lost its session and its key, so it starts again when it comes back.
+  addEventListener('pageshow', (event) => {
+    if (event.persisted) location.reload();
+  });
   return {
     key,
     stop: () => {

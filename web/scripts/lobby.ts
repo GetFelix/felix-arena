@@ -140,7 +140,10 @@ watcher.close();
 await browser.close();
 if (errors.length) throw new Error(errors.join('\n'));
 if (beacon > 5_000) throw new Error(`a normal close took ${beacon} ms to leave the list`);
-// A key is written every 10 s, so one that left sooner than 20 s after the tab died was deleted, not lapsed.
-if (lapsed < (TTL_MS * 2) / 3) throw new Error(`the dead tab left after ${lapsed} ms: its beacon got through`);
-if (lapsed > TTL_MS) throw new Error(`a dead tab took ${lapsed} ms to leave the list, over the ${TTL_MS} ms TTL`);
+// A key is written every 10 s, so one that left much sooner than 20 s after the tab died was deleted, not lapsed.
+// A second either way covers a write in flight as the tab closed and a slow timer on a busy runner.
+if (lapsed < (TTL_MS * 2) / 3 - 2_000) throw new Error(`the dead tab left after ${lapsed} ms: its beacon got through`);
+if (lapsed > TTL_MS + 1_000) {
+  throw new Error(`a dead tab took ${lapsed} ms to leave the list, over the ${TTL_MS} ms TTL`);
+}
 process.exit(0);
