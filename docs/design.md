@@ -571,8 +571,8 @@ per-stream retention is not applied yet
 offset has been trimmed is refused as `CursorTooOld`, and the client says
 "Replay no longer available".
 
-**Cost.** One kill cam is one subscription and about 40 KB out of the broker's
-memory. A match with 8 players averages about one kill every 6 seconds, so the
+**Cost.** One kill cam is two or three range reads and about 40 KB of the
+log. A match with 8 players averages about one kill every 6 seconds, so the
 victim's replays add well under 10 KB/s per arena. If every spectator also
 watched every kill, 100 spectators would add about 700 KB/s across the
 gateway, which is still less than the live ticks.
