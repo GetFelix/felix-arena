@@ -216,6 +216,7 @@ async function main(): Promise<void> {
     const newest = interpolator.newest;
     if (newest && s.epoch > newest.epoch) {
       due.length = 0;
+      spawnedIn.clear();
       pacer = new Pacer();
     }
     interpolator.push(s, arrivedMs);
