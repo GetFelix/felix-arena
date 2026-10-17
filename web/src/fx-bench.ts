@@ -91,8 +91,6 @@ window.fxBench = {
         update();
         const updated = performance.now();
         renderer.render(scene, camera);
-        performance.measure('fx-update', { start, end: updated });
-        performance.measure('fx-render', { start: updated, end: performance.now() });
         result.update.push(updated - start);
         result.render.push(performance.now() - updated);
         if (result.update.length < frames) requestAnimationFrame(tick);

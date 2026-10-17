@@ -579,7 +579,6 @@ async function main(): Promise<void> {
     );
     view.update(t);
     const updated = performance.now();
-    performance.measure(controls.changedAt !== null ? 'input-update' : 'page-update', { start: frameStart, end: updated });
     pipeline.render(t);
     shown = now;
     if (bench?.frame(frameAt, performance.now() - frameStart, settled, pipeline.tier, renderer.domElement)) {

@@ -1,7 +1,7 @@
 // Against a running dev stack (dev/up.sh): ana flies circles in arena alpha while cleo watches through the gateway.
 // Cleo's ticks, with the times they really arrived, are played through the interpolator at 60 frames a second with
 // one tick in twenty thrown away, and every frame is checked against all the ticks cleo received.
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { beforeAll, expect, it } from 'vitest';
 import { decodeTick, Inputs, loadCore } from '../src/core';
 import { Gateway } from '../src/gateway';
@@ -55,7 +55,6 @@ it('draws a flying craft smoothly with one tick in twenty lost', async () => {
   const speeds = truth.flatMap((s) => s.crafts.map((c) => Math.hypot(c.vx, c.vz)));
   expect(Math.max(...speeds)).toBeGreaterThan(600);
   const run = measure(arrivals, lose, truth);
-  if (process.env.DIAG) writeFileSync('diag-arrivals.json', JSON.stringify({ arrivals, lost: arrivals.map((_, i) => lose(i)) }));
   console.log(`${arrivals.length} ticks through the gateway, one in twenty lost:`, run);
   expect(run.lost).toBeGreaterThan(arrivals.length / 25);
   expect(run.frames).toBeGreaterThan(300);

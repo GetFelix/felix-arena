@@ -6,7 +6,7 @@
 // without waiting for them to be drawn.
 import { appendFileSync } from 'node:fs';
 import { chromium } from 'playwright';
-import { analyse, CATEGORIES } from './trace-diag.mjs';
+import { isolateRenderer } from './isolate.mjs';
 
 const [url] = process.argv.slice(2);
 if (!url) throw new Error('usage: fx-bench.mjs <fx-bench.html url>');
@@ -22,19 +22,11 @@ page.on('pageerror', (e) => errors.push(String(e)));
 page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
 await page.goto(url, { waitUntil: 'load' });
 await page.waitForFunction(() => window.fxBench !== undefined);
+const isolation = await isolateRenderer(browser);
 
 // Warm up first, so shader compiles and the JIT's first passes are not counted as either cost.
 await page.evaluate(() => window.fxBench.run(120));
-if (process.env.DIAG) await browser.startTracing(page, { categories: CATEGORIES });
 const { update, render } = await page.evaluate((n) => window.fxBench.run(n), FRAMES);
-if (process.env.DIAG) {
-  const trace = await browser.stopTracing();
-  const top = (xs) => [...xs].sort((a, b) => b - a).slice(0, 40).map((x) => Number(x.toFixed(2)));
-  const diag = { totalTop: top(update.map((u, i) => u + render[i])), updateTop: top(update), renderTop: top(render),
-    update: analyse(trace, 'fx-update'), render: analyse(trace, 'fx-render') };
-  appendFileSync('diag-fx.json', JSON.stringify(diag, null, 1));
-  console.log('DIAG', JSON.stringify(diag));
-}
 const total = update.map((u, i) => u + render[i]);
 const pct = (xs, p) => [...xs].sort((a, b) => a - b)[Math.min(xs.length - 1, Math.floor((p / 100) * xs.length))];
 const ms = (x) => Number(x.toFixed(3));
@@ -82,7 +74,7 @@ const walk = (node, ours) => {
 walk(profile.head, false);
 await browser.close();
 
-const result = { ...timing, allocations: allocations.length };
+const result = { ...timing, allocations: allocations.length, isolation };
 console.log(result);
 for (const a of allocations) console.log(a);
 if (process.env.GITHUB_STEP_SUMMARY) {
