@@ -131,7 +131,11 @@ subscriber queues. Watch the sim's tick rate and commit latency with:
 ```bash
 dev/up.sh
 docker compose -f dev/compose.yml logs -f sim   # or podman compose
+dev/down.sh                                     # stop it and delete its data
 ```
+
+`dev/up.sh` waits on the broker through host port 8080; set
+`ARENA_BROKER_PORT` to another port if something on the host already uses it.
 
 The ticks page follows one arena's tick stream through the gateway, showing
 each tick's offset and number as it arrives, and the p50 and p99 of each leg
