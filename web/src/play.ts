@@ -219,6 +219,7 @@ async function main(): Promise<void> {
     return new KillRig(view.camera.fov, view.camera.aspect, radius, yaw, { x: layout.halfX, z: layout.halfZ });
   }, new Markers(fx));
   /** Names over the killer and the victim while a replay plays, placed from where this frame draws them. */
+  const tagAt = new Vector3();
   const whoTags = (kill: KillRef, crafts: CraftView[]) => {
     // The camera moved this frame and has not been drawn yet.
     view.camera.updateMatrixWorld();
@@ -228,10 +229,13 @@ async function main(): Promise<void> {
     ] as const) {
       const tag = document.getElementById(`replay-who-${role}`)!;
       const c = crafts.find((craft) => craft.slot === slot);
-      tag.hidden = !c?.alive;
-      if (!c?.alive) continue;
-      const p = new Vector3(c.x / 100, 3, c.z / 100).project(view.camera);
-      tag.style.transform = `translate(-50%, -100%) translate(${((p.x + 1) / 2) * innerWidth}px, ${((1 - p.y) / 2) * innerHeight}px)`;
+      // A destroyed craft keeps its tag where it went down.
+      tag.hidden = !c;
+      if (!c) continue;
+      const p = tagAt.set(c.x / 100, 3, c.z / 100).project(view.camera);
+      // Below the letterbox's top bar, whatever the camera does.
+      const y = Math.max(110, ((1 - p.y) / 2) * innerHeight);
+      tag.style.transform = `translate(-50%, -100%) translate(${((p.x + 1) / 2) * innerWidth}px, ${y}px)`;
       const name = tag.querySelector('b')!;
       name.textContent = callsign(slot);
       name.className = c.violet ? 'violet' : 'coral';
