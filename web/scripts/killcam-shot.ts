@@ -1,11 +1,14 @@
 // Screenshots of the kill cam, for review: the page flies at the nearest enemy without firing until it is destroyed,
 // and once its replay plays the page grows to 1920x1080, holds the replay a moment before the kill and takes it in
-// each view. With `?offline` in the URL it plays the page's own sim.
+// each view. With `?offline` in the URL it plays the page's own sim; otherwise two bots join the arena through the
+// dev stack to do the destroying.
 // Usage: npx vite-node scripts/killcam-shot.ts -- <play page url with its query> <out dir> [GPU]
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { chromium } from 'playwright';
+import { loadCore } from '../src/core';
 import type { ArenaDebug } from '../src/play';
+import { bot } from './bot';
 
 const [url, out, gpu] = process.argv.slice(2).filter((arg) => arg !== '--');
 if (!url || !out) throw new Error('usage: killcam-shot.ts <play page url> <out dir> [GPU]');
@@ -53,6 +56,12 @@ async function charge(a: Arena): Promise<void> {
   if (sy / size < -0.38) await page.keyboard.down('KeyW');
 }
 
+const stopBots: (() => void)[] = [];
+if (!url.includes('offline')) {
+  loadCore(readFileSync(new URL('../src/core/felix_arena_core_bg.wasm', import.meta.url)));
+  const arenaName = new URL(url).searchParams.get('arena') ?? 'alpha';
+  stopBots.push(...(await Promise.all(['dan', 'eve'].map((user) => bot(user, arenaName)))));
+}
 const started = Date.now();
 let a = await arena();
 while (Date.now() - started < LIMIT_MS) {
@@ -80,5 +89,6 @@ for (const [key, name] of [
   console.log(`saved ${name}.png`, JSON.stringify(await page.evaluate(() => window.arena!.replayAt)));
 }
 console.log(JSON.stringify(await page.evaluate(() => window.arena!.killcams), null, 1));
+for (const stop of stopBots) stop();
 await browser.close();
 if (errors.length) throw new Error(errors.join('\n'));
