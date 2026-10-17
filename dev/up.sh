@@ -37,7 +37,7 @@ if ! "${compose[@]}" up --detach --build; then
 fi
 
 for _ in $(seq 1 90); do
-  if [[ -f state/seeded ]] && curl -fsS http://127.0.0.1:8080/ready >/dev/null 2>&1; then
+  if [[ -f state/seeded ]] && curl -fsS "http://127.0.0.1:${ARENA_BROKER_PORT:-8080}/ready" >/dev/null 2>&1; then
     echo "Felix is ready, with arenas alpha and bravo."
     echo "  gateway:      ws://127.0.0.1:8787"
     echo "  sim's ticks:  $engine compose -f dev/compose.yml logs -f sim"
