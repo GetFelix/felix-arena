@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::future::Future;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -6,7 +7,7 @@ use anyhow::Result;
 use tokio::time::{Instant, MissedTickBehavior};
 use tracing::{info, warn};
 
-use felix_arena_core::{Rules, Timing, World};
+use felix_arena_core::{Event, Phase, Rules, Tick, Timing, World};
 
 use crate::inputs::{Inbox, Players};
 use crate::latency::Window;
@@ -19,6 +20,10 @@ const REPORT_EVERY: Duration = Duration::from_secs(5);
 const COMMIT_TIMEOUT: Duration = Duration::from_secs(1);
 /// The tick record's header: epoch, flags, match and tick number.
 const HEADER_LEN: usize = 12;
+/// A kill cam starts 3 seconds before the kill.
+const REPLAY_BEFORE: u32 = 90;
+/// Ticks whose offsets are kept for naming replays: 10 seconds.
+const OFFSETS_KEPT: usize = 300;
 
 /// The stream state key a keyframe's commit writes, and the key a match's
 /// first tick writes. Each value is the tick record's 12-byte header, and its
@@ -57,6 +62,8 @@ pub(crate) async fn run<C, F>(
     // timed out is written again with the next tick; a timed-out commit may
     // have landed, so the key can end up a tick late, never missing.
     let mut started_match: Option<u32> = None;
+    let mut offsets = Offsets::default();
+    let mut phase: Option<Phase> = None;
     loop {
         let due = timer.tick().await;
         if let Some(last) = last_due {
@@ -75,7 +82,14 @@ pub(crate) async fn run<C, F>(
         report.inputs += received.len() as u64;
         let controls = players.update(&mut world, received, Instant::now());
         world.step(|slot| controls[usize::from(slot)]);
-        let tick = world.snapshot(epoch);
+        let mut tick = world.snapshot(epoch);
+        // A warmup or a match starts with every craft back at its spawn, so
+        // a replay that reached back past it would show them jump.
+        if phase != Some(tick.state.phase) && tick.state.phase != Phase::Results {
+            offsets.cut(tick.tick);
+        }
+        phase = Some(tick.state.phase);
+        offsets.name_replays(&mut tick);
         let started = Instant::now();
         let timing = Timing {
             commit_start_us: unix_micros(),
@@ -102,6 +116,17 @@ pub(crate) async fn run<C, F>(
                 report.offset = Some(offset);
                 previous_commit = Some(took);
                 started_match = Some(tick.match_number);
+                offsets.committed(tick.tick, offset);
+                for event in &tick.events {
+                    if let Event::Killed {
+                        victim,
+                        killer,
+                        replay_from,
+                    } = event
+                    {
+                        info!(arena = %arena, tick = tick.tick, offset, victim, killer, replay_from, "kill");
+                    }
+                }
                 // Readers compare this hash with their own decoding of the tick.
                 if tick.is_keyframe() {
                     info!(arena = %arena, epoch, tick = tick.tick, hash = %format!("{:016x}", tick.hash()), offset, "keyframe");
@@ -116,6 +141,59 @@ pub(crate) async fn run<C, F>(
         let now = Instant::now();
         if now.duration_since(report.since) >= REPORT_EVERY {
             report.log(&arena, now);
+        }
+    }
+}
+
+/// The log offset of each tick committed in the last 10 seconds, so a kill
+/// can name the offset its replay starts from. Offsets are not one a tick: a
+/// failover's generation-start record takes one, and a failed commit leaves a
+/// tick with none, so only the answers say where a tick landed.
+#[derive(Default)]
+struct Offsets {
+    /// Tick number and offset, oldest first.
+    ticks: VecDeque<(u32, u64)>,
+    /// The first tick of the current warmup or match, before which a replay
+    /// never starts.
+    cut: u32,
+}
+
+impl Offsets {
+    fn committed(&mut self, tick: u32, offset: u64) {
+        if self.ticks.len() == OFFSETS_KEPT {
+            self.ticks.pop_front();
+        }
+        self.ticks.push_back((tick, offset));
+    }
+
+    fn cut(&mut self, tick: u32) {
+        self.cut = tick;
+    }
+
+    /// Where the replay of a kill in `tick` starts: the offset of the tick
+    /// [`REPLAY_BEFORE`] earlier, or of the nearest committed tick before it,
+    /// but not before the cut. `None` when nothing since the cut committed.
+    fn replay_from(&self, tick: u32) -> Option<u64> {
+        let start = tick.saturating_sub(REPLAY_BEFORE).max(self.cut);
+        let mut oldest = None;
+        for &(at, offset) in self.ticks.iter().rev() {
+            if at < self.cut {
+                break;
+            }
+            if at <= start {
+                return Some(offset);
+            }
+            oldest = Some(offset);
+        }
+        oldest
+    }
+
+    fn name_replays(&self, tick: &mut Tick) {
+        let from = self.replay_from(tick.tick);
+        for event in &mut tick.events {
+            if let Event::Killed { replay_from, .. } = event {
+                *replay_from = from;
+            }
         }
     }
 }
@@ -198,7 +276,9 @@ mod tests {
 
     use felix_arena_core::{Rules, Tick, Timing};
 
-    use super::{KEYFRAME_KEY, TICK, run};
+    use felix_arena_core::Event;
+
+    use super::{KEYFRAME_KEY, OFFSETS_KEPT, Offsets, TICK, run};
 
     /// What the tests read back from a record.
     #[derive(Clone, Copy)]
@@ -345,5 +425,72 @@ mod tests {
         for pair in seen.windows(2) {
             assert!(pair[1].1 - pair[0].1 >= Duration::from_millis(50));
         }
+    }
+
+    fn killed(replay_from: Option<u64>) -> Event {
+        Event::Killed {
+            victim: 1,
+            killer: 0,
+            replay_from,
+        }
+    }
+
+    #[test]
+    fn a_kill_names_the_offset_of_the_tick_three_seconds_earlier() {
+        let mut offsets = Offsets::default();
+        offsets.cut(1);
+        // A failover's generation-start record took offset 1100, and tick
+        // 150's commit failed, so offsets are not one a tick.
+        for tick in 1..=200u32 {
+            if tick == 150 {
+                continue;
+            }
+            let offset = 1000 + u64::from(tick) + u64::from(tick > 100);
+            offsets.committed(tick, offset);
+        }
+        assert_eq!(offsets.replay_from(201), Some(1000 + 111 + 1));
+        assert_eq!(offsets.replay_from(190), Some(1000 + 100));
+        // Tick 150 has no offset; the replay starts a tick earlier instead.
+        assert_eq!(offsets.replay_from(240), Some(1000 + 149 + 1));
+
+        let mut tick = felix_arena_core::World::new(0).snapshot(0);
+        tick.tick = 201;
+        tick.events = vec![killed(None), Event::Left { slot: 3 }, killed(None)];
+        offsets.name_replays(&mut tick);
+        assert_eq!(
+            tick.events,
+            [
+                killed(Some(1112)),
+                Event::Left { slot: 3 },
+                killed(Some(1112))
+            ]
+        );
+    }
+
+    #[test]
+    fn a_replay_never_reaches_back_past_the_start_of_the_match() {
+        let mut offsets = Offsets::default();
+        for tick in 1..=100u32 {
+            offsets.committed(tick, u64::from(tick));
+        }
+        offsets.cut(60);
+        assert_eq!(offsets.replay_from(101), Some(60));
+        assert_eq!(offsets.replay_from(200), Some(100));
+        // Before anything since the cut has committed there is no replay.
+        offsets.cut(101);
+        assert_eq!(offsets.replay_from(101), None);
+    }
+
+    #[test]
+    fn offsets_are_kept_for_ten_seconds() {
+        let mut offsets = Offsets::default();
+        for tick in 1..=1000u32 {
+            offsets.committed(tick, u64::from(tick) * 2);
+        }
+        assert_eq!(offsets.ticks.len(), OFFSETS_KEPT);
+        assert_eq!(offsets.replay_from(1001), Some(911 * 2));
+        assert_eq!(offsets.replay_from(2000), Some(1000 * 2));
+        // Past what is kept, the oldest kept offset is the best there is.
+        assert_eq!(offsets.replay_from(750), Some(701 * 2));
     }
 }

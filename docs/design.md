@@ -333,7 +333,7 @@ without the ones before it:
 | Match | Phase: warmup, playing or results (1), ticks left in the phase (2), team scores (2 × 2), ticks until a rail is on the crystal, 0 while one is (2) | 9 bytes |
 | Crafts | A count (1), then per craft: slot (1), flags with alive (bit 0), team (bit 1), spawn protection (bit 2) and the fire cooldown (bits 3 to 7) (1), position and velocity in centimetres (4 × 2), heading (2), health (1), boost cooldown (1), last input sequence applied (2), rail shots in the low 2 bits and rail charge ticks above them (1) | 17 bytes each |
 | Projectiles | A count (2), then per live bolt: id (2), owner (1), position (4), heading (2) | 9 bytes each |
-| Events | A count (2), then each a kind byte and its fields: joined (slot, team, player key), left, spawned, fired (slot, bolt, input sequence), hit (target, attacker, bolt, damage), killed (victim, killer), picked up (slot), railed (slot, target or 255, where the beam ended) | 2 to 11 bytes each |
+| Events | A count (2), then each a kind byte and its fields: joined (slot, team, player key), left, spawned, fired (slot, bolt, input sequence), hit (target, attacker, bolt, damage), killed (victim, killer, `replay_from`: the 8-byte offset its kill cam starts from, all ones for none), picked up (slot), railed (slot, target or 255, where the beam ended) | 2 to 11 bytes each |
 | Keyframe only | The roster: a count (1), then per player, slot, team, player key, kills and deaths | 1 + 14 bytes a player |
 
 A player key is the FNV-1a hash of the player's Felix principal, so a client
@@ -483,7 +483,13 @@ sequenceDiagram
 **Finding the right offset.** The sim keeps a ring of `(tick, offset)` for the
 last 10 seconds, filled from each commit's answer. When a kill happens at tick
 `T`, the kill event names `replay_from`, the offset of tick `T - 90` (3 seconds
-earlier). The client does no arithmetic on offsets. Offsets are not one per
+earlier). If tick `T - 90` has no offset, because its commit failed, the
+kill names the nearest earlier tick that has one. A replay never starts
+before the first tick of the warmup or match the kill is in, since every craft
+jumps back to its spawn there; a kill in a match's first 3 seconds replays
+from its start. The sim logs every kill with its offsets, and CI's `match` job
+checks each `replay_from` against the ticks a watcher read live. The client
+does no arithmetic on offsets. Offsets are not one per
 tick: after a failover the new leader's generation-start record takes an offset
 (`Event::skipped_before` in `crates/sdk/felix-client/src/subscribe.rs`), and
 a retried commit can land twice. The sim knows each tick's real offset, so it

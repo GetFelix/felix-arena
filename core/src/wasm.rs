@@ -528,6 +528,15 @@ impl JsEvent {
             _ => 0,
         }
     }
+    /// A kill's replay offset: the log offset of the tick to start its kill
+    /// cam from, about 3 seconds before it. Exact in a double up to 2^53.
+    #[wasm_bindgen(getter, js_name = replayFrom)]
+    pub fn replay_from(&self) -> Option<f64> {
+        match self.0 {
+            crate::Event::Killed { replay_from, .. } => replay_from.map(|o| o as f64),
+            _ => None,
+        }
+    }
     /// Who a rail's beam hit, if anyone.
     #[wasm_bindgen(getter)]
     pub fn target(&self) -> Option<u8> {
