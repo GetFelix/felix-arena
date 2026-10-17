@@ -51,8 +51,8 @@ export class Match {
   private since = new Map<number, { kills: number; deaths: number }>();
   private lastTick = -1;
 
-  /** Take a tick that arrived at `nowMs`. */
-  update(tick: Tick, nowMs: number): void {
+  /** Take a tick that arrived at `nowMs`. A tick folded while catching up adds nothing to the kill feed. */
+  update(tick: Tick, nowMs: number, feed = true): void {
     const phase = tick.phase as Phase;
     const left = tick.phaseLeft;
     const fresh = tick.matchNumber !== this.number || phase !== this.phase;
@@ -87,7 +87,7 @@ export class Match {
       if (e.kind === 'joined') this.roster.set(e.slot, { slot: e.slot, violet: e.violet, kills: 0, deaths: 0 });
       if (e.kind === 'left') this.roster.delete(e.slot);
       if (e.kind !== 'killed') continue;
-      this.feed.push({ killer: e.by, victim: e.slot, atMs: nowMs, rail: railed.has(e.slot) });
+      if (feed) this.feed.push({ killer: e.by, victim: e.slot, atMs: nowMs, rail: railed.has(e.slot) });
       // Keyframes carry the tally; between them, kills are counted here.
       if (!tick.keyframe) {
         const tally = (slot: number) => this.since.get(slot) ?? { kills: 0, deaths: 0 };
@@ -112,6 +112,17 @@ export class Match {
         return { ...s, kills: s.kills + (extra?.kills ?? 0), deaths: s.deaths + (extra?.deaths ?? 0) };
       })
       .sort((a, b) => b.kills - a.kills || a.deaths - b.deaths || a.slot - b.slot);
+  }
+
+  /**
+   * The folded state as text: match, phase, clock, scores, rail timer and every player's tally. Two clients that
+   * folded the same ticks from different starting points agree on it.
+   */
+  digest(): string {
+    const board = this.standings()
+      .sort((a, b) => a.slot - b.slot)
+      .map((s) => `${s.slot}${s.violet ? 'v' : 'c'}${s.kills}/${s.deaths}`);
+    return `${this.number}:${this.phase}:${this.left}:${this.scores.join('-')}:${this.railIn}:${board.join(',')}`;
   }
 
   /** Whole seconds left in the phase. */

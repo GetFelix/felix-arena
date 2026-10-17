@@ -6,16 +6,13 @@
 import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { chromium, type Page } from 'playwright';
-import { decodeTick, Inputs, loadCore } from '../src/core';
-import { Gateway } from '../src/gateway';
-import { drive } from '../src/offline';
+import { loadCore } from '../src/core';
 import type { ArenaDebug } from '../src/play';
+import { bot, botSlots } from './bot';
 
 const [base, out] = process.argv.slice(2).filter((arg) => arg !== '--');
 if (!base || !out) throw new Error('usage: match.ts <play page url> <out dir>');
 const ARENA = 'alpha';
-const GATEWAY = process.env.ARENA_GATEWAY ?? 'ws://127.0.0.1:8787/ws';
-const IDP = process.env.ARENA_IDP ?? 'http://127.0.0.1:9400';
 const LIMIT_MS = 9 * 60_000;
 /** Software rendering at 1920x1080 takes many seconds a frame on a CI runner. */
 const SHOT_TIMEOUT_MS = 240_000;
@@ -25,48 +22,6 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 type Arena = Pick<ArenaDebug, 'slot' | 'own' | 'match' | 'crafts' | 'phases'>;
 
 loadCore(readFileSync(new URL('../src/core/felix_arena_core_bg.wasm', import.meta.url)));
-
-/** A bot: a gateway session that reads ticks and steers its craft as the offline bots do. */
-/** Each bot's slot once it has found itself. */
-const botSlots = new Map<string, number | null>();
-
-async function bot(user: string): Promise<() => void> {
-  const answer = await fetch(`${IDP}/token?sub=${user}&aud=felix-arena`);
-  const token = ((await answer.json()) as { id_token: string }).id_token;
-  const gateway = await Gateway.connect(GATEWAY, ARENA, token);
-  // Bots find their own craft by the sequence numbers it applies, so theirs start far apart.
-  const inputs = new Inputs(user === 'dan' ? 1000 : 30000);
-  const state = { turn: user === 'dan' ? 1 : -1 };
-  let slot: number | null = null;
-  let control = [0, 0, 0, 0];
-  await gateway.subscribe('ticks', 'live', 'live', (frame) => {
-    const tick = decodeTick(frame.payload);
-    const crafts = tick.crafts.map((c) => ({
-      slot: c.slot,
-      violet: c.violet,
-      alive: c.alive,
-      x: c.x,
-      z: c.z,
-      rail: c.rail,
-      lastInput: c.lastInput,
-      protected: c.protected,
-    }));
-    // A bot knows itself as the craft its inputs drive.
-    slot ??= crafts.find((c) => c.lastInput !== 0 && Math.abs(c.lastInput - inputs.seq) < 10)?.slot ?? null;
-    botSlots.set(user, slot);
-    const me = crafts.find((c) => c.slot === slot);
-    control = me?.alive && tick.phase === 'playing' ? drive(me, crafts, state, tick.railIn === 0) : [0, 0, 0, 0];
-    tick.free();
-  });
-  const timer = setInterval(
-    () => gateway.send('input', inputs.next(control[0]!, control[1]!, control[2]!, control[3]!)),
-    33,
-  );
-  return () => {
-    clearInterval(timer);
-    gateway.close();
-  };
-}
 
 async function arena(page: Page): Promise<Arena> {
   return page.evaluate(() => {
@@ -137,7 +92,7 @@ const open = async (user: string, quality: string, width: number, height: number
 const ana = await open('ana', '&quality=high', 1920, 1080);
 const ben = await open('ben', '&quality=low', 480, 270);
 for (const page of [ana, ben]) await page.waitForSelector('#loading', { state: 'detached', timeout: 180_000 });
-const stopBots = await Promise.all(['dan', 'eve'].map(bot));
+const stopBots = await Promise.all(['dan', 'eve'].map((user) => bot(user, ARENA)));
 
 /** The screenshots, at 1920x1080. */
 async function shoot(name: string): Promise<void> {
