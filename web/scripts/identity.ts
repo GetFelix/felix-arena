@@ -5,7 +5,7 @@
 // Usage: npx vite-node scripts/identity.ts -- <play page url>
 import { readFileSync } from 'node:fs';
 import { chromium, type Page } from 'playwright';
-import { loadCore } from '../src/core';
+import { decodeTick, loadCore } from '../src/core';
 import { Gateway } from '../src/gateway';
 import type { ArenaDebug } from '../src/play';
 import { bot } from './bot';
@@ -26,7 +26,8 @@ const browser = await chromium.launch({
   args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'],
 });
 const errors: string[] = [];
-let dropped = 0;
+/** The log offsets of the live ticks cleo's WebSocket dropped. */
+const dropped = new Set<number>();
 async function open(user: string, lossy = false): Promise<Page> {
   const page = await browser.newPage({ viewport: { width: 480, height: 270 } });
   page.on('pageerror', (e) => errors.push(`${user}: ${String(e)}`));
@@ -36,8 +37,10 @@ async function open(user: string, lossy = false): Promise<Page> {
       const server = ws.connectToServer();
       ws.onMessage((message) => server.send(message));
       server.onMessage((message) => {
-        if (typeof message !== 'string' && Math.random() < DROP) dropped++;
-        else ws.send(message);
+        if (typeof message !== 'string' && Math.random() < DROP) {
+          // A binary event frame carries its offset at bytes 8 to 15.
+          dropped.add(Number(message.readBigUInt64LE(8)));
+        } else ws.send(message);
       });
     });
   }
@@ -106,8 +109,9 @@ try {
   if (!pick) throw new Error('no kill of ana that all three pages know of');
   for (const key of ['KeyW', 'KeyA', 'KeyS', 'KeyD']) await ana.keyboard.up(key);
   console.log(`ana's kill at tick ${pick.tick}, replayed from offset ${pick.replayFrom}: ${pick.hash}`);
-  console.log(`cleo's WebSocket dropped ${dropped} live ticks`);
-  if (dropped < 30) failures.push(`cleo dropped only ${dropped} live ticks`);
+  const inWindow = [...dropped].filter((o) => o >= pick!.replayFrom && o <= pick!.offset + 30).length;
+  console.log(`cleo's WebSocket dropped ${dropped.size} live ticks, ${inWindow} of them in the replay's window`);
+  if (inWindow === 0) failures.push(`cleo dropped none of the replay's ticks live (${dropped.size} in all)`);
 
   const hashes: Record<string, string | null> = { ana: pick.hash };
   for (const [name, page] of [
@@ -120,7 +124,10 @@ try {
     const deadline = Date.now() + 60_000;
     let run: Seen['killcams'][number] | undefined;
     while (Date.now() < deadline) {
-      run = (await seen(page)).killcams[before];
+      // The page's own death can start a kill cam too; this is the one of ana's kill.
+      run = (await seen(page)).killcams
+        .slice(before)
+        .find((k) => k.killTick === pick!.tick && k.from === pick!.replayFrom);
       if (run && (run.failed || run.complete)) break;
       await sleep(250);
     }
@@ -132,13 +139,29 @@ try {
   const token = ((await (await fetch(`${IDP}/token?sub=cleo&aud=felix-arena`)).json()) as { id_token: string })
     .id_token;
   const gateway = await Gateway.connect(GATEWAY, ARENA, token);
-  const records: Uint8Array[] = [];
-  for (let from = pick.replayFrom; records.length < 121; ) {
-    const page = await gateway.read('ticks', from, pick.offset + 31);
-    records.push(...page.records.map((r) => r.payload));
+  // Read as a page reads a replay: the kill's epoch only, each tick once, up to a second after the kill.
+  const end = pick.offset + 31;
+  const raw: Uint8Array[] = [];
+  for (let from = pick.replayFrom; from < end; ) {
+    const page = await gateway.read('ticks', from, end);
+    raw.push(...page.records.map((r) => r.payload));
     if (page.nextOffset <= from) break;
     from = page.nextOffset;
   }
+  const epochOf = (bytes: Uint8Array) => {
+    const tick = decodeTick(bytes);
+    const out = [tick.epoch, tick.tick] as const;
+    tick.free();
+    return out;
+  };
+  const killEpoch = raw.map(epochOf).find(([, tick]) => tick === pick!.tick)?.[0];
+  const held = new Set<number>();
+  const records = raw.filter((bytes) => {
+    const [epoch, tick] = epochOf(bytes);
+    if (epoch !== killEpoch || held.has(tick) || tick > pick!.tick + 30) return false;
+    held.add(tick);
+    return true;
+  });
   gateway.close();
   hashes.log = fnv64(records);
   console.log('hashes:', JSON.stringify(hashes));

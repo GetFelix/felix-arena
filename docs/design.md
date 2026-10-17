@@ -561,8 +561,8 @@ firing and her page plays her kill cam; ben, playing, and cleo, watching
 through a WebSocket that loses a third of its live ticks on the way (a
 Playwright route between the page and the gateway), replay the same kill from
 their replays panels. The three pages' hashes of the tick bytes they replayed
-must match each other and a plain range read of the log
-(`web/scripts/identity.ts`).
+must match each other and a plain range read of the log, and cleo must have
+lost some of the replay's own ticks live (`web/scripts/identity.ts`).
 
 The alternative, playing the kill cam from the client's own recent buffer, was
 rejected for that reason. It would save the fetch, but a client that dropped
