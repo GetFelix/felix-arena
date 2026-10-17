@@ -80,7 +80,8 @@ services:
       RUST_LOG: info
     ports:
       - "127.0.0.1:5000:5000/udp"
-      - "127.0.0.1:8080:8080"
+      # ARENA_BROKER_PORT moves the readiness port when 8080 is taken on the host.
+      - "127.0.0.1:${ARENA_BROKER_PORT:-8080}:8080"
     volumes:
       - ./state:/state
       - felix-data:/var/lib/felix
