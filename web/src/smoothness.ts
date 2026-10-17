@@ -39,8 +39,8 @@ export interface Smoothness {
 }
 
 const FRAME_MS = 1000 / 60;
-/** The interpolator's blend after a guess, and a frame. */
-const RECOVER_MS = 100 + FRAME_MS;
+/** The frames of the interpolator's 100 ms blend after a guess, and one more. */
+const RECOVER_FRAMES = Math.round(100 / FRAME_MS) + 1;
 
 /**
  * Play `arrivals` through an {@link Interpolator} at 60 frames a second, leaving out each arrival `lose` picks, and
@@ -65,10 +65,13 @@ export function measure(arrivals: Arrival[], lose: (index: number) => boolean, t
   const interpolator = new Interpolator();
   let next = 0;
   let previous: { r: number; at: Map<number, [number, number]>; truth: Map<number, [number, number]> } | null = null;
-  // A second in, so the clock has settled, until the last arrival.
-  const start = kept[0]!.arrivedMs + 1000;
+  // A second in, so the clock has settled, until the last arrival. Frames are counted rather than timed: arrival
+  // times on the Unix clock are large enough that adding up frame lengths drifts, and would move the last frame of a
+  // blend out of `recovering`.
+  const first = kept[0]!.arrivedMs;
+  const start = first + 1000;
   let starvedAt = -Infinity;
-  for (let now = kept[0]!.arrivedMs; now <= kept.at(-1)!.arrivedMs; now += FRAME_MS) {
+  for (let frame = 0, now = first; now <= kept.at(-1)!.arrivedMs; frame++, now = first + frame * FRAME_MS) {
     while (next < kept.length && kept[next]!.arrivedMs <= now) {
       interpolator.push(kept[next]!.snapshot, kept[next]!.arrivedMs);
       next++;
@@ -82,9 +85,9 @@ export function measure(arrivals: Arrival[], lose: (index: number) => boolean, t
     const starved = view.renderTick - interpolator.newest!.tick >= 2;
     if (starved) {
       out.starved++;
-      starvedAt = now;
+      starvedAt = frame;
     }
-    const recovering = !starved && now - starvedAt <= RECOVER_MS;
+    const recovering = !starved && frame - starvedAt <= RECOVER_FRAMES;
     if (recovering) out.recovering++;
     const at = new Map<number, [number, number]>();
     const real = new Map<number, [number, number]>();

@@ -590,10 +590,11 @@ applies every input exactly once, no correction moves the craft more than
 10 cm in a frame, about four pixels at 1080p, nothing snaps, and nine in ten
 shots or more are matched to the sim's bolt, with one tick in twenty lost too. CI's dev
 stack job drives the live page in headless Chromium against the dev stack and
-times each input in three parts: the wait for the next frame, the page putting
-it into that frame's scene, and the render. The first frame after an input
-draws it, so on a 60 Hz display the wait is under a frame, and the page's own
-part is held under 2 ms. CI renders on the CPU, so its waits and renders are
+times 300 inputs, after 60 it leaves out while the JIT warms up, in three
+parts: the wait for the next frame, the page putting it into that frame's
+scene, and the render. The first frame after an input draws it, so on a 60 Hz
+display the wait is under a frame, and the page's own part is held under 2 ms
+at the 95th percentile. CI renders on the CPU, so its waits and renders are
 the software rasterizer's and are only reported.
 
 **Your own shots are predicted too.** A bolt appears from your nose when the
@@ -683,7 +684,10 @@ puts 40 bolts and 8 hits on screen with their flashes and lights, and
 `web/scripts/fx-bench.mjs` times each frame's update and `renderer.render` call
 (under 2 ms at the 95th percentile) and samples every allocation while the
 effects update (none allowed). CI renders on the CPU with SwiftShader, so it
-times the page's own work and the issuing of draw calls, not the GPU.
+times the page's own work and the issuing of draw calls, not the GPU. SwiftShader
+rasterizes on every core and would otherwise preempt the page mid-frame, so the
+timing gates give the page's main thread a core of its own and keep the rest of
+the browser off it (`web/scripts/isolate.mjs`).
 
 **Quality tiers.** High is the style frame. Medium drops ambient occlusion,
 halves the shadow map and renders bloom at quarter resolution. Low keeps only

@@ -6,6 +6,7 @@
 // without waiting for them to be drawn.
 import { appendFileSync } from 'node:fs';
 import { chromium } from 'playwright';
+import { isolateRenderer } from './isolate.mjs';
 
 const [url] = process.argv.slice(2);
 if (!url) throw new Error('usage: fx-bench.mjs <fx-bench.html url>');
@@ -21,6 +22,7 @@ page.on('pageerror', (e) => errors.push(String(e)));
 page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
 await page.goto(url, { waitUntil: 'load' });
 await page.waitForFunction(() => window.fxBench !== undefined);
+const isolation = await isolateRenderer(browser);
 
 // Warm up first, so shader compiles and the JIT's first passes are not counted as either cost.
 await page.evaluate(() => window.fxBench.run(120));
@@ -72,7 +74,7 @@ const walk = (node, ours) => {
 walk(profile.head, false);
 await browser.close();
 
-const result = { ...timing, allocations: allocations.length };
+const result = { ...timing, allocations: allocations.length, isolation };
 console.log(result);
 for (const a of allocations) console.log(a);
 if (process.env.GITHUB_STEP_SUMMARY) {

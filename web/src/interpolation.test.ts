@@ -133,6 +133,22 @@ describe('interpolation', () => {
     expect(rough.stalls).toBe(0);
   });
 
+  it('leaves every frame of the blend after a hold-up out of the measures, on the Unix clock', () => {
+    // A steady link that holds the ticks up for 110 ms once, stamped as the gateway stamps them: milliseconds since
+    // 1970, where adding up frame lengths drifts.
+    const epoch = Date.UTC(2026, 9, 17);
+    const steadily = deliver(truth, steady);
+    const until = steadily[300]!.arrivedMs + 110;
+    const held = steadily.map((a, i) => ({
+      ...a,
+      arrivedMs: epoch + (i >= 300 ? Math.max(a.arrivedMs, until) : a.arrivedMs),
+    }));
+    const run = measure(held, () => false, truth);
+    expect(run.starved).toBeGreaterThan(0);
+    expect(run.recovering).toBe(7);
+    expect(run.maxJump).toBeLessThan(0.5);
+  });
+
   it('slides across one missing tick inside the two-tick delay', () => {
     const ticks = cruise(140);
     let frames = 0;
