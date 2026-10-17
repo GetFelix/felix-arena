@@ -104,6 +104,9 @@ services:
     volumes:
       - ./scope.toml:/etc/felix-gateway/scope.toml:ro
       - ./state:/state:ro
+    # The broker writes the certificate the gateway trusts a moment after it
+    # starts; a gateway that starts first exits, and is started again.
+    restart: on-failure
     depends_on:
       broker:
         condition: service_started
