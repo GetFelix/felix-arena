@@ -42,7 +42,7 @@ frame it describes, [prototype/style-frame.html](../prototype/style-frame.html).
 | Players | 2 to 8 per match, up to 4 a side |
 | Length | 5 minutes or first team to 25 kills, after a 10 second warmup; 15 seconds of results, then the next match |
 | Craft | One hover-craft model per player from the Kenney Space Kit, team colour on its accent panels; 100 health, regenerating after 4 seconds without damage |
-| Respawn | 5 seconds, at your team's spawn zone. The kill cam fills that wait |
+| Respawn | 5 seconds, at the safest point on your team's half, then 2 seconds of spawn protection. The kill cam fills that wait |
 | Arena | 40 by 28 metres, walled, point-symmetric cover so neither side is better |
 
 **The match loop.** The warmup is free play: kills there do not count, and its
@@ -54,6 +54,17 @@ then the next match's warmup starts with the same players and the next match
 number. The sim's `SIM_WARMUP_SECONDS`, `SIM_MATCH_SECONDS`,
 `SIM_RESULTS_SECONDS`, `SIM_KILL_LIMIT` and `SIM_RAIL_SECONDS` set the lengths,
 for tests that cannot wait five minutes.
+
+**Respawns.** A match starts with every craft at its team's spawn zone. A
+destroyed craft comes back at one of a fixed grid of points over its own half,
+clear of cover and mirrored between the teams: the one farthest from the
+nearest live enemy, where an enemy within 15 m with a clear line to the point
+(through core's cover) counts as half as far away. Ties go to the first point
+in the grid's order, so the choice is the same in the sim and in the browser.
+With no enemy alive the craft goes back to its spawn zone. For 60 ticks after
+it appears the craft takes no damage: bolts that reach it stop there and a rail
+ends on it, both harmlessly. Firing gives the protection up at once. The tick
+carries it as a craft flag, so every client draws the shield.
 
 **The rail.** The crystal stands on a plinth 4.6 m across at its foot, which
 crafts and bolts collide with. When a rail is there, the first live craft that comes
@@ -319,7 +330,7 @@ without the ones before it:
 | Header | Epoch (2 bytes), flags with the keyframe bit (1) and the timed bit (2), reserved (1), match number (4), tick number (4), little-endian | 12 bytes |
 | Timing, with the timed bit | Commit start in µs since the Unix epoch (8), the sim step (4), the previous tick's commit in µs (4) | 16 bytes |
 | Match | Phase: warmup, playing or results (1), ticks left in the phase (2), team scores (2 × 2), ticks until a rail is on the crystal, 0 while one is (2) | 9 bytes |
-| Crafts | A count (1), then per craft: slot (1), flags with alive, team and the fire cooldown (1), position and velocity in centimetres (4 × 2), heading (2), health (1), boost cooldown (1), last input sequence applied (2), rail shots in the low 2 bits and rail charge ticks above them (1) | 17 bytes each |
+| Crafts | A count (1), then per craft: slot (1), flags with alive (bit 0), team (bit 1), spawn protection (bit 2) and the fire cooldown (bits 3 to 7) (1), position and velocity in centimetres (4 × 2), heading (2), health (1), boost cooldown (1), last input sequence applied (2), rail shots in the low 2 bits and rail charge ticks above them (1) | 17 bytes each |
 | Projectiles | A count (2), then per live bolt: id (2), owner (1), position (4), heading (2) | 9 bytes each |
 | Events | A count (2), then each a kind byte and its fields: joined (slot, team, player key), left, spawned, fired (slot, bolt, input sequence), hit (target, attacker, bolt, damage), killed (victim, killer), picked up (slot), railed (slot, target or 255, where the beam ended) | 2 to 11 bytes each |
 | Keyframe only | The roster: a count (1), then per player, slot, team, player key, kills and deaths | 1 + 14 bytes a player |

@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 
 use crate::input::{BOOST, FIRE};
-use crate::world::{BOLT_DAMAGE, MAX_HEALTH, RESPAWN_AFTER};
+use crate::world::{BOLT_DAMAGE, MAX_HEALTH, RESPAWN_AFTER, SPAWN_PROTECTION, SPAWN_SIGHT};
 use crate::{
     CRAFT_RADIUS, Event, Input, Phase, Rules, Team, Tick, Timing, World, bolt_ticks, player_key,
     steer,
@@ -385,8 +385,9 @@ fn bolts_pass_through_teammates() {
 fn unknown_bits_are_refused() {
     let tick = busy(30, 2).snapshot(0);
     let record = tick.encode(None);
-    // The flags, the reserved byte, the phase, the first craft's flags and its rail charge.
-    for (at, bit) in [(2, 4), (3, 1), (12, 4), (23, 4), (38, 128)] {
+    // The flags, the reserved byte, the phase and the first craft's rail
+    // charge. Every bit of a craft's flags has a meaning.
+    for (at, bit) in [(2, 4), (3, 1), (12, 4), (38, 128)] {
         let mut changed = record.clone();
         changed[at] |= bit;
         assert!(Tick::decode(&changed).is_none(), "byte {at}");
@@ -541,7 +542,8 @@ fn the_kill_limit_ends_the_match_and_the_start_clears_the_warmup() {
     world.join(1);
     world.join(2);
     let kill = |world: &mut World| {
-        while !world.crafts()[1].alive {
+        // Back, and its spawn protection run out.
+        while !world.crafts()[1].alive || world.crafts()[1].protected {
             world.step(|_| None);
         }
         place(world, 0, -300, 1250);
@@ -691,4 +693,210 @@ fn the_rail_stops_at_cover() {
     assert_eq!(target, None);
     assert!((-1310..=-1290).contains(&x), "{x}");
     assert_eq!(world.crafts()[1].health, MAX_HEALTH);
+}
+
+/// Destroys `slot`'s craft where it is, so it respawns in the next step.
+fn wreck(world: &mut World, slot: usize) {
+    let craft = &mut world.crafts_mut()[slot];
+    (craft.alive, craft.health) = (false, 0);
+}
+
+/// The nearest enemy to `point` and whether any enemy within
+/// [`SPAWN_SIGHT`] has a clear line to it.
+fn exposure(point: (i32, i32), enemies: &[(i32, i32)]) -> (i32, bool) {
+    let nearest = enemies
+        .iter()
+        .map(|e| crate::fixed::length(e.0 - point.0, e.1 - point.1))
+        .min()
+        .unwrap();
+    let seen = enemies.iter().any(|&e| {
+        crate::fixed::length(e.0 - point.0, e.1 - point.1) < SPAWN_SIGHT
+            && crate::arena::line_of_sight(point, e)
+    });
+    (nearest, seen)
+}
+
+#[test]
+fn a_respawn_avoids_an_enemy_camping_the_spawn() {
+    let mut world = free_play(0);
+    world.join(1); // Coral
+    world.join(2); // Violet
+    let camp = crate::arena::spawn(Team::Coral, 0);
+    place(&mut world, 1, camp.0 as i16, camp.1 as i16);
+    wreck(&mut world, 0);
+    world.step(|_| None);
+    let craft = world.crafts()[0];
+    assert!(craft.alive && craft.protected);
+    assert!(
+        world
+            .snapshot(0)
+            .events
+            .contains(&Event::Spawned { slot: 0 })
+    );
+    let (nearest, seen) = exposure((craft.x.into(), craft.z.into()), &[camp]);
+    assert!(
+        nearest >= 1000 && !seen,
+        "({}, {}): {nearest} {seen}",
+        craft.x,
+        craft.z
+    );
+}
+
+#[test]
+fn a_respawn_is_never_close_or_in_sight_when_a_safe_point_exists() {
+    const SAFE: i32 = 1000;
+    let mut rng = Lcg(5);
+    let mut checked = 0;
+    for _ in 0..300 {
+        let mut world = free_play(0);
+        for key in 0..6 {
+            world.join(key); // Coral in even slots, Violet in odd ones.
+        }
+        let mut enemies = Vec::new();
+        for slot in [1, 3, 5] {
+            let (x, z) = loop {
+                let x = (rng.next() % 3800) as i32 - 1900;
+                let z = (rng.next() % 2600) as i32 - 1300;
+                if crate::arena::OBSTACLES
+                    .iter()
+                    .all(|o| !o.touches(x, z, CRAFT_RADIUS))
+                {
+                    break (x, z);
+                }
+            };
+            place(&mut world, slot, x as i16, z as i16);
+            enemies.push((x, z));
+        }
+        let safe = crate::arena::respawn_points(Team::Coral).any(|p| {
+            let (nearest, seen) = exposure(p, &enemies);
+            nearest >= SAFE && !seen
+        });
+        let chosen = world.respawn_point(Team::Coral, 0);
+        assert!(crate::arena::respawn_points(Team::Coral).any(|p| p == chosen));
+        if safe {
+            checked += 1;
+            let (nearest, seen) = exposure(chosen, &enemies);
+            assert!(
+                nearest >= SAFE && !seen,
+                "{enemies:?} -> {chosen:?}: {nearest} {seen}"
+            );
+        }
+    }
+    assert!(checked > 100, "{checked}");
+}
+
+#[test]
+fn the_same_enemies_give_the_same_respawn_and_the_mirror_for_violet() {
+    let mut world = free_play(0);
+    for key in 0..4 {
+        world.join(key);
+    }
+    place(&mut world, 0, -1000, 300);
+    place(&mut world, 2, -400, -900);
+    place(&mut world, 1, 1000, -300);
+    place(&mut world, 3, 400, 900);
+    let (coral, violet) = (
+        world.respawn_point(Team::Coral, 0),
+        world.respawn_point(Team::Violet, 0),
+    );
+    assert_eq!(violet, (-coral.0, -coral.1));
+    assert_eq!(world.clone().respawn_point(Team::Coral, 0), coral);
+}
+
+#[test]
+fn with_no_enemy_alive_a_craft_respawns_at_its_own_spawn() {
+    let mut world = free_play(0);
+    world.join(1);
+    world.join(2);
+    wreck(&mut world, 1);
+    assert_eq!(
+        world.respawn_point(Team::Coral, 0),
+        crate::arena::spawn(Team::Coral, 0)
+    );
+}
+
+/// A world where Coral's craft has just respawned with an enemy 4 m in front
+/// of it, on open floor along z = 12.5 m.
+fn respawned_under_fire() -> World {
+    let mut world = free_play(0);
+    world.join(1);
+    world.join(2);
+    wreck(&mut world, 0);
+    world.step(|_| None);
+    assert!(world.crafts()[0].protected);
+    place(&mut world, 0, -200, 1250);
+    place(&mut world, 1, 200, 1250);
+    world
+}
+
+#[test]
+fn spawn_protection_stops_shots_then_runs_out() {
+    let mut world = respawned_under_fire();
+    let fire = input(1, 0, 0, 32768, FIRE);
+    // The respawn tick was the first of the protection.
+    for step in 1..SPAWN_PROTECTION {
+        world.step(|slot| (slot == 1).then_some(fire));
+        let craft = world.crafts()[0];
+        assert!(craft.protected, "step {step}");
+        assert_eq!(craft.health, MAX_HEALTH, "step {step}");
+        assert!(
+            !world
+                .snapshot(0)
+                .events
+                .iter()
+                .any(|e| matches!(e, Event::Hit { target: 0, .. })),
+            "step {step}"
+        );
+        // Stopped by the shield, not passed through.
+        assert!(
+            world.snapshot(0).bolts.iter().all(|b| b.x > -150),
+            "step {step}"
+        );
+    }
+    world.step(|slot| (slot == 1).then_some(fire));
+    assert!(!world.crafts()[0].protected);
+    let mut hit = false;
+    for _ in 0..10 {
+        world.step(|slot| (slot == 1).then_some(fire));
+        hit |= world.crafts()[0].health < MAX_HEALTH;
+    }
+    assert!(hit);
+}
+
+#[test]
+fn firing_ends_spawn_protection_at_once_in_the_world_and_in_steer() {
+    let mut world = respawned_under_fire();
+    let mut predicted = world.crafts()[0];
+    let fire = input(1, 0, 0, 0, FIRE);
+    world.step(|slot| (slot == 0).then_some(fire));
+    assert!(steer(&mut predicted, Some(fire)).is_some());
+    assert!(!predicted.protected);
+    assert!(!world.crafts()[0].protected);
+    assert!(
+        world
+            .snapshot(0)
+            .events
+            .iter()
+            .any(|e| matches!(e, Event::Fired { slot: 0, .. }))
+    );
+    world.step(|slot| (slot == 1).then_some(input(1, 0, 0, 32768, FIRE)));
+    let mut hit = false;
+    for _ in 0..10 {
+        world.step(|slot| (slot == 1).then_some(input(1, 0, 0, 32768, FIRE)));
+        hit |= world.crafts()[0].health < MAX_HEALTH;
+    }
+    assert!(hit);
+}
+
+#[test]
+fn spawn_protection_rides_in_the_crafts_flags() {
+    let mut world = respawned_under_fire();
+    world.step(|_| None);
+    let tick = world.snapshot(0);
+    assert!(tick.crafts[0].protected && !tick.crafts[1].protected);
+    let record = tick.encode(None);
+    // Header 12, match 9, the craft count 1, then the first craft's slot.
+    assert_eq!(record[23] & 4, 4);
+    assert_eq!(record[23 + 17] & 4, 0);
+    assert_eq!(Tick::decode(&record), Some((tick, None)));
 }

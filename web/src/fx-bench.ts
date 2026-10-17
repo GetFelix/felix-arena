@@ -1,4 +1,5 @@
-// The effects kit under its budget load: 40 bolts and 8 hits on screen, with muzzle flashes and the three lights.
+// The effects kit under its budget load: 40 bolts and 8 hits on screen, with muzzle flashes, the three lights and
+// two spawn shields that come and go.
 // `scripts/fx-bench.mjs` drives it through `window.fxBench`; on its own the page just plays the scene.
 import { Color, Fog, Group, PerspectiveCamera, Scene } from 'three';
 import { Effects } from './effects';
@@ -71,6 +72,11 @@ function update(): void {
   if (n % 60 === 0) {
     effects.railed(true, 1500, 600, -900, -300, t);
     effects.destroyed(false, -900, -300, t);
+  }
+  // Two shields for one second in every three, so they rise, flicker and fade.
+  if (n % 180 < 60) {
+    effects.shield(0, false, -1500, 300, 60 - (n % 180));
+    effects.shield(1, true, 1500, -300, 60 - (n % 180));
   }
   effects.update(t);
 }

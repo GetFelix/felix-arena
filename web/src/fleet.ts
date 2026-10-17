@@ -26,6 +26,8 @@ export interface CraftView {
   heading: number;
   /** How far a rail has charged, 0 to 1, or 0 when none is charging. */
   charge?: number;
+  /** Under spawn protection, which the effects draw as a shield. */
+  protected?: boolean;
 }
 
 /** The scene's angle about y for a heading: a heading turns from +x toward +z, a model faces +z at angle 0. */

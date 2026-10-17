@@ -195,6 +195,12 @@ pub fn respawn_ticks() -> u16 {
     crate::world::RESPAWN_AFTER
 }
 
+/// Ticks a respawned craft is protected for, unless it fires first.
+#[wasm_bindgen(js_name = spawnProtectionTicks)]
+pub fn spawn_protection_ticks() -> u16 {
+    crate::world::SPAWN_PROTECTION
+}
+
 /// Ticks the boost takes to cool down.
 #[wasm_bindgen(js_name = boostTicks)]
 pub fn boost_ticks() -> u8 {
@@ -465,6 +471,12 @@ impl JsCraft {
     #[wasm_bindgen(getter)]
     pub fn charge(&self) -> u8 {
         self.0.charge
+    }
+    /// Just respawned, and takes no damage until it fires or the
+    /// protection runs out.
+    #[wasm_bindgen(getter)]
+    pub fn protected(&self) -> bool {
+        self.0.protected
     }
 }
 

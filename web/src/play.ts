@@ -18,6 +18,7 @@ import {
   playerKey,
   railChargeTicks,
   respawnTicks,
+  spawnProtectionTicks,
   type Tick,
 } from './core';
 import { Effects } from './effects';
@@ -64,8 +65,8 @@ export interface ArenaDebug {
   match: { number: number; phase: string; seconds: number; scores: [number, number]; railIn: number } | null;
   /** Each match number and phase the page has seen, as `number:phase`, oldest first. */
   phases: string[];
-  /** Every craft as drawn: centimetres. */
-  crafts: { slot: number; violet: boolean; alive: boolean; x: number; z: number }[];
+  /** Every craft as drawn: centimetres, and whether it is under spawn protection. */
+  crafts: { slot: number; violet: boolean; alive: boolean; x: number; z: number; protected: boolean }[];
   /** Where a point on the floor, in centimetres, is on screen, in CSS pixels. */
   screenOf: (x: number, z: number) => { x: number; y: number };
   /** The quality tier drawn now. */
@@ -197,6 +198,8 @@ async function main(): Promise<void> {
   const due: { tick: number; kind: string; slot: number; by: number; x: number; z: number; target?: number }[] = [];
   /** When your craft respawns, on the page's clock, while it is destroyed. */
   let respawnAt: number | null = null;
+  /** The tick each slot last respawned in, for how much of its spawn protection is left. */
+  const spawnedIn = new Map<number, number>();
 
   const onTick = (tick: Tick, arrivedMs: number) => {
     debug.ticks++;
@@ -285,7 +288,14 @@ async function main(): Promise<void> {
         : { ...c, charge };
     });
     fleet.update(crafts, t);
-    debug.crafts = crafts.map(({ slot, violet, alive, x, z }) => ({ slot, violet, alive, x, z }));
+    debug.crafts = crafts.map(({ slot, violet, alive, x, z, protected: shielded }) => ({
+      slot,
+      violet,
+      alive,
+      x,
+      z,
+      protected: shielded ?? false,
+    }));
 
     const claimed = own?.claimed ?? new Set<number>();
     const byId = new Map<number, { x: number; z: number }>();
@@ -320,7 +330,17 @@ async function main(): Promise<void> {
         effects.fired(at.violet, nose[0], nose[1], t);
       } else if (e.kind === 'killed') {
         effects.destroyed(at.violet, at.x, at.z, t);
+        spawnedIn.delete(e.slot);
+      } else if (e.kind === 'spawned') {
+        spawnedIn.set(e.slot, e.tick);
       }
+    }
+    const protection = spawnProtectionTicks();
+    for (const c of crafts) {
+      if (!c.alive || !c.protected) continue;
+      const since = spawnedIn.get(c.slot);
+      const left = since === undefined || !frame ? protection : protection - (frame.renderTick - since);
+      effects.shield(c.slot, c.violet, c.x, c.z, left);
     }
     effects.update(t);
 

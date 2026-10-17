@@ -123,6 +123,44 @@ pub fn spawn(team: crate::Team, place: usize) -> (i32, i32) {
     }
 }
 
+/// Where a craft can come back after being destroyed, before the safest is
+/// picked: a grid over the back of Coral's half, clear of cover by a margin.
+/// Violet's are the mirror image, in the same order, so neither side's
+/// choice is better.
+const RESPAWN_X: [i32; 5] = [-1800, -1500, -1200, -900, -600];
+const RESPAWN_Z: [i32; 7] = [-1200, -800, -400, 0, 400, 800, 1200];
+/// How far a respawn point stays from cover, past the craft's own radius.
+const RESPAWN_CLEARANCE: i32 = 40;
+/// The step a line of sight is checked at.
+const SIGHT_STEP: i32 = 20;
+
+/// The points `team` may respawn at, in a fixed order.
+pub fn respawn_points(team: crate::Team) -> impl Iterator<Item = (i32, i32)> {
+    RESPAWN_X
+        .into_iter()
+        .flat_map(|x| RESPAWN_Z.into_iter().map(move |z| (x, z)))
+        .filter(|&(x, z)| {
+            let reach = crate::CRAFT_RADIUS + RESPAWN_CLEARANCE;
+            x.abs() <= HALF_X - reach
+                && z.abs() <= HALF_Z - reach
+                && OBSTACLES.iter().all(|o| !o.touches(x, z, reach))
+        })
+        .map(move |(x, z)| match team {
+            crate::Team::Coral => (x, z),
+            crate::Team::Violet => (-x, -z),
+        })
+}
+
+/// Whether nothing in the arena stands on the line from `a` to `b`.
+pub fn line_of_sight(a: (i32, i32), b: (i32, i32)) -> bool {
+    let (dx, dz) = (b.0 - a.0, b.1 - a.1);
+    let steps = (crate::fixed::length(dx, dz) / SIGHT_STEP).max(1);
+    (0..=steps).all(|i| {
+        let (x, z) = (a.0 + dx * i / steps, a.1 + dz * i / steps);
+        OBSTACLES.iter().all(|o| !o.touches(x, z, 1))
+    })
+}
+
 impl Obstacle {
     /// The point of this obstacle closest to `(x, z)`, for a box, or its
     /// centre and radius, for a round one.
@@ -155,7 +193,7 @@ impl Obstacle {
 
 #[cfg(test)]
 mod tests {
-    use super::{HALF_X, HALF_Z, OBSTACLES, Obstacle, spawn};
+    use super::{HALF_X, HALF_Z, OBSTACLES, Obstacle, line_of_sight, respawn_points, spawn};
     use crate::{CRAFT_RADIUS, Team};
 
     #[test]
@@ -195,5 +233,29 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn respawn_points_are_clear_mirrored_and_on_their_own_half() {
+        let coral: Vec<_> = respawn_points(Team::Coral).collect();
+        let violet: Vec<_> = respawn_points(Team::Violet).collect();
+        assert!(coral.len() >= 20, "{}", coral.len());
+        assert_eq!(
+            violet,
+            coral.iter().map(|&(x, z)| (-x, -z)).collect::<Vec<_>>()
+        );
+        for &(x, z) in &coral {
+            assert!(x < 0);
+            assert!(x.abs() <= HALF_X - CRAFT_RADIUS && z.abs() <= HALF_Z - CRAFT_RADIUS);
+            assert!(OBSTACLES.iter().all(|o| !o.touches(x, z, CRAFT_RADIUS)));
+        }
+    }
+
+    #[test]
+    fn cover_blocks_sight() {
+        // The crystal stands between the two ends of the arena's long axis.
+        assert!(!line_of_sight((-1000, 0), (1000, 0)));
+        assert!(line_of_sight((-1000, 1300), (1000, 1300)));
+        assert!(line_of_sight((1500, 1300), (1500, 1300)));
     }
 }
