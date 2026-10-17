@@ -566,7 +566,7 @@ export class Effects {
   constructor(scene: Object3D, fx: Object3D, tex: EffectTextures, random: () => number) {
     this.kit = new EffectsKit(scene, fx, tex, random);
     // Made after the kit, so the style frame, which draws through the kit alone, is unchanged.
-    const sphere = new SphereGeometry(1, 48, 32);
+    const sphere = new SphereGeometry(1, 32, 16);
     this.shields = Array.from({ length: SHIELDS }, () => shield(fx, sphere));
     // Below the bloom threshold at full strength: only an absorbed shot and the collapse glow.
     this.shieldTints = [hdr(palette.coral, 2.2), hdr(palette.violet, 2.2)];
