@@ -71,6 +71,7 @@ export class KillCam {
   private victimAt: Spot = { x: 0, z: 0 };
   private killerAt: Spot = { x: 0, z: 0 };
   private readonly hud = new ReplayHud();
+  private readonly fetched = new WeakMap<KillCamTimes, Replay>();
 
   constructor(
     private readonly rigFor: () => KillRig,
@@ -85,6 +86,9 @@ export class KillCam {
   /** Start the kill cam for `kill`, which arrived at `nowMs`: the death beat now, the replay once it is read. */
   start(kill: KillRef, reader: Reader, nowMs: number, commitUnixMs: number | null, beatMs = BEAT_MS): void {
     const view = this.rig?.view;
+    if (this.replay) this.replay.dropped = true;
+    this.hud.hide();
+    this.markers.hide();
     this.state = 'beat';
     this.kill = kill;
     this.since = nowMs - (BEAT_MS - beatMs);
@@ -103,11 +107,20 @@ export class KillCam {
     };
     this.times = times;
     void fetchReplay(reader, kill).then((replay) => {
-      if (this.times !== times) return;
+      this.fetched.set(times, replay);
+      if (this.times !== times) {
+        replay.dropped = true;
+        return;
+      }
       this.replay = replay;
       times.failed = replay.failed;
       if (replay.times.beforeMs !== null) times.fetchMs = replay.times.beforeMs - replay.times.startMs;
     });
+  }
+
+  /** The replay a kill cam read, once it has, current or not. */
+  replayOf(times: KillCamTimes): Replay | null {
+    return this.fetched.get(times) ?? null;
   }
 
   /** Leave for the game. */
@@ -124,7 +137,8 @@ export class KillCam {
 
   /** The frame at `nowMs`, given the live crafts, which the death beat looks at. */
   frame(nowMs: number, live: Placed[]): KillCamFrame {
-    const dt = this.lastMs === null ? 0 : Math.max(0, nowMs - this.lastMs);
+    // A page that was hidden comes back with one long frame; the replay takes it as a short one.
+    const dt = this.lastMs === null ? 0 : Math.min(100, Math.max(0, nowMs - this.lastMs));
     this.lastMs = nowMs;
     this.hud.refused(nowMs < this.refusedUntil);
     const kill = this.kill;

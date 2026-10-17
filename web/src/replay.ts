@@ -73,6 +73,8 @@ export class Replay {
   readonly times: FetchTimes;
   /** The read failed: `trimmed` when retention has passed the offset. */
   failed: 'trimmed' | 'error' | null = null;
+  /** Set when the replay is no longer wanted, which stops reading the second after the kill. */
+  dropped = false;
   private seen = new Set<number>();
 
   constructor(
@@ -157,11 +159,16 @@ export async function fetchReplay(
     replay.failed = isTrimmed(err) ? 'trimmed' : 'error';
     return replay;
   }
+  // Nothing usable came back, such as only records of another epoch.
+  if (replay.ticks.length === 0) {
+    replay.failed = 'error';
+    return replay;
+  }
   replay.times.beforeMs = now();
   void (async () => {
     const give = now() + AFTER_WAIT_MS;
     try {
-      while ((replay.span?.[1] ?? 0) < kill.tick + AFTER && now() < give) {
+      while ((replay.span?.[1] ?? 0) < kill.tick + AFTER && now() < give && !replay.dropped) {
         const page = await reader.read('ticks', from, null, kill.tick + AFTER - (replay.span?.[1] ?? kill.tick));
         replay.add(page.records);
         if (page.nextOffset > from) from = page.nextOffset;
@@ -226,7 +233,9 @@ export class Playback {
     const { replay } = this;
     const kill = replay.kill.tick;
     const speed = speedAt(this.r, kill);
-    if (!this.held) this.r = Math.min(replay.end, this.r + (dtMs / 1000) * HZ * speed);
+    // Never past the newest tick held: while the second after the kill is still being read, the clock waits for it.
+    const last = Math.min(replay.end, replay.span?.[1] ?? replay.end);
+    if (!this.held) this.r = Math.min(last, this.r + (dtMs / 1000) * HZ * speed);
     return this.frame(speed);
   }
 

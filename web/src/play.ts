@@ -29,7 +29,7 @@ import { type Link, Offline, OFFLINE_PRINCIPAL } from './offline';
 import { Hud } from './hud';
 import { KillCam, type KillCamTimes, Markers } from './killcam';
 import { KillRig } from './killcam-rig';
-import type { KillRef, Page, Reader, Replay } from './replay';
+import type { KillRef, Page, Reader } from './replay';
 import { joinFromKeyframe, type JoinTimes } from './join';
 import { Interpolator, snapshot } from './interpolation';
 import { addLights, loadEnvironment } from './lighting';
@@ -340,13 +340,11 @@ async function main(): Promise<void> {
   };
 
   /** Every kill cam run, for {@link ArenaDebug.killcams}. */
-  const runs: { times: KillCamTimes; kill: KillRef; replay: () => Replay | null }[] = [];
-  const replays = new Map<KillCamTimes, Replay>();
+  const runs: { times: KillCamTimes; kill: KillRef }[] = [];
   Object.defineProperty(debug, 'killcams', {
     get: () =>
       runs.map((run) => {
-        const replay = run.replay() ?? replays.get(run.times) ?? null;
-        if (replay) replays.set(run.times, replay);
+        const replay = killcam.replayOf(run.times);
         const bytes = replay?.bytes() ?? [];
         const span = replay?.span ?? null;
         return {
@@ -356,6 +354,7 @@ async function main(): Promise<void> {
           first: span?.[0] ?? null,
           last: span ? Math.min(span[1], replay!.end) : null,
           hash: bytes.length ? fnv64(bytes) : null,
+          complete: replay?.times.afterMs != null,
         };
       }),
   });
@@ -415,7 +414,7 @@ async function main(): Promise<void> {
           killcam.start(kill, reader(), arrivedMs, timing ? timing.commitStartUs / 1000 : null);
           timing?.free();
           const times = killcam.times!;
-          runs.push({ times, kill, replay: () => (killcam.times === times ? killcam.replay : null) });
+          runs.push({ times, kill });
         }
       }
       e.free();
@@ -564,6 +563,9 @@ async function main(): Promise<void> {
   const clock = new Clock();
   let shown: number | null = null;
   let lastT = 0;
+  /** The tick each slot respawned in within the replay on screen, and that replay. */
+  const replaySpawned = new Map<number, number>();
+  let replayed: unknown = null;
   /** The effects' clock, in seconds: the page's, slowed while a replay is in slow motion. */
   let fxT = 0;
   renderer.setAnimationLoop((frameAt: number) => {
@@ -659,14 +661,26 @@ async function main(): Promise<void> {
       if (e.kind === 'killed') spawnedIn.delete(e.slot);
       else if (e.kind === 'spawned') spawnedIn.set(e.slot, e.tick);
     }
-    for (const e of replay?.events ?? []) happened(e);
+    if (killcam.replay !== replayed) {
+      replayed = killcam.replay;
+      replaySpawned.clear();
+    }
+    for (const e of replay?.events ?? []) {
+      happened(e);
+      if (e.kind === 'killed') replaySpawned.delete(e.slot);
+      else if (e.kind === 'spawned') replaySpawned.set(e.slot, e.tick);
+    }
     const protection = spawnProtectionTicks();
     for (const c of crafts) {
       if (!c.alive || !c.protected) continue;
-      const since = replay ? undefined : spawnedIn.get(c.slot);
+      const since = (replay ? replaySpawned : spawnedIn).get(c.slot);
       // Counted to the newest tick at most: past it, nothing says the protection is still running down.
-      const at = frame ? Math.min(frame.renderTick, interpolator.newest?.tick ?? frame.renderTick) : 0;
-      const left = since === undefined || !frame ? protection : protection - (at - since);
+      const at = replay
+        ? replay.renderTick
+        : frame
+          ? Math.min(frame.renderTick, interpolator.newest?.tick ?? frame.renderTick)
+          : 0;
+      const left = since === undefined || (!frame && !replay) ? protection : protection - (at - since);
       effects.shield(c.slot, c.violet, c.x, c.z, left);
     }
     const posed = debug.absorbing;

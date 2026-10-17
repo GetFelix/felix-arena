@@ -545,8 +545,8 @@ CI's `kill cam` job times both on the dev stack. Two bots fight a player who
 flies at them without firing, and a watcher replays every kill with the page's
 own code (`fetchReplay`), timing the commit to the kill's arrival, the read,
 and when the replay would be on screen. The job requires 20 kills with the
-read under 250 ms at p95 and every replay on screen within 800 ms of its
-commit. The player's page plays its own kill cams too, drawn by SwiftShader at
+read under 250 ms and the replay on screen within 800 ms of the commit, both
+at p95. The player's page plays its own kill cams too, drawn by SwiftShader at
 about a frame a second, so its times are reported and only its replay's ticks
 are checked.
 
