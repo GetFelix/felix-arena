@@ -24,6 +24,7 @@ import {
 import { Effects } from './effects';
 import { type CraftView, Fleet, GUN_HEIGHT } from './fleet';
 import { type EventFrame, Gateway, GatewayError } from './gateway';
+import { botCount, botLevel, botTag } from './bots';
 import { type Link, Offline, OFFLINE_PRINCIPAL } from './offline';
 import { Hud } from './hud';
 import { joinFromKeyframe, type JoinTimes } from './join';
@@ -51,6 +52,9 @@ const BENCH = params.has('bench');
 const ASKED = BENCH ? urlTier(params) : requestedTier(params);
 /** Play against bots with the sim in the page, without the dev stack: `?offline`, with `&warmup=`, `&length=` and `&results=` in seconds. */
 const OFFLINE = params.has('offline') || BENCH;
+/** Offline only: `&bots=easy|normal|hard` and `&botcount=1..3`. */
+const BOT_LEVEL = botLevel(params.get('bots'));
+const BOT_COUNT = botCount(params.get('botcount'));
 /** How long a try at joining may take before it is given up and made again. */
 const JOIN_TIMEOUT_MS = 10_000;
 
@@ -224,7 +228,7 @@ async function main(): Promise<void> {
   const status = document.getElementById('loading')!;
   status.textContent = `Joining ${ARENA}`;
   const where = document.getElementById('where')!;
-  const place = OFFLINE ? 'offline, against bots' : `${ARENA} · playing as ${USER}`;
+  const place = OFFLINE ? botTag(BOT_LEVEL, BOT_COUNT) : `${ARENA} · playing as ${USER}`;
   let gateway: Link;
   let key: string;
   const joinStartMs = performance.now();
@@ -413,8 +417,8 @@ async function main(): Promise<void> {
   if (OFFLINE) {
     const seconds = (name: string, fallback: number) => Number(params.get(name) ?? fallback);
     const offline = BENCH
-      ? new Offline(2, seconds('length', 600), 15)
-      : new Offline(seconds('warmup', 10), seconds('length', 300), seconds('results', 15));
+      ? new Offline(2, seconds('length', 600), 15, BOT_LEVEL, BOT_COUNT)
+      : new Offline(seconds('warmup', 10), seconds('length', 300), seconds('results', 15), BOT_LEVEL, BOT_COUNT);
     debug.pause = (paused) => {
       offline.paused = paused;
     };
