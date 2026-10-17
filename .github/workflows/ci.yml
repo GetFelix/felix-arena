@@ -276,6 +276,8 @@ jobs:
           npx vite preview --host 127.0.0.1 --port 4173 --strictPort &
           for _ in $(seq 1 30); do curl -sf http://127.0.0.1:4173/play.html >/dev/null && break; sleep 1; done
           npx vite-node scripts/killcam.ts -- http://127.0.0.1:4173/play.html killcam
+          # Each view at 1920x1080, held a moment before the kill, for review.
+          npx vite-node scripts/killcam-shot.ts -- 'http://127.0.0.1:4173/play.html?arena=alpha&as=ben&quality=high' killcam/views
       - if: always()
         uses: actions/upload-artifact@v4
         with:

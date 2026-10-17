@@ -28,12 +28,12 @@ import { botCount, botLevel, botTag } from './bots';
 import { type Link, Offline, OFFLINE_PRINCIPAL } from './offline';
 import { Hud } from './hud';
 import { KillCam, type KillCamTimes, Markers } from './killcam';
-import { KillRig } from './killcam-rig';
+import { KillRig, VIEWS } from './killcam-rig';
 import type { KillRef, Page, Reader } from './replay';
 import { joinFromKeyframe, type JoinTimes } from './join';
 import { Interpolator, snapshot } from './interpolation';
 import { addLights, loadEnvironment } from './lighting';
-import { Match } from './match';
+import { callsign, Match } from './match';
 import { ModelLibrary } from './models';
 import { palette, setCssColours } from './palette';
 import { Pickup } from './pickup';
@@ -135,7 +135,7 @@ export interface ArenaDebug {
   /** The replay's tick time and its kill's tick, while one plays. */
   replayAt: { r: number; kill: number } | null;
   /** For screenshots: hold the replay at its current moment, or let it play. */
-  holdReplay: (held: boolean) => void;
+  holdReplay: (held: boolean, ticksFromKill?: number) => void;
   /** The state each recent tick folded to, by `epoch/tick`: the tick's hash and the match's digest. */
   states: Record<string, string>;
 }
@@ -215,13 +215,41 @@ async function main(): Promise<void> {
   const match = new Match();
   const killcam = new KillCam(() => {
     const { radius, yaw } = view.resting;
-    return new KillRig(view.camera.fov, view.camera.aspect, radius, yaw);
+    const layout = arenaLayout();
+    return new KillRig(view.camera.fov, view.camera.aspect, radius, yaw, { x: layout.halfX, z: layout.halfZ });
   }, new Markers(fx));
-  debug.holdReplay = (held) => {
+  /** Names over the killer and the victim while a replay plays, placed from where this frame draws them. */
+  const tagAt = new Vector3();
+  const whoTags = (kill: KillRef, crafts: CraftView[]) => {
+    // The camera moved this frame and has not been drawn yet.
+    view.camera.updateMatrixWorld();
+    for (const [role, slot] of [
+      ['killer', kill.killer],
+      ['victim', kill.victim],
+    ] as const) {
+      const tag = document.getElementById(`replay-who-${role}`)!;
+      const c = crafts.find((craft) => craft.slot === slot);
+      // A destroyed craft keeps its tag where it went down.
+      tag.hidden = !c;
+      if (!c) continue;
+      const p = tagAt.set(c.x / 100, 3, c.z / 100).project(view.camera);
+      // Below the letterbox's top bar, whatever the camera does.
+      const y = Math.max(110, ((1 - p.y) / 2) * innerHeight);
+      tag.style.transform = `translate(-50%, -100%) translate(${((p.x + 1) / 2) * innerWidth}px, ${y}px)`;
+      const name = tag.querySelector('b')!;
+      name.textContent = callsign(slot);
+      name.className = c.violet ? 'violet' : 'coral';
+      if (role === 'victim') tag.querySelector('span')!.textContent = slot === own?.slot ? 'YOU' : 'VICTIM';
+    }
+  };
+  debug.holdReplay = (held, ticksFromKill) => {
     killcam.held = held;
+    if (ticksFromKill !== undefined) killcam.seek(ticksFromKill);
   };
   addEventListener('keydown', (event) => {
     if (killcam.state === 'off') return;
+    const pick = ['Digit1', 'Digit2', 'Digit3'].indexOf(event.code);
+    if (pick >= 0) killcam.view(VIEWS[pick]!);
     if (event.code === 'Space' || event.code === 'Escape') killcam.skip(performance.now());
   });
   debug.screenOf = (x, z) => {
@@ -728,6 +756,7 @@ async function main(): Promise<void> {
       view.camera,
     );
     view.update(t, cam.pose ?? undefined, cam.weight);
+    if (replay && killcam.kill) whoTags(killcam.kill, crafts);
     const updated = performance.now();
     pipeline.render(t);
     shown = now;
