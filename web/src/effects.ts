@@ -22,6 +22,7 @@ import {
   SpriteMaterial,
   type Texture,
   Vector3,
+  Vector4,
 } from 'three';
 import { type Bolt, Bolts, MAX_BOLTS } from './bolts';
 import { GUN_HEIGHT } from './fleet';
@@ -418,16 +419,21 @@ export class EffectsKit {
 
 /** Spawn shields: one a craft, by slot. */
 export const SHIELDS = 8;
-/** How long a shield takes to rise, and to fade once the sim drops the protection, in seconds. */
-const SHIELD_IN_S = 0.2;
-const SHIELD_OUT_S = 0.25;
-/** With this few sim ticks of protection left a shield flickers, so the player sees it is about to go. */
-const SHIELD_FLICKER_TICKS = 15;
+/** How long a shield takes to rise around a respawned craft, in seconds. */
+const SHIELD_IN_S = 0.15;
+/** Sim ticks over which a shield fades as the protection runs out: the last 0.4 s. */
+const SHIELD_FADE_TICKS = 12;
+/** How long a shield takes to collapse when firing ends the protection early, in seconds. */
+const SHIELD_COLLAPSE_S = 0.18;
+/** How long the ripple from an absorbed shot runs, in seconds. */
+const SHIELD_HIT_S = 0.6;
 
-/** A spawn shield: a dome over the craft, bright at its rim and crossed by faint bands that drift across it. */
+/** A spawn shield: a bubble around the craft, clear in the middle and bright at its silhouette. */
 interface Shield {
-  dome: Mesh<SphereGeometry, MeshBasicMaterial>;
+  bubble: Mesh<SphereGeometry, MeshBasicMaterial>;
   time: { value: number };
+  /** The last absorbed shot: its direction from the centre in xyz, and seconds since it in w. */
+  hit: { value: Vector4 };
   /** Asked for this frame, held since `since`, or let go at `gone`. */
   asked: boolean;
   held: boolean;
@@ -437,56 +443,61 @@ interface Shield {
   where: Vector3;
   /** Sim ticks of protection left. */
   left: number;
+  /** How far the end-of-protection fade had got when the shield was let go: near 1 means firing ended it. */
+  fade: number;
+  /** Where the last absorbed shot came from, in metres, and when. */
+  from: Vector3;
+  hitAt: number;
 }
 
-/** The shield's vertex additions: the normal and view direction for its rim, and the point on the unit dome. */
 const SHIELD_VERTEX = `
 vShieldNormal = normalize( normalMatrix * normal );
 vShieldView = -mvPosition.xyz;
 vShieldAt = position;`;
 
 /**
- * The shield's surface: a rim that brightens toward the dome's edge, and a honeycomb seen from above whose lines are
- * lit by ripples running out from the crown.
+ * A fresnel rim, nearly nothing where the bubble faces the camera so the craft inside stays clear, with a faint sheen
+ * sliding over it. An absorbed shot flashes where it struck and sends a ring across the bubble from there.
  */
-const SHIELD_FRAGMENT = `
-float hexEdge( vec2 p ) {
-  const vec2 s = vec2( 1.0, 1.7320508 );
-  vec4 c = floor( vec4( p, p - vec2( 0.5, 1.0 ) ) / s.xyxy ) + 0.5;
-  vec4 h = vec4( p - c.xy * s, p - ( c.zw + 0.5 ) * s );
-  vec2 q = abs( dot( h.xy, h.xy ) < dot( h.zw, h.zw ) ? h.xy : h.zw );
-  return 0.5 - max( dot( q, s * 0.5 ), q.x );
-}`;
-
 const SHIELD_ALPHA = `
 float facing = abs( dot( normalize( vShieldNormal ), normalize( vShieldView ) ) );
-float rim = pow( 1.0 - facing, 3.0 );
-float edge = hexEdge( vShieldAt.xz * 3.6 );
-float line = 1.0 - smoothstep( 0.0, fwidth( edge ) * 1.5 + 0.02, edge );
-float ripple = pow( 0.5 + 0.5 * sin( length( vShieldAt.xz ) * 9.0 - uShieldTime * 5.0 ), 3.0 );
-// The honeycomb fades toward the crown, so the craft under it stays clear.
-diffuseColor.a *= rim * 0.9 + line * ( 0.14 + 0.5 * ripple ) * ( 0.25 + 0.75 * ( 1.0 - facing ) ) + 0.02;
+float edge = 1.0 - facing;
+float rim = pow( edge, 5.0 ) + 0.08 * pow( edge, 2.0 );
+float sheen = 0.5 + 0.5 * sin( dot( vShieldAt, vec3( 1.5, 4.0, 1.0 ) ) * 2.5 - uShieldTime * 2.0 );
+float struck = 0.0;
+if ( uShieldHit.w < ${SHIELD_HIT_S.toFixed(2)} ) {
+  float angle = acos( clamp( dot( normalize( vShieldAt ), uShieldHit.xyz ), -1.0, 1.0 ) );
+  float fade = 1.0 - uShieldHit.w / ${SHIELD_HIT_S.toFixed(2)};
+  float ring = exp( -pow( ( angle - uShieldHit.w * 4.0 ) * 6.0, 2.0 ) );
+  float spot = exp( -angle * 2.5 ) * max( 0.0, 1.0 - uShieldHit.w * 4.0 );
+  struck = ( ring + spot ) * fade;
+}
+diffuseColor.a *= rim * ( 0.85 + 0.15 * sheen ) + struck;
+outgoingLight *= 1.0 + struck * 4.0;
 #include <opaque_fragment>`;
 
 function shield(fx: Object3D, geometry: SphereGeometry): Shield {
   const time = { value: 0 };
+  const hit = { value: new Vector4(0, 0, 1, SHIELD_HIT_S) };
   const material = new MeshBasicMaterial(additive);
   const varyings = 'varying vec3 vShieldNormal;\nvarying vec3 vShieldView;\nvarying vec3 vShieldAt;\n';
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uShieldTime = time;
+    shader.uniforms.uShieldHit = hit;
     shader.vertexShader = shader.vertexShader
       .replace('void main() {', `${varyings}void main() {`)
       .replace('#include <project_vertex>', `#include <project_vertex>${SHIELD_VERTEX}`);
     shader.fragmentShader = shader.fragmentShader
-      .replace('void main() {', `uniform float uShieldTime;\n${varyings}${SHIELD_FRAGMENT}\nvoid main() {`)
+      .replace('void main() {', `uniform float uShieldTime;\nuniform vec4 uShieldHit;\n${varyings}void main() {`)
       .replace('#include <opaque_fragment>', SHIELD_ALPHA);
   };
-  const dome = new Mesh(geometry, material);
-  dome.visible = false;
-  fx.add(dome);
+  const bubble = new Mesh(geometry, material);
+  bubble.visible = false;
+  fx.add(bubble);
   return {
-    dome,
+    bubble,
     time,
+    hit,
     asked: false,
     held: false,
     since: -Infinity,
@@ -494,6 +505,9 @@ function shield(fx: Object3D, geometry: SphereGeometry): Shield {
     violet: false,
     where: new Vector3(),
     left: 0,
+    fade: 0,
+    from: new Vector3(),
+    hitAt: -Infinity,
   };
 }
 
@@ -552,15 +566,16 @@ export class Effects {
   constructor(scene: Object3D, fx: Object3D, tex: EffectTextures, random: () => number) {
     this.kit = new EffectsKit(scene, fx, tex, random);
     // Made after the kit, so the style frame, which draws through the kit alone, is unchanged.
-    const dome = new SphereGeometry(1, 48, 24);
-    this.shields = Array.from({ length: SHIELDS }, () => shield(fx, dome));
-    this.shieldTints = [hdr(palette.coral, 2.4), hdr(palette.violet, 2.4)];
+    const sphere = new SphereGeometry(1, 48, 32);
+    this.shields = Array.from({ length: SHIELDS }, () => shield(fx, sphere));
+    // Below the bloom threshold at full strength: only an absorbed shot and the collapse glow.
+    this.shieldTints = [hdr(palette.coral, 2.2), hdr(palette.violet, 2.2)];
   }
 
   /**
    * `slot`'s craft, of `violet`'s team, is under spawn protection at `(x, z)` in centimetres this frame, with `left`
-   * sim ticks of it to go unless the craft fires. The flicker near the end follows the sim's ticks rather than the
-   * page's clock, so it means the same on a page that draws slowly.
+   * sim ticks of it to go unless the craft fires. The fade at the end follows the sim's ticks rather than the page's
+   * clock, so it lines up with the protection on a page that draws slowly.
    */
   shield(slot: number, violet: boolean, x: number, z: number, left: number): void {
     const s = this.shields[slot % SHIELDS]!;
@@ -569,6 +584,16 @@ export class Effects {
     s.violet = violet;
     s.where.x = x / 100;
     s.where.z = z / 100;
+  }
+
+  /** `slot`'s shield stopped a shot coming from `(x, z)` in centimetres, at time `t`. */
+  absorbed(slot: number, x: number, z: number, t: number): void {
+    const s = this.shields[slot % SHIELDS]!;
+    // Only stored here: the direction is worked out in `update`, which runs hot enough to be compiled, so its
+    // arithmetic allocates nothing.
+    s.from.x = x / 100;
+    s.from.z = z / 100;
+    s.hitAt = t;
   }
 
   /** A bolt at `(x, z)` in centimetres heading `heading` 65536ths of a turn from +x toward +z, for this frame. */
@@ -674,26 +699,39 @@ export class Effects {
       if (s.held) {
         const age = t - s.since;
         const rise = Math.min(1, age / SHIELD_IN_S);
-        // It comes up a little bright and settles, then flickers as the protection runs out.
-        level = rise * (1 + 0.6 * (1 - rise)) * (s.left < SHIELD_FLICKER_TICKS ? 0.6 + 0.4 * Math.cos(age * 40) : 1);
-        grow = 0.75 + 0.25 * rise * (2 - rise);
+        s.fade = Math.min(1, Math.max(0, s.left / SHIELD_FADE_TICKS));
+        // A slow breath, so it reads as live rather than painted on.
+        level = rise * s.fade * (0.85 + 0.15 * Math.sin(age * 4.5));
+        grow = 0.85 + 0.15 * rise;
       } else {
         const out = t - s.gone;
-        level = out < SHIELD_OUT_S ? 1 - out / SHIELD_OUT_S : 0;
-        // Let go, it swells as it fades, rather than shrinking back into the craft.
-        grow = 1 + 0.15 * (out / SHIELD_OUT_S);
+        // Ended by firing, it collapses onto the craft with a flash; run out, it has already faded.
+        const k = out / SHIELD_COLLAPSE_S;
+        level = k < 1 ? s.fade * (1 - k) * (1 + 0.8 * (1 - k)) : 0;
+        grow = 1 - 0.35 * Math.min(1, k);
       }
-      const dome = s.dome;
-      dome.visible = level > 0 || this.warm;
-      if (!dome.visible) continue;
-      dome.position.x = s.where.x;
-      dome.position.y = 0.2;
-      dome.position.z = s.where.z;
-      dome.scale.x = dome.scale.z = 1.35 * grow;
-      dome.scale.y = 1.15 * grow;
-      dome.material.color.copy(this.shieldTints[s.violet ? 1 : 0]);
-      dome.material.opacity = 0.55 * level;
+      const bubble = s.bubble;
+      bubble.visible = level > 0 || this.warm;
+      if (!bubble.visible) continue;
+      bubble.position.x = s.where.x;
+      bubble.position.y = 0.8;
+      bubble.position.z = s.where.z;
+      bubble.scale.x = bubble.scale.z = 1.55 * grow;
+      bubble.scale.y = 1.2 * grow;
+      bubble.material.color.copy(this.shieldTints[s.violet ? 1 : 0]);
+      bubble.material.opacity = 0.9 * level;
       s.time.value = t;
+      const hit = s.hit.value;
+      hit.w = t - s.hitAt;
+      if (hit.w < SHIELD_HIT_S) {
+        // Shots fly at gun height, close to the bubble's middle.
+        const dx = s.from.x - s.where.x;
+        const dz = s.from.z - s.where.z;
+        const flat = Math.sqrt(dx * dx + dz * dz) || 1;
+        hit.x = dx / flat;
+        hit.y = 0;
+        hit.z = dz / flat;
+      }
     }
     this.warm = false;
     // The point lights go to the brightest glows.

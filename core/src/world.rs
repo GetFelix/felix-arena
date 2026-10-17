@@ -530,8 +530,16 @@ impl World {
 
     fn damage(&mut self, target: usize, attacker: u8, bolt: u16, damage: u8) {
         let craft = &mut self.crafts[target];
-        // Spawn protection: the shot is stopped, and nothing is hurt.
+        // Spawn protection: the shot is stopped and nothing is hurt. The hit
+        // is still told, with no damage, so clients can draw the shield
+        // taking it.
         if craft.protected {
+            self.events.push(Event::Hit {
+                target: craft.slot,
+                attacker,
+                bolt,
+                damage: 0,
+            });
             return;
         }
         let damage = damage.min(craft.health);
