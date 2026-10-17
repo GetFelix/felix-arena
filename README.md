@@ -15,9 +15,10 @@
 Felix Arena is a team deathmatch for up to eight players, Coral against
 Violet, flying low-poly hover-craft in a walled arena seen from a top-down
 camera. It is playable: a match runs through Felix from warmup to results,
-with the simulation deciding every hit. Still to come are the kill cam, which
-will replay the last seconds from your view, your killer's, or a camera that
-orbits the fight, joining a match in progress, and per-arena sign-in. It is meant for people who want a small multiplayer game they can
+with the simulation deciding every hit. When you are destroyed, the kill cam
+replays the last seconds from the match's log, from your view, your killer's,
+or a camera that orbits the fight. Still to come are the lobby and per-arena
+sign-in. It is meant for people who want a small multiplayer game they can
 host themselves, and for game developers evaluating Felix as the backend for
 live play, spectating and replays.
 
@@ -25,9 +26,9 @@ Each arena's simulation commits every tick to a durable Felix
 stream as an
 [atomic commit](https://github.com/GetFelix/felix/blob/main/docs/atomic-commit.md),
 and every 30th tick also updates a stream state key that points at it as a
-keyframe. In the design, players and spectators join by reading that key and
-subscribing from its offset, and the kill cam is a read of the same stream from
-an offset named in the kill event. Inputs go on an in-memory stream with
+keyframe. Players and spectators join by reading that key and subscribing from
+its offset, and the kill cam is a read of the same stream from an offset named
+in the kill event. Inputs go on an in-memory stream with
 [drop-new delivery](https://github.com/GetFelix/felix/blob/main/docs/semantics.md#delivery-to-subscribers),
 presence and the lobby are
 [cache](https://github.com/GetFelix/felix/blob/main/docs/cache-on-log.md) keys with
@@ -55,7 +56,13 @@ match can continue after its broker
   farthest from the enemy and out of their sight, behind a two-second shield
   that ends when it fires.
 - **Keyframes.** Every 30th tick's commit also writes the `keyframe` state key,
-  the starting point for joining a match in progress (in review).
+  so a player or spectator joins a match in progress from the newest keyframe
+  and catches up without drawing.
+- **The kill cam.** Each kill event names the offset of the tick three seconds
+  earlier. The victim's page reads that range of the log and plays it back,
+  with slow motion before the killing shot, while the live match carries on
+  underneath. Every kill in the feed can be replayed, from this match or an
+  earlier one, until retention trims it.
 - **Offline play.** `play.html?offline` runs `core` in the page against three
   bots, with no servers.
 - **Quality tiers.** High, Medium and Low, chosen from the first seconds of
@@ -167,10 +174,15 @@ is chosen from the first seconds of frame times; the Quality setting on the HUD
 or `&quality=high|medium|low|auto` overrides it. The page runs the
 match loop the sim decides: warmup, play, results and the next match, with the
 score, clock, kill feed and your hull, boost and rail on the HUD, and Tab for
-the scoreboard. `dev/compose.yml` lets `ana`, `ben`, `dan` and `eve` play.
+the scoreboard. When you are destroyed the kill cam plays: 1, 2 and 3 switch
+between your view, your killer's and an orbit, and Space or Escape skips it.
+R opens the replays panel, where any kill in the feed, or from an earlier
+match, can be replayed. `dev/compose.yml` lets `ana`, `ben`, `dan` and `eve` play.
 
 `play.html?offline` needs no dev stack: core's world runs in the page as the
-sim, with three bots, so the game can be seen and played anywhere.
+sim, with three bots, so the game can be seen and played anywhere. The
+offline sim keeps no log, so its kill cam replays from the last 40 seconds the
+page kept, and earlier matches cannot be replayed.
 `&bots=easy|normal|hard` (normal by default) sets how well the bots aim, how
 quickly they react, how they pace their fire and whether they chase across the
 arena; `&botcount=1..3` (3 by default) sets how many. They steer through the
@@ -179,7 +191,8 @@ same input path as a player.
 
 `npm run smoke` checks the same path from Node: ticks arrive at 30 Hz, the
 WebAssembly build decodes keyframes to the state hashes the sim logged, a
-replay slot reads the same records while the live one keeps going, and it
+range read returns the same records while the live subscription keeps going,
+and it
 prints each leg's latency. It also drives two players, `ana` and `ben`, in
 arena `bravo`: each moves only its own craft, a forged input naming the other
 player is refused, and `cleo` cannot publish inputs. And it has `ana` fly
@@ -221,10 +234,10 @@ Three processes sit around Felix: the browser client, a stateless
 gateway that bridges WebSocket to Felix's QUIC protocol, and a Rust simulation
 that is the single authority for each arena, stepping it at 30 Hz. The client
 and the simulation are this project's own. The gateway is
-[felix-gateway](https://github.com/GetFelix/felix-gateway), whose
-`binary_events` and `slots` features carry the game's ticks as binary frames
-and let a replay run beside the live view, and whose `state` feature reads the
-keyframe pointer. The plan is to ship it in this project's own image, which
+[felix-gateway](https://github.com/GetFelix/felix-gateway) 0.6.0, whose
+`binary_events` feature carries the game's ticks as binary frames, whose
+`state` feature reads the keyframe pointer, and whose `read` feature returns a
+fixed range of the log for the kill cam beside the live subscription. The plan is to ship it in this project's own image, which
 will also serve the web client. The game rules live in one Rust crate, linked by the simulation and
 compiled to WebAssembly for the browser's prediction, so the two cannot
 disagree about the rules.
@@ -248,9 +261,9 @@ compares this with the usual way of building a session-based game.
 
 ## Status
 
-The look is locked and the game is playable through Felix (M0 to M2). M3,
-joining a match in progress, is under way: keyframes are written, and the join
-path and the lobby are in review. The frame-time row for M0's 60 fps target
+The look is locked, the game is playable through Felix, a match can be joined
+in progress, and the kill cam replays kills from the log (M0 to M2 and M4). M3
+is done apart from the lobby and member list. The frame-time row for M0's 60 fps target
 waits for a run on an Intel Iris Xe or Apple M1. Each milestone is a
 [GitHub milestone](https://github.com/GetFelix/felix-arena/milestones) with an
 issue per piece of work.
@@ -261,7 +274,7 @@ issue per piece of work.
 | [1](https://github.com/GetFelix/felix-arena/milestone/2) | A browser reaches Felix | Done |
 | [2](https://github.com/GetFelix/felix-arena/milestone/3) | One authority | Done |
 | [3](https://github.com/GetFelix/felix-arena/milestone/4) | Join mid-match | In progress |
-| [4](https://github.com/GetFelix/felix-arena/milestone/5) | The kill cam | Planned |
+| [4](https://github.com/GetFelix/felix-arena/milestone/5) | The kill cam | Done |
 | [5](https://github.com/GetFelix/felix-arena/milestone/6) | Isolation and gaps | Planned |
 | [6](https://github.com/GetFelix/felix-arena/milestone/7) | Per-arena sign-in | Planned |
 | [7](https://github.com/GetFelix/felix-arena/milestone/8) | Scale and failover | Planned |
@@ -272,7 +285,7 @@ issue per piece of work.
 - [docs/design.md](docs/design.md): the game, the architecture, the data model, the kill cam, failure modes, targets and the build order.
 - [docs/art.md](docs/art.md): the art direction, from the palette and lighting to the rules that keep new content consistent.
 - [prototype/assets/CREDITS.md](prototype/assets/CREDITS.md): the sources and licences of the models and the HDRI.
-- [Arena](https://docs.getfelix.dev/built-on-felix/arena/) in the Felix docs: how the game is planned to use Felix.
+- [Arena](https://docs.getfelix.dev/built-on-felix/arena/) in the Felix docs: how the game uses Felix.
 
 ## Contributing
 
