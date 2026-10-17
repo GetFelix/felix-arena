@@ -23,7 +23,7 @@ import {
 } from './core';
 import { Effects } from './effects';
 import { type CraftView, Fleet, GUN_HEIGHT } from './fleet';
-import { Gateway } from './gateway';
+import { type EventFrame, Gateway, GatewayError } from './gateway';
 import { type Link, Offline, OFFLINE_PRINCIPAL } from './offline';
 import { Hud } from './hud';
 import { Interpolator, snapshot } from './interpolation';
@@ -50,6 +50,22 @@ const BENCH = params.has('bench');
 const ASKED = BENCH ? urlTier(params) : requestedTier(params);
 /** Play against bots with the sim in the page, without the dev stack: `?offline`, with `&warmup=`, `&length=` and `&results=` in seconds. */
 const OFFLINE = params.has('offline') || BENCH;
+/** How long a try at joining may take before it is given up and made again. */
+const JOIN_TIMEOUT_MS = 10_000;
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/** `promise`, or a rejection once {@link JOIN_TIMEOUT_MS} has passed, calling `onLate` then. */
+function within<T>(promise: Promise<T>, onLate = () => {}): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const late = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      onLate();
+      reject(new Error('the gateway did not answer in time'));
+    }, JOIN_TIMEOUT_MS);
+  });
+  return Promise.race([promise, late]).finally(() => clearTimeout(timer));
+}
 
 /** What the page exposes for tests and the dev console. */
 export interface ArenaDebug {
@@ -60,6 +76,8 @@ export interface ArenaDebug {
   inputToPixel: { wait: number; update: number; render: number }[];
   slot: number | null;
   ticks: number;
+  /** How many times the page joined again after the gateway closed its session. */
+  reconnects: number;
   /** Where your craft is drawn, in centimetres. */
   own: { x: number; z: number; heading: number } | null;
   match: { number: number; phase: string; seconds: number; scores: [number, number]; railIn: number } | null;
@@ -97,6 +115,7 @@ async function main(): Promise<void> {
     inputToPixel: [],
     slot: null,
     ticks: 0,
+    reconnects: 0,
     own: null,
     match: null,
     phases: [],
@@ -167,28 +186,17 @@ async function main(): Promise<void> {
   addEventListener('resize', fitView);
   document.addEventListener('visibilitychange', () => chooser?.pause());
 
+  // The first frame uploads every texture and compiles every shader, which holds the page for many seconds on a slow
+  // GPU. A page held that long after joining sends no inputs and leaves its socket unread, so it is drawn first.
+  renderer.compile(scene, view.camera);
+  pipeline.render(0);
+
   const status = document.getElementById('loading')!;
   status.textContent = `Joining ${ARENA}`;
+  const where = document.getElementById('where')!;
+  const place = OFFLINE ? 'offline, against bots' : `${ARENA} · playing as ${USER}`;
   let gateway: Link;
   let key: string;
-  if (OFFLINE) {
-    const seconds = (name: string, fallback: number) => Number(params.get(name) ?? fallback);
-    gateway = BENCH
-      ? new Offline(2, seconds('length', 600), 15)
-      : new Offline(seconds('warmup', 10), seconds('length', 300), seconds('results', 15));
-    key = playerKey(OFFLINE_PRINCIPAL);
-  } else {
-    const token = (
-      (await (await fetch(`${IDP}/token?sub=${encodeURIComponent(USER)}&aud=felix-arena`)).json()) as {
-        id_token: string;
-      }
-    ).id_token;
-    key = playerKey(await principal(token));
-    gateway = await Gateway.connect(GATEWAY, ARENA, token);
-  }
-  gateway.onError = (err) => {
-    status.textContent = String(err.message);
-  };
 
   const interpolator = new Interpolator();
   let pacer = new Pacer();
@@ -236,7 +244,7 @@ async function main(): Promise<void> {
     if (own) own.frozen = match.phase === 'results';
     own?.reconcile(tick, arrivedMs);
   };
-  await gateway.subscribe('ticks', 'live', 'live', (frame) => {
+  const onFrame = (frame: EventFrame) => {
     let tick: Tick;
     try {
       tick = decodeTick(frame.payload);
@@ -245,22 +253,93 @@ async function main(): Promise<void> {
     }
     onTick(tick, performance.now());
     tick.free();
-  });
+  };
+
+  const signIn = async () =>
+    (
+      (await (await fetch(`${IDP}/token?sub=${encodeURIComponent(USER)}&aud=felix-arena`)).json()) as {
+        id_token: string;
+      }
+    ).id_token;
+  /** Open a gateway session and subscribe to the ticks. A session that closes once joined is opened again. */
+  const open = async (token: string): Promise<Gateway> => {
+    let late = false;
+    const connecting = Gateway.connect(GATEWAY, ARENA, token);
+    // A session that opens after its try was given up on would hold a place at the gateway for nothing.
+    connecting.then((link) => late && link.close()).catch(() => {});
+    const link = await within(connecting, () => (late = true));
+    let joined = false;
+    const lost = new Promise<never>((_, reject) => {
+      link.onError = (err) => {
+        if (err.code !== 'closed') status.textContent = String(err.message);
+        else if (joined) void rejoin();
+        else reject(err);
+      };
+    });
+    try {
+      await within(Promise.race([link.subscribe('ticks', 'live', 'live', onFrame), lost]));
+    } catch (err) {
+      link.close();
+      throw err;
+    }
+    joined = true;
+    return link;
+  };
+  /**
+   * Open sessions until one joins, waiting longer after each failed try. With `final`, a refusal from the gateway
+   * ends the tries, as a page that may not join cannot start.
+   */
+  const persist = async (token: string | null, final: (err: unknown) => boolean): Promise<Gateway> => {
+    for (let wait = 500; ; wait = Math.min(wait * 2, 8000)) {
+      try {
+        return await open(token ?? (await signIn()));
+      } catch (err) {
+        if (final(err)) throw err;
+      }
+      token = null;
+      await sleep(wait);
+    }
+  };
+  let rejoining = false;
+  /** Join again after the gateway closed the session. */
+  const rejoin = async () => {
+    if (rejoining) return;
+    rejoining = true;
+    debug.reconnects++;
+    where.textContent = 'Reconnecting';
+    await sleep(500);
+    gateway = await persist(null, () => false);
+    where.textContent = place;
+    rejoining = false;
+  };
+
+  if (OFFLINE) {
+    const seconds = (name: string, fallback: number) => Number(params.get(name) ?? fallback);
+    gateway = BENCH
+      ? new Offline(2, seconds('length', 600), 15)
+      : new Offline(seconds('warmup', 10), seconds('length', 300), seconds('results', 15));
+    key = playerKey(OFFLINE_PRINCIPAL);
+    await gateway.subscribe('ticks', 'live', 'live', onFrame);
+  } else {
+    const token = await signIn();
+    key = playerKey(await principal(token));
+    gateway = await persist(token, (err) => err instanceof GatewayError && err.code !== 'closed');
+  }
 
   // Inputs go once a sim tick, on the sim's clock as the ticks show it; a short timer keeps the send close to it.
   let live = { moveX: 0, moveZ: 0, aim: 0, buttons: 0 };
   // The first input joins the arena; a watcher, who may not publish inputs, sends none.
-  const playing = !gateway.missing.includes('input');
+  const playing = () => !gateway.missing.includes('input');
   setInterval(() => {
     const now = performance.now();
     // A hidden page draws no frames, so its controls are stale: send none, and the sim lets the craft coast.
-    if (!playing || document.hidden || !pacer.due(now)) return;
+    if (!playing() || document.hidden || !pacer.due(now)) return;
     gateway.send('input', inputs.next(live.moveX, live.moveZ, live.aim, live.buttons));
     if (own?.ready) own.send(inputs.seq, live, now);
   }, 4);
 
   status.remove();
-  document.getElementById('where')!.textContent = OFFLINE ? 'offline, against bots' : `${ARENA} · playing as ${USER}`;
+  where.textContent = place;
   const clock = new Clock();
   let shown: number | null = null;
   let lastT = 0;
@@ -375,7 +454,7 @@ async function main(): Promise<void> {
     // The cursor comes back for the results, which are read rather than played.
     aim.update(
       {
-        pointer: playing && own && match.phase !== 'results' ? controls.pointerAt : null,
+        pointer: playing() && own && match.phase !== 'results' ? controls.pointerAt : null,
         craft: ownCraft?.alive ? { x: ownCraft.x / 100, z: ownCraft.z / 100 } : null,
         violet: ownCraft?.violet ?? false,
         target: controls.target,

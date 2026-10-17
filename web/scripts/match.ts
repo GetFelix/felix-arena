@@ -127,7 +127,9 @@ const errors: string[] = [];
 const open = async (user: string, quality: string, width: number, height: number) => {
   const page = await browser.newPage({ viewport: { width, height } });
   page.on('pageerror', (e) => errors.push(`${user}: ${String(e)}`));
-  await page.goto(`${base}?arena=${ARENA}&as=${user}${quality}`, { waitUntil: 'load' });
+  // The page draws its first frame before it joins, which can hold it past the load event on a software renderer;
+  // #loading going away is what says it joined.
+  await page.goto(`${base}?arena=${ARENA}&as=${user}${quality}`, { waitUntil: 'domcontentloaded' });
   return page;
 };
 // Ana's page draws at full quality and full size for the screenshots, slowly on a runner's software renderer; her
@@ -192,7 +194,12 @@ while (!done && Date.now() - started < LIMIT_MS) {
 }
 
 const who = async (page: Page) =>
-  page.evaluate(() => ({ slot: window.arena!.slot, ticks: window.arena!.ticks, hidden: document.hidden }));
+  page.evaluate(() => ({
+    slot: window.arena!.slot,
+    ticks: window.arena!.ticks,
+    reconnects: window.arena!.reconnects,
+    hidden: document.hidden,
+  }));
 console.log('ana:', await who(ana), 'ben:', await who(ben), 'bots:', Object.fromEntries(botSlots));
 const board = await ana.evaluate(() => ({
   title: document.getElementById('board-title')?.textContent,
