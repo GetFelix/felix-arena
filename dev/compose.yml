@@ -35,6 +35,14 @@ services:
       RUST_LOG: info
     ports:
       - "127.0.0.1:8443:8443"
+    # The image's own HEALTHCHECK, repeated: Podman drops it from OCI images,
+    # and the seed waits on it.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/ready >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 3s
+      start_period: 10s
+      retries: 6
     depends_on:
       idp:
         condition: service_healthy
