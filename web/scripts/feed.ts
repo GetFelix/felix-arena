@@ -127,7 +127,12 @@ try {
   });
   gateway.close();
   const refused = await replay(cleo, oldest.key);
-  const gone = await cleo.locator('#replay-gone').isVisible();
+  // The message goes up in the page's next frame, which takes a while in software.
+  const gone = await cleo
+    .locator('#replay-gone')
+    .waitFor({ state: 'visible', timeout: 15_000 })
+    .then(() => true)
+    .catch(() => false);
   console.log('replayed a trimmed kill:', JSON.stringify(refused), 'message shown:', gone);
   if (refused.failed !== 'trimmed' || !gone) failures.push('a trimmed replay did not say "Replay no longer available"');
   await page_shot(cleo, 'trimmed.png');
