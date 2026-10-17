@@ -37,3 +37,20 @@ jobs:
           gh release create "$GITHUB_REF_NAME" --generate-notes --verify-tag \
             "felix-arena-web-${GITHUB_REF_NAME}.tar.gz" \
             "felix-arena-web-${GITHUB_REF_NAME}.tar.gz.sha256"
+
+  site:
+    needs: web
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      # The site's Release versions workflow also runs hourly, so a missing token only delays the update.
+      - name: Dispatch release-published to the site
+        env:
+          GH_TOKEN: ${{ secrets.SITE_DISPATCH_TOKEN }}
+          SITE: ${{ github.repository_owner }}/getfelix.github.io
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::notice::SITE_DISPATCH_TOKEN is not set; the site picks up the release within the hour."
+            exit 0
+          fi
+          gh api "repos/$SITE/dispatches" -f event_type=release-published
