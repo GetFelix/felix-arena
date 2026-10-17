@@ -135,7 +135,7 @@ export interface ArenaDebug {
   /** The replay's tick time and its kill's tick, while one plays. */
   replayAt: { r: number; kill: number } | null;
   /** For screenshots: hold the replay at its current moment, or let it play. */
-  holdReplay: (held: boolean) => void;
+  holdReplay: (held: boolean, ticksFromKill?: number) => void;
   /** The state each recent tick folded to, by `epoch/tick`: the tick's hash and the match's digest. */
   states: Record<string, string>;
 }
@@ -242,8 +242,9 @@ async function main(): Promise<void> {
       if (role === 'victim') tag.querySelector('span')!.textContent = slot === own?.slot ? 'YOU' : 'VICTIM';
     }
   };
-  debug.holdReplay = (held) => {
+  debug.holdReplay = (held, ticksFromKill) => {
     killcam.held = held;
+    if (ticksFromKill !== undefined) killcam.seek(ticksFromKill);
   };
   addEventListener('keydown', (event) => {
     if (killcam.state === 'off') return;

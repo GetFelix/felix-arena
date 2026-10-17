@@ -66,13 +66,14 @@ const started = Date.now();
 let a = await arena();
 while (Date.now() - started < LIMIT_MS) {
   a = await arena();
-  if (a.replayAt && a.replayAt.r >= a.replayAt.kill - 6) break;
+  if (a.killcam === 'replay') break;
   if (a.killcam === 'off') await charge(a);
   await sleep(a.killcam === 'off' ? 150 : 10);
 }
-if (!a.replayAt) throw new Error(`no replay played: ${a.killcam}`);
+if (a.killcam !== 'replay') throw new Error(`no replay played: ${a.killcam}`);
+// Held a moment before the kill, whatever the frame rate: in software a replay plays far slower than it is cut short.
 await page.evaluate(() => {
-  window.arena!.holdReplay(true);
+  window.arena!.holdReplay(true, -6);
   window.arena!.pause?.(true);
 });
 for (const key of ['KeyW', 'KeyA', 'KeyS', 'KeyD']) await page.keyboard.up(key);

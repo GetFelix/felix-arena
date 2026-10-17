@@ -130,6 +130,11 @@ export class KillCam {
     if (this.state === 'replay') this.leave(nowMs, 1);
   }
 
+  /** Put the replay at `ticks` from its kill, for screenshots; it is held there if {@link held}. */
+  seek(ticks: number): void {
+    if (this.playback && this.kill) this.playback.seek(this.kill.tick + ticks);
+  }
+
   /** Set the replay's camera. */
   view(view: KillView): void {
     if (this.rig) this.rig.view = view;
