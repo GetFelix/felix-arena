@@ -1,7 +1,7 @@
 // The kill cam (docs/design.md, "The kill cam"): the live death beat while the replay is read, the replay drawn by
 // the same scene through its own cameras, and the way back to the game. The live world keeps updating underneath.
 import { AdditiveBlending, type Mesh, Mesh as ThreeMesh, MeshBasicMaterial, type Object3D, RingGeometry } from 'three';
-import { type KillRig, type KillView, type Pose, type Spot } from './killcam-rig';
+import { type KillRig, type KillView, type Pose, type Spot, VIEWS } from './killcam-rig';
 import { hdr } from './materials';
 import { callsign } from './match';
 import { palette } from './palette';
@@ -172,7 +172,7 @@ export class KillCam {
         frame.renderTick >= kill.tick,
       );
       this.times!.drawnUnixMs ??= Date.now();
-      this.hud.update(frame, kill, frame.crafts);
+      this.hud.update(frame, kill, this.rig!.view, frame.crafts);
       this.markers.show(frame.crafts, kill, nowMs);
       if (frame.done) this.leave(nowMs, 1);
       return { replay: frame, pose, weight: 1 };
@@ -231,7 +231,7 @@ class ReplayHud {
     document.getElementById('replay-gone')!.hidden = !on;
   }
 
-  update(frame: ReplayFrame, kill: KillRef, crafts: Placed[]): void {
+  update(frame: ReplayFrame, kill: KillRef, view: KillView, crafts: Placed[]): void {
     if (!this.on) {
       this.on = true;
       this.root.classList.add('on');
@@ -242,6 +242,7 @@ class ReplayHud {
       `<span class="${team(kill.killer)}">${callsign(kill.killer)}</span><span class="x">eliminated</span><span class="${team(kill.victim)}">${callsign(kill.victim)}</span>`,
     );
     this.text('replay-speed', frame.speed < 0.95 ? `${frame.speed.toFixed(1)}×` : '');
+    for (const v of VIEWS) document.getElementById(`replay-${v}`)!.classList.toggle('on', v === view);
     const bar = document.getElementById('replay-progress')!;
     bar.style.transform = `scaleX(${Math.max(0, Math.min(1, frame.progress)).toFixed(4)})`;
     document.getElementById('replay-mark')!.style.left = `${(frame.killAt * 100).toFixed(2)}%`;

@@ -357,6 +357,27 @@
         inset: 0;
         background: radial-gradient(ellipse at center, transparent 55%, var(--void) 135%);
       }
+      .replay .who {
+        position: absolute;
+        top: 0;
+        left: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 1px;
+        text-shadow: 0 1px 8px var(--void);
+        will-change: transform;
+      }
+      .replay .who b {
+        font-size: 14px;
+        font-weight: 700;
+      }
+      .replay .who span {
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.2em;
+        color: var(--muted);
+      }
       .replay .bar {
         position: absolute;
         left: 0;
@@ -597,6 +618,8 @@
         <div class="next" id="board-next"></div>
       </div>
       <div class="replay" id="replay">
+        <div class="who" id="replay-who-killer"><b></b><span>KILLER</span></div>
+        <div class="who" id="replay-who-victim"><b></b><span></span></div>
         <div class="bar top">
           <div class="tag-replay"><i></i>REPLAY<span class="speed" id="replay-speed"></span></div>
           <div class="title" id="replay-title"></div>
@@ -604,7 +627,10 @@
         <div class="bar bottom">
           <div class="timeline"><i id="replay-progress"></i><b id="replay-mark"></b></div>
           <div class="views">
-            <span><kbd>Space</kbd>Skip</span>
+            <span id="replay-victim"><kbd>1</kbd>Victim</span>
+            <span id="replay-killer"><kbd>2</kbd>Killer</span>
+            <span id="replay-orbit"><kbd>3</kbd>Orbit</span>
+            <span class="skip"><kbd>Space</kbd>Skip</span>
           </div>
         </div>
       </div>

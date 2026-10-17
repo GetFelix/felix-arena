@@ -12,6 +12,11 @@ export const VIEWS: readonly KillView[] = ['victim', 'killer', 'orbit'];
 const GAME_ELEVATION = 0.98;
 /** The orbit's: lower, so the crafts read as models rather than pieces on a board. */
 const ORBIT_ELEVATION = 0.52;
+/**
+ * How far from the arena's centre a view may centre, as a share of its half length and width. Centred on a craft at a
+ * wall, half the picture would be the dark beyond it.
+ */
+const INSIDE = 0.55;
 /** How far toward the other craft a centred view leans, so the two share the frame. */
 const LEAN = 0.3;
 /** Both crafts stay inside this share of the screen's half width and height. */
@@ -61,6 +66,8 @@ export class KillRig {
     aspect: number,
     private readonly radius: number,
     private readonly yaw: number,
+    /** Half the arena's length (x) and width (z), in metres. */
+    private readonly half: { x: number; z: number } = { x: 20, z: 14 },
   ) {
     this.fit.fov = fov;
     this.fit.aspect = aspect;
@@ -127,7 +134,8 @@ export class KillRig {
     } else {
       focus = [v[0] + (k[0] - v[0]) * LEAN, v[1] + (k[1] - v[1]) * LEAN];
     }
-    out.target.set(focus[0], 0, focus[1]);
+    const [hx, hz] = [this.half.x * INSIDE, this.half.z * INSIDE];
+    out.target.set(Math.max(-hx, Math.min(hx, focus[0])), 0, Math.max(-hz, Math.min(hz, focus[1])));
     this.points[0]!.set(v[0], GUN_HEIGHT, v[1]);
     this.points[1]!.set(k[0], GUN_HEIGHT, k[1]);
     // Out from close until both crafts fit.
