@@ -127,6 +127,8 @@ export interface ArenaDebug {
     first: number | null;
     last: number | null;
     hash: string | null;
+    /** The read of the second after the kill has finished. */
+    complete: boolean;
   })[];
   /** The kill cam's state now: `off`, `beat`, `replay` or `leaving`. */
   killcam: string;
