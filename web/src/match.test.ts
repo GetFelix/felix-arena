@@ -34,4 +34,22 @@ describe('the match as the HUD shows it', () => {
     expect(clock(300)).toBe('5:00');
     expect(clock(61)).toBe('1:01');
   });
+
+  it('keeps the kills of the last five matches, and an earlier one loaded on request', () => {
+    const match = new Match();
+    const kill = (n: number, offset: number) => ({
+      killer: 1,
+      victim: 2,
+      atMs: 0,
+      rail: false,
+      matchNumber: n,
+      seconds: 10,
+      replay: { matchNumber: n, tick: offset, offset, replayFrom: offset - 90, victim: 2, killer: 1, epoch: 0 },
+    });
+    for (let n = 3; n <= 8; n++) match.remember(n, [kill(n, n * 1000), kill(n, n * 1000)]);
+    expect(match.replays().map(([n]) => n)).toEqual([8, 7, 6, 5, 4]);
+    expect(match.replays()[0]![1]).toHaveLength(1);
+    match.remember(2, [kill(2, 2000)]);
+    expect(match.replays().map(([n]) => n)).toEqual([8, 7, 6, 5, 2]);
+  });
 });

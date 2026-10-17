@@ -156,7 +156,9 @@ export class Match {
     }
     held.sort((a, b) => (a.replay?.tick ?? 0) - (b.replay?.tick ?? 0));
     this.history.set(number, held);
-    for (const n of [...this.history.keys()].sort((a, b) => a - b).slice(0, -MATCHES_KEPT)) this.history.delete(n);
+    // The oldest go, but never the match just taken: an earlier match loaded on request stays.
+    const others = [...this.history.keys()].filter((n) => n !== number).sort((a, b) => a - b);
+    for (const n of others.slice(0, Math.max(0, others.length - (MATCHES_KEPT - 1)))) this.history.delete(n);
   }
 
   /** The kills held for replaying, newest match first, each match's kills oldest first. */

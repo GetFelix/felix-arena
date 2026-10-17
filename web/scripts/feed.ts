@@ -89,17 +89,22 @@ try {
   // A page that never saw the match finds its kills through match/<n>.
   const fresh = await watch();
   await fresh.keyboard.press('KeyR');
-  await fresh.locator('#replays-earlier').click();
-  const found = await until(
-    `match ${first} in the log`,
-    async () => {
-      const s = await seen(fresh);
-      const note = await fresh.locator('#replays-note').textContent();
-      if (note && note !== '' && !note.startsWith('Reading')) throw new Error(`loading match ${first}: ${note}`);
-      return s.kills.filter((k) => k.match === first).length ? s.kills.filter((k) => k.match === first) : null;
-    },
-    60_000,
-  );
+  // Each click reads the match before the earliest one listed; a match may have started since, so it can take two.
+  let found: Seen['kills'] = [];
+  for (let click = 0; click < 3 && found.length === 0; click++) {
+    await fresh.locator('#replays-earlier').click();
+    found = await until(
+      'an earlier match to load',
+      async () => {
+        const note = await fresh.locator('#replays-note').textContent();
+        if (note?.startsWith('Reading')) return null;
+        if (note) throw new Error(`loading an earlier match: ${note}`);
+        return [(await seen(fresh)).kills.filter((k) => k.match === first)];
+      },
+      60_000,
+    ).then(([kills]) => kills!);
+  }
+  if (found.length === 0) throw new Error(`a fresh page did not find match ${first} in the log`);
   console.log(`a fresh page found ${found.length} of match ${first}'s kills in the log`);
   const loaded = await replay(fresh, found.at(-1)!.key);
   if (loaded.failed || loaded.last !== found.at(-1)!.tick + 30) failures.push('a loaded kill did not replay');
