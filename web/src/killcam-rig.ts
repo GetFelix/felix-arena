@@ -31,8 +31,10 @@ const EASE_S = 0.2;
 const CHASE_ELEVATION = 0.78;
 /** The time constant of the killer view's turn after the killer's heading, seconds: slow, so circling reads calm. */
 const CHASE_EASE_S = 0.7;
-/** How long the camera takes to move from the death beat's pose to the replay's, seconds. */
+/** The shortest move from the death beat's pose to the replay's, seconds. */
 const HANDOFF_S = 0.6;
+/** The fastest the camera moves in that hand-over, metres a second: a longer move takes longer. */
+const HANDOFF_SPEED = 45;
 
 /** A camera pose in metres: where it is and the point it looks at. */
 export interface Pose {
@@ -61,6 +63,7 @@ export class KillRig {
   /** The pose the death beat left the camera in, while the replay's first move eases out of it. */
   private handoffFrom: Pose | null = null;
   private handoffS = 0;
+  private handoffT = HANDOFF_S;
   private readonly shown: Pose = { position: new Vector3(), target: new Vector3() };
 
   /**
@@ -134,8 +137,11 @@ export class KillRig {
     }
     const from = this.handoffFrom;
     if (!from) return this.pose;
+    // Smoothstep peaks at 1.5 times the mean speed.
+    if (this.handoffS === 0)
+      this.handoffT = Math.max(HANDOFF_S, (1.5 * from.position.distanceTo(this.pose.position)) / HANDOFF_SPEED);
     this.handoffS += dt;
-    const f = Math.min(1, this.handoffS / HANDOFF_S);
+    const f = Math.min(1, this.handoffS / this.handoffT);
     if (f >= 1) this.handoffFrom = null;
     const s = f * f * (3 - 2 * f);
     this.shown.position.lerpVectors(from.position, this.pose.position, s);

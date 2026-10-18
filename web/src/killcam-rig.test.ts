@@ -81,6 +81,7 @@ describe('the hand-over from the death beat to the replay', () => {
       Math.cos(yaw) * Math.cos(0.98) * radius,
     );
     let worst = 0;
+    let checked = 0;
     for (const kill of match.kills) {
       const replay = await fetchReplay(reader(match.records), kill);
       for (let i = 0; i < 50 && replay.times.afterMs === null; i++) await new Promise((r) => setTimeout(r, 0));
@@ -101,13 +102,25 @@ describe('the hand-over from the death beat to the replay', () => {
       }
       rig.handoff(0.5);
       const playback = new Playback(replay);
-      for (let i = 0, frame = playback.advance(0); i < 60 && !frame.done; i++, frame = playback.advance(1000 / 60)) {
-        const c = (slot: number) => frame.crafts.find((x) => x.slot === slot)!;
-        const pose = rig.update(c(kill.victim), c(kill.killer), 1 / 60, frame.speed);
-        worst = Math.max(worst, pose.position.distanceTo(last));
+      let step = 0;
+      let was: { x: number; z: number }[] | null = null;
+      // The hand-over and a little after. A craft that respawns in it is a cut the rig makes on purpose, so that kill is left out.
+      for (let i = 0, frame = playback.advance(0); i < 75 && !frame.done; i++, frame = playback.advance(1000 / 60)) {
+        const now = [kill.victim, kill.killer].map((slot) => frame.crafts.find((x) => x.slot === slot)!);
+        if (was?.some((w, j) => Math.hypot(now[j]!.x - w.x, now[j]!.z - w.z) > 200)) {
+          step = -1;
+          break;
+        }
+        was = now.map((c) => ({ x: c.x, z: c.z }));
+        const pose = rig.update(now[0]!, now[1]!, 1 / 60, frame.speed);
+        step = Math.max(step, pose.position.distanceTo(last));
         last.copy(pose.position);
       }
+      if (step < 0) continue;
+      checked++;
+      worst = Math.max(worst, step);
     }
+    expect(checked).toBeGreaterThan(match.kills.length / 2);
     // A 60 Hz frame; the eased hand-over moves at most about a metre a frame.
     expect(worst).toBeLessThan(1.5);
   });
