@@ -31,6 +31,8 @@ const EASE_S = 0.2;
 const CHASE_ELEVATION = 0.78;
 /** The time constant of the killer view's turn after the killer's heading, seconds: slow, so circling reads calm. */
 const CHASE_EASE_S = 0.7;
+/** How long the camera takes to move from the death beat's pose to the replay's, seconds. */
+const HANDOFF_S = 0.6;
 
 /** A camera pose in metres: where it is and the point it looks at. */
 export interface Pose {
@@ -56,6 +58,10 @@ export class KillRig {
   private readonly want: Pose = { position: new Vector3(), target: new Vector3() };
   private readonly points = [new Vector3(), new Vector3()];
   private readonly away = new Vector3();
+  /** The pose the death beat left the camera in, while the replay's first move eases out of it. */
+  private handoffFrom: Pose | null = null;
+  private handoffS = 0;
+  private readonly shown: Pose = { position: new Vector3(), target: new Vector3() };
 
   /**
    * `fov` and `aspect` are the game camera's; `radius` is its distance from the arena's centre and `yaw` its angle
@@ -85,6 +91,21 @@ export class KillRig {
   }
 
   /**
+   * Hand over from the death beat, which drew the camera `weight` of the way from the game camera to this rig's pose,
+   * to the replay. The replay opens seconds before the kill with the crafts elsewhere, so the camera eases from
+   * where the beat left it to the replay's framing instead of jumping there.
+   */
+  handoff(weight: number): void {
+    const from: Pose = { position: new Vector3(), target: new Vector3() };
+    place(from.position, from.target, this.radius, this.yaw, GAME_ELEVATION);
+    from.position.lerp(this.pose.position, weight);
+    from.target.lerp(this.pose.target, weight);
+    this.handoffFrom = from;
+    this.handoffS = 0;
+    this.started = false;
+  }
+
+  /**
    * The pose for a frame `dt` seconds after the last, with the replay running at `speed` (1 normal, 0.5 slowed) and
    * `held` true once the killing shot has landed, which slows the orbit further.
    */
@@ -111,7 +132,15 @@ export class KillRig {
       this.away.subVectors(this.pose.position, this.pose.target).multiplyScalar(1.04);
       this.pose.position.addVectors(this.pose.target, this.away);
     }
-    return this.pose;
+    const from = this.handoffFrom;
+    if (!from) return this.pose;
+    this.handoffS += dt;
+    const f = Math.min(1, this.handoffS / HANDOFF_S);
+    if (f >= 1) this.handoffFrom = null;
+    const s = f * f * (3 - 2 * f);
+    this.shown.position.lerpVectors(from.position, this.pose.position, s);
+    this.shown.target.lerpVectors(from.target, this.pose.target, s);
+    return this.shown;
   }
 
   /** The pose `view` wants for the two crafts, written into `out`. */

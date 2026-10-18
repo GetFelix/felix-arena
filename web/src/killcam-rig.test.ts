@@ -69,3 +69,46 @@ describe('the kill cam views', () => {
     });
   }
 });
+
+describe('the hand-over from the death beat to the replay', () => {
+  it('moves the camera without a jump, though the replay opens with the crafts elsewhere', async () => {
+    const aspect = 1920 / 1080;
+    const { radius, yaw } = framing(aspect, 30, true);
+    const rest = new PerspectiveCamera(30, aspect, 1, 200);
+    rest.position.set(
+      Math.sin(yaw) * Math.cos(0.98) * radius,
+      Math.sin(0.98) * radius,
+      Math.cos(yaw) * Math.cos(0.98) * radius,
+    );
+    let worst = 0;
+    for (const kill of match.kills) {
+      const replay = await fetchReplay(reader(match.records), kill);
+      for (let i = 0; i < 50 && replay.times.afterMs === null; i++) await new Promise((r) => setTimeout(r, 0));
+      // Where the two were at the kill, which the live beat looks at.
+      const toKill = new Playback(replay);
+      let at = toKill.advance(0);
+      while (!at.done && at.renderTick < kill.tick) at = toKill.advance(1000 / 60);
+      const spot = (slot: number) => at.crafts.find((c) => c.slot === slot)!;
+      const [victim, killer] = [spot(kill.victim), spot(kill.killer)];
+      const rig = new KillRig(30, aspect, radius, yaw);
+      const last = new Vector3();
+      // The beat: 600 ms easing to half weight, as KillCam draws it.
+      for (let frame = 1; frame <= 36; frame++) {
+        const pose = rig.update(victim, killer, 1 / 60);
+        const f = frame / 36;
+        const w = 0.5 * f * f * (3 - 2 * f);
+        last.copy(rest.position).lerp(pose.position, w);
+      }
+      rig.handoff(0.5);
+      const playback = new Playback(replay);
+      for (let i = 0, frame = playback.advance(0); i < 60 && !frame.done; i++, frame = playback.advance(1000 / 60)) {
+        const c = (slot: number) => frame.crafts.find((x) => x.slot === slot)!;
+        const pose = rig.update(c(kill.victim), c(kill.killer), 1 / 60, frame.speed);
+        worst = Math.max(worst, pose.position.distanceTo(last));
+        last.copy(pose.position);
+      }
+    }
+    // A 60 Hz frame; the eased hand-over moves at most about a metre a frame.
+    expect(worst).toBeLessThan(1.5);
+  });
+});

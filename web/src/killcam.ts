@@ -154,6 +154,7 @@ export class KillCam {
         this.leave(nowMs, this.beatWeight(nowMs));
       } else if (replay?.ready && nowMs - this.since >= BEAT_MS) {
         this.state = 'replay';
+        this.rig!.handoff(this.beatWeight(nowMs));
         this.playback = new Playback(replay);
         this.times!.readyUnixMs = Date.now();
       } else {
