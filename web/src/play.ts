@@ -232,9 +232,9 @@ async function main(): Promise<void> {
     ] as const) {
       const tag = document.getElementById(`replay-who-${role}`)!;
       const c = crafts.find((craft) => craft.slot === slot);
-      // A destroyed craft keeps its tag where it went down.
-      tag.hidden = !c;
-      if (!c) continue;
+      // The victim keeps its tag where it went down; a killer destroyed earlier in the replay has none until it respawns.
+      tag.hidden = !c || (role === 'killer' && !c.alive);
+      if (tag.hidden || !c) continue;
       const p = tagAt.set(c.x / 100, 3, c.z / 100).project(view.camera);
       // Below the letterbox's top bar, whatever the camera does.
       const y = Math.max(110, ((1 - p.y) / 2) * innerHeight);
@@ -754,6 +754,8 @@ async function main(): Promise<void> {
       } else if (e.kind === 'railed') {
         effects.railed(at.violet, nose[0], nose[1], e.x, e.z, fxT);
         effects.fired(at.violet, nose[0], nose[1], fxT);
+      } else if (e.kind === 'killed' && replay && e.slot === killcam.kill?.victim) {
+        effects.wrecked(at.violet, at.x, at.z, fxT);
       } else if (e.kind === 'killed') {
         effects.destroyed(at.violet, at.x, at.z, fxT);
       }

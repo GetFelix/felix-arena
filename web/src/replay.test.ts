@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { decodeTick, loadCore } from './core';
 import { botMatch, type Fixture } from './kills.fixture';
-import { AFTER, fetchReplay, killsOf, Playback, type Reader, Replay, speedAt } from './replay';
+import { AFTER, fetchReplay, killsOf, Playback, type Reader, Replay, SHOWN, speedAt } from './replay';
 
 let match: Fixture;
 beforeAll(() => {
@@ -72,7 +72,7 @@ describe('a replay', () => {
     expect(speedAt(kill + 10, kill)).toBe(1);
   });
 
-  it('plays 3 s before the kill and 1 s after, in about 4.6 s with the slow motion', async () => {
+  it('plays 2 s before the kill and 1 s after, in about 3.6 s with the slow motion', async () => {
     const kill = match.kills[1]!;
     const replay = await fetchReplay(
       log(match.records, () => match.records.length, 500),
@@ -81,6 +81,9 @@ describe('a replay', () => {
     );
     for (let i = 0; i < 100 && replay.times.afterMs === null; i++) await new Promise((r) => setTimeout(r, 0));
     const playback = new Playback(replay);
+    // The log is read from further back than the kill cam plays.
+    expect(replay.ticks[0]!.snapshot.tick).toBeLessThan(kill.tick - SHOWN);
+    expect(playback.r).toBe(kill.tick - SHOWN);
     const seen: string[] = [];
     let ms = 0;
     let frame = playback.advance(0);
@@ -90,8 +93,8 @@ describe('a replay', () => {
       for (const e of frame.events) seen.push(`${e.tick}:${e.kind}`);
     }
     expect(frame.done).toBe(true);
-    expect(ms / 1000).toBeGreaterThan(4.4);
-    expect(ms / 1000).toBeLessThan(4.8);
+    expect(ms / 1000).toBeGreaterThan(3.4);
+    expect(ms / 1000).toBeLessThan(3.8);
     expect(seen).toContain(`${kill.tick}:killed`);
     expect(frame.crafts.find((c) => c.slot === kill.victim)?.alive).toBe(false);
   });

@@ -480,7 +480,7 @@ sequenceDiagram
     B-->>V: ticks T-90 .. T
     V->>B: read on from T+1 as it is committed
     B-->>V: ticks T+1 .. T+30
-    Note over V: play 3 s before the kill and 1 s after, then respawn
+    Note over V: play 2 s before the kill and 1 s after, the explosion, the caption, then respawn
 ```
 
 **Finding the right offset.** The sim keeps a ring of `(tick, offset)` for the
@@ -516,12 +516,22 @@ live subscription for a few seconds, and a replay of an older kill from the
 feed would stream every tick from that kill up to live before it could be
 closed. A range read is bounded by construction.
 
-**Playing it.** The window is 3 seconds before the kill and 1 second after:
-120 ticks, about 40 KB. The replay is its own copy of the match's state, fed by
-the read and drawn by the same scene (`web/src/replay.ts`, `web/src/killcam.ts`). The
-live world keeps updating underneath, so leaving the kill cam is instant. The
-last half second before the kill plays at half speed, then the hit, then the
-explosion at full speed.
+**Playing it.** The read covers 3 seconds before the kill and 1 second after:
+120 ticks, about 40 KB. The kill cam plays the last 2 seconds before the kill
+and the second after it, so the whole sequence fits in the 5 seconds before the
+victim respawns. The replay is its own copy of the match's state, fed by the
+read and drawn by the same scene (`web/src/replay.ts`, `web/src/killcam.ts`).
+The live world keeps updating underneath, so leaving the kill cam is instant.
+The last half second before the kill plays at half speed. Then the victim
+explodes, bigger than a kill in the live game, with a shock ring on the floor,
+and a caption says who destroyed whom ("Rook was destroyed by Mara"). The
+replay holds on its last tick with the caption up until the respawn, or for
+1.2 seconds when replayed from the feed.
+
+The rings under the two crafts and their name tags mark only a craft that is
+alive. A killer that was itself destroyed earlier in the window, and is
+waiting to respawn, gets neither until it is back, and the views frame the
+victim alone until then.
 
 **Views.** A tick holds every craft's position, heading and aim, so any camera
 works:

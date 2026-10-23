@@ -68,9 +68,9 @@ match can continue after its broker
   so a player or spectator joins a match in progress from the newest keyframe
   and catches up without drawing.
 - **The kill cam.** Each kill event names the offset of the tick three seconds
-  earlier. The victim's page reads that range of the log and plays it back,
-  with slow motion before the killing shot, while the live match carries on
-  underneath. Every kill in the feed can be replayed, from this match or an
+  earlier. The victim's page reads that range of the log and plays the last two
+  seconds of it, with slow motion before the killing shot, then the explosion
+  and who destroyed whom, while the live match carries on underneath. Every kill in the feed can be replayed, from this match or an
   earlier one, until retention trims it.
 - **Offline play.** `play.html?offline` runs `core` in the page against three
   bots, with no servers.

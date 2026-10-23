@@ -618,6 +618,16 @@ export class Effects {
     start(this.blasts, violet, t).where.set(x / 100, 0.7, z / 100);
   }
 
+  /**
+   * The kill cam's victim destroyed at `(x, z)` in centimetres, at time `t`: three blasts close together, so the
+   * replay's end reads as an explosion rather than one more hit.
+   */
+  wrecked(violet: boolean, x: number, z: number, t: number): void {
+    this.destroyed(violet, x, z, t);
+    start(this.blasts, violet, t + 0.1).where.set(x / 100 + 0.5, 1.0, z / 100 - 0.3);
+    start(this.blasts, violet, t + 0.22).where.set(x / 100 - 0.4, 0.5, z / 100 + 0.4);
+  }
+
   /** A muzzle flash at `(x, z)` in centimetres, at time `t`. */
   fired(violet: boolean, x: number, z: number, t: number): void {
     start(this.fires, violet, t).where.set(x / 100, GUN_HEIGHT, z / 100);
