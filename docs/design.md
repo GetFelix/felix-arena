@@ -506,7 +506,7 @@ the gateway's `read` (Felix's bounded range read, `Client::read`, added in
 subscription registered and nothing to close afterwards. The second after the
 kill is still being played when the kill arrives, so the client reads on from
 the kill's offset plus one, again each time a page comes back short, until it
-holds tick `T + 30`; playback reaches the kill no sooner than 3 seconds later,
+holds tick `T + 30`; playback reaches the kill no sooner than 2.5 seconds later,
 so those ticks are always there in time. A read answers only committed
 records, so a replay never shows a tick a failover could take back.
 
