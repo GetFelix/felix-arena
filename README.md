@@ -12,14 +12,15 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license"></a>
 </p>
 
-[![Eight hover-craft trading fire around the crystal; one is destroyed and the kill cam replays its last seconds in slow motion](docs/screenshots/arena.gif)](docs/screenshots/arena.mp4)
+[![Eight hover-craft trading fire around the crystal; one is destroyed, and the kill cam replays its last seconds in slow motion and ends on the explosion and who destroyed whom](docs/screenshots/arena.gif)](docs/screenshots/arena.mp4)
 
 <sub>A live four-a-side match on the development stack, played in Edge: one
 player in the browser and seven bots through the gateway. When the browser's
 craft is destroyed, the kill cam replays the seconds before it, read back from
-the match's tick stream in Felix. Full size: [arena.mp4](docs/screenshots/arena.mp4).</sub>
+the match's tick stream in Felix, and ends on the explosion and who destroyed
+whom. Full size: [arena.mp4](docs/screenshots/arena.mp4).</sub>
 
-![The kill cam: the replay of the killing shot at half speed, with the killer and the victim named](docs/screenshots/arena-killcam.webp)
+![The kill cam at the moment of the kill: the victim explodes in the replay, with the killer and the victim named](docs/screenshots/arena-killcam.webp)
 
 Felix Arena is a team deathmatch for up to eight players, Coral against
 Violet, flying low-poly hover-craft in a walled arena seen from a top-down
