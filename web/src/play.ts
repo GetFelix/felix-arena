@@ -526,7 +526,7 @@ async function main(): Promise<void> {
     if (mine?.alive) {
       respawnAt = null;
       // Back in the game: the replay gives way to it.
-      if (killcam.state !== 'off' && killcam.kill?.victim === mine.slot) killcam.skip(arrivedMs);
+      if (killcam.state !== 'off' && killcam.kill?.victim === mine.slot) killcam.skip(arrivedMs, true);
     }
     match.update(tick, arrivedMs, true, offset, replayFrom);
     recordState(tick);

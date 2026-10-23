@@ -466,7 +466,7 @@
         font-weight: 500;
         color: var(--muted);
       }
-      .replay .verdict {
+      .verdict {
         position: absolute;
         top: 30%;
         left: 50%;
@@ -484,11 +484,11 @@
           opacity 260ms ease-out,
           transform 360ms cubic-bezier(0.2, 0.8, 0.2, 1);
       }
-      .replay.ended .verdict {
+      .verdict.on {
         opacity: 1;
         transform: translate(-50%, 0);
       }
-      .replay .verdict span {
+      .verdict span {
         font-weight: 700;
       }
       .replay .timeline {
@@ -788,7 +788,6 @@
       <div class="replay" id="replay">
         <div class="who" id="replay-who-killer"><b></b><span>KILLER</span></div>
         <div class="who" id="replay-who-victim"><b></b><span></span></div>
-        <div class="verdict" id="replay-verdict"></div>
         <div class="bar top">
           <div class="tag-replay"><i></i>REPLAY<span class="speed" id="replay-speed"></span></div>
           <div class="title" id="replay-title"></div>
@@ -803,6 +802,7 @@
           </div>
         </div>
       </div>
+      <div class="verdict" id="replay-verdict"></div>
       <div class="gone" id="replay-gone" hidden>Replay no longer available</div>
       <div class="replays" id="replays" hidden>
         <h3>REPLAYS <kbd>R</kbd></h3>

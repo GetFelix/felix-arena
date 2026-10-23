@@ -17,10 +17,13 @@ const LEAVE_MS = 450;
 const REFUSED_MS = 2500;
 /** How far the death beat eases the camera toward the victim. */
 const BEAT_WEIGHT = 0.5;
-/** Ticks after the kill before the caption comes up, so the explosion is seen first. */
-const CAPTION_TICKS = 8;
-/** How long the replay holds on its last tick, with the caption up, before going back to the game. */
-const HOLD_MS = 1200;
+/** Ticks after the kill before the caption comes up: half a second, so the explosion registers first. */
+const CAPTION_TICKS = 15;
+/**
+ * How long the caption stays up, even past the respawn: a viewer who was not expecting it needs about half a second
+ * to find it and about a second and a half to read it.
+ */
+const CAPTION_MS = 2000;
 /** How long the shock ring under the explosion takes to spread, in seconds of the replay. */
 const SHOCK_S = 0.6;
 
@@ -74,8 +77,8 @@ export class KillCam {
   private leaveFrom = 1;
   private lastMs: number | null = null;
   private refusedUntil = 0;
-  /** When the replay reached its last tick. */
-  private endedAt: number | null = null;
+  /** When the caption came up. */
+  private captionFrom: number | null = null;
   /** Whether the killer was seen alive in this kill cam; until then the views frame the victim alone. */
   private killerSeen = false;
   private victimAt: Spot = { x: 0, z: 0 };
@@ -104,7 +107,7 @@ export class KillCam {
     this.since = nowMs - (BEAT_MS - beatMs);
     this.replay = null;
     this.playback = null;
-    this.endedAt = null;
+    this.captionFrom = null;
     this.killerSeen = false;
     this.rig = this.rigFor();
     if (view) this.rig.view = view;
@@ -135,9 +138,10 @@ export class KillCam {
     return this.fetched.get(times) ?? null;
   }
 
-  /** Leave for the game. */
-  skip(nowMs: number): void {
+  /** Leave for the game. With `keepCaption`, as at the respawn, a caption already up stays for its full time. */
+  skip(nowMs: number, keepCaption = false): void {
     if (this.held) return;
+    if (!keepCaption) this.captionFrom = null;
     if (this.state === 'beat') this.leave(nowMs, this.beatWeight(nowMs));
     if (this.state === 'replay') this.leave(nowMs, 1);
   }
@@ -158,6 +162,7 @@ export class KillCam {
     const dt = this.lastMs === null ? 0 : Math.min(100, Math.max(0, nowMs - this.lastMs));
     this.lastMs = nowMs;
     this.hud.refused(nowMs < this.refusedUntil);
+    this.hud.caption(this.captionFrom !== null && nowMs - this.captionFrom < CAPTION_MS);
     const kill = this.kill;
     if (this.state === 'beat' && kill) {
       const replay = this.replay;
@@ -192,10 +197,11 @@ export class KillCam {
         frame.renderTick >= kill.tick,
       );
       this.times!.drawnUnixMs ??= Date.now();
-      this.hud.update(frame, kill, this.rig!.view, frame.crafts);
+      // A replay cut short of the caption's tick still ends on it.
+      if (frame.renderTick >= kill.tick + CAPTION_TICKS || frame.done) this.captionFrom ??= nowMs;
+      this.hud.update(frame, kill, this.rig!.view, frame.crafts, this.captionFrom !== null);
       this.markers.show(frame.crafts, kill, frame.renderTick, nowMs);
-      if (frame.done) this.endedAt ??= nowMs;
-      if (this.endedAt !== null && nowMs - this.endedAt >= HOLD_MS && !this.held) this.leave(nowMs, 1);
+      if (frame.done && nowMs - this.captionFrom! >= CAPTION_MS && !this.held) this.leave(nowMs, 1);
       return { replay: frame, pose, weight: 1 };
     }
     this.hud.hide();
@@ -261,7 +267,12 @@ class ReplayHud {
     document.getElementById('replay-gone')!.hidden = !on;
   }
 
-  update(frame: ReplayFrame, kill: KillRef, view: KillView, crafts: Placed[]): void {
+  /** The caption, which outlives the replay when the respawn cuts it short. */
+  caption(on: boolean): void {
+    document.getElementById('replay-verdict')!.classList.toggle('on', on);
+  }
+
+  update(frame: ReplayFrame, kill: KillRef, view: KillView, crafts: Placed[], ended: boolean): void {
     if (!this.on) {
       this.on = true;
       this.root.classList.add('on');
@@ -276,7 +287,7 @@ class ReplayHud {
       'replay-verdict',
       `<span class="${team(kill.victim)}">${callsign(kill.victim)}</span> was destroyed by <span class="${team(kill.killer)}">${callsign(kill.killer)}</span>`,
     );
-    this.root.classList.toggle('ended', frame.renderTick >= kill.tick + CAPTION_TICKS);
+    this.root.classList.toggle('ended', ended);
     for (const v of VIEWS) document.getElementById(`replay-${v}`)!.classList.toggle('on', v === view);
     const bar = document.getElementById('replay-progress')!;
     bar.style.transform = `scaleX(${Math.max(0, Math.min(1, frame.progress)).toFixed(4)})`;

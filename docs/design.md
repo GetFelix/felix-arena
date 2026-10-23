@@ -524,9 +524,12 @@ read and drawn by the same scene (`web/src/replay.ts`, `web/src/killcam.ts`).
 The live world keeps updating underneath, so leaving the kill cam is instant.
 The last half second before the kill plays at half speed. Then the victim
 explodes, bigger than a kill in the live game, with a shock ring on the floor,
-and a caption says who destroyed whom ("Rook was destroyed by Mara"). The
-replay holds on its last tick with the caption up until the respawn, or for
-1.2 seconds when replayed from the feed.
+and half a second later, once the explosion has registered, a caption says
+who destroyed whom ("Rook was destroyed by Mara"). The caption stays up for 2
+seconds, about what a viewer who was not expecting it needs to find and read
+it. The replay holds on its last tick until then. When the respawn comes
+first, the replay gives way to the game and the caption finishes its time over
+it; Space or Escape takes it down with the replay.
 
 The rings under the two crafts and their name tags mark only a craft that is
 alive. A killer that was itself destroyed earlier in the window, and is
