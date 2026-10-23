@@ -15,8 +15,6 @@ export const BEAT_MS = 600;
 const LEAVE_MS = 450;
 /** How long "Replay no longer available" stays up. */
 const REFUSED_MS = 2500;
-/** How far the death beat eases the camera toward the victim. */
-const BEAT_WEIGHT = 0.5;
 /** Ticks after the kill before the caption comes up: half a second, so the explosion registers first. */
 const CAPTION_TICKS = 15;
 /**
@@ -142,7 +140,7 @@ export class KillCam {
   skip(nowMs: number, keepCaption = false): void {
     if (this.held) return;
     if (!keepCaption) this.captionFrom = null;
-    if (this.state === 'beat') this.leave(nowMs, this.beatWeight(nowMs));
+    if (this.state === 'beat') this.leave(nowMs, 0);
     if (this.state === 'replay') this.leave(nowMs, 1);
   }
 
@@ -168,21 +166,18 @@ export class KillCam {
       const replay = this.replay;
       if (replay?.failed) {
         this.refusedUntil = nowMs + REFUSED_MS;
-        this.leave(nowMs, this.beatWeight(nowMs));
+        this.leave(nowMs, 0);
       } else if (replay?.ready && nowMs - this.since >= BEAT_MS) {
         this.state = 'replay';
         // The beat saw the live killer; the replay's may not be alive yet.
         this.killerSeen = false;
-        this.rig!.handoff(this.beatWeight(nowMs));
+        this.rig!.handoff(0);
         this.playback = new Playback(replay);
         this.times!.readyUnixMs = Date.now();
       } else {
+        // The beat keeps the game camera, so the move into the replay is the kill cam's only one.
         this.follow(live, kill);
-        return {
-          replay: null,
-          pose: this.rig!.update(this.victimAt, this.killerAt, dt / 1000),
-          weight: this.beatWeight(nowMs),
-        };
+        return { replay: null, pose: null, weight: 0 };
       }
     }
     if (this.state === 'replay' && this.playback && kill) {
@@ -223,10 +218,6 @@ export class KillCam {
     this.state = 'leaving';
     this.since = nowMs;
     this.leaveFrom = from;
-  }
-
-  private beatWeight(nowMs: number): number {
-    return BEAT_WEIGHT * ease(Math.min(1, (nowMs - this.since) / BEAT_MS));
   }
 
   private follow(

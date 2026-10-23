@@ -546,7 +546,9 @@ works:
 | Orbit | A cinematic camera circling the midpoint of the two, lower and closer than the game camera, slowing as the killing shot lands |
 
 **Timing.** The victim sees the kill live and gets a 0.6 second death beat (the
-explosion, the camera easing in) before the replay starts. The fetch runs
+explosion and the DESTROYED banner, on the game camera) before the replay
+starts. The camera then makes one move, from the game's view into the replay's,
+so one kill gets one camera move. The fetch runs
 inside that beat: one round trip to the gateway plus 90 records. On a 40 ms
 link that is about 100 ms, so the replay is buffered before it is needed. The
 target is a fetch under 250 ms p95 and the replay on screen within 800 ms of
