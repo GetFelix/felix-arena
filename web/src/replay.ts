@@ -8,6 +8,11 @@ import { boltsBetween, between, type BoltState, type CraftState, snapshot, type 
 const HZ = 30;
 /** Ticks played after the kill. */
 export const AFTER = 30;
+/**
+ * Ticks before the kill a kill cam plays. The log is read from the kill's `replayFrom`, further back; playing less of
+ * it leaves room for the explosion and the caption before the victim respawns, 5 s after the kill.
+ */
+export const SHOWN = 60;
 /** Ticks before the kill that play at half speed. */
 const SLOW = 15;
 /** Ticks over which the speed eases into and out of the slow motion. */
@@ -220,12 +225,16 @@ export interface ReplayFrame {
 export class Playback {
   /** The tick time now. */
   r: number;
+  /** The tick it starts at. */
+  readonly start: number;
   private passed: number;
   /** Holds the clock still, for screenshots. */
   held = false;
 
   constructor(readonly replay: Replay) {
-    this.r = replay.ticks[0]?.snapshot.tick ?? replay.kill.tick;
+    const first = replay.ticks[0]?.snapshot.tick ?? replay.kill.tick;
+    this.start = Math.max(first, replay.kill.tick - SHOWN);
+    this.r = this.start;
     this.passed = this.r - 1;
   }
 
@@ -260,7 +269,7 @@ export class Playback {
       if (n > this.passed && n <= r) for (const e of t.events) events.push({ ...e, tick: n });
     }
     this.passed = Math.max(this.passed, Math.floor(r));
-    const start = ticks[0]!.snapshot.tick;
+    const start = this.start;
     const length = Math.max(1, this.replay.end - start);
     return {
       renderTick: r,

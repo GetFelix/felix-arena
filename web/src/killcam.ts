@@ -17,6 +17,15 @@ const LEAVE_MS = 450;
 const REFUSED_MS = 2500;
 /** How far the death beat eases the camera toward the victim. */
 const BEAT_WEIGHT = 0.5;
+/** Ticks after the kill before the caption comes up: half a second, so the explosion registers first. */
+const CAPTION_TICKS = 15;
+/**
+ * How long the caption stays up, even past the respawn: a viewer who was not expecting it needs about half a second
+ * to find it and about a second and a half to read it.
+ */
+const CAPTION_MS = 2000;
+/** How long the shock ring under the explosion takes to spread, in seconds of the replay. */
+const SHOCK_S = 0.6;
 
 /** When one kill cam's steps happened, in Unix milliseconds on the page's clock unless named otherwise. */
 export interface KillCamTimes {
@@ -68,6 +77,10 @@ export class KillCam {
   private leaveFrom = 1;
   private lastMs: number | null = null;
   private refusedUntil = 0;
+  /** When the caption came up. */
+  private captionFrom: number | null = null;
+  /** Whether the killer was seen alive in this kill cam; until then the views frame the victim alone. */
+  private killerSeen = false;
   private victimAt: Spot = { x: 0, z: 0 };
   private killerAt: Spot = { x: 0, z: 0 };
   private readonly hud = new ReplayHud();
@@ -94,6 +107,8 @@ export class KillCam {
     this.since = nowMs - (BEAT_MS - beatMs);
     this.replay = null;
     this.playback = null;
+    this.captionFrom = null;
+    this.killerSeen = false;
     this.rig = this.rigFor();
     if (view) this.rig.view = view;
     const times: KillCamTimes = {
@@ -123,9 +138,10 @@ export class KillCam {
     return this.fetched.get(times) ?? null;
   }
 
-  /** Leave for the game. */
-  skip(nowMs: number): void {
+  /** Leave for the game. With `keepCaption`, as at the respawn, a caption already up stays for its full time. */
+  skip(nowMs: number, keepCaption = false): void {
     if (this.held) return;
+    if (!keepCaption) this.captionFrom = null;
     if (this.state === 'beat') this.leave(nowMs, this.beatWeight(nowMs));
     if (this.state === 'replay') this.leave(nowMs, 1);
   }
@@ -146,6 +162,7 @@ export class KillCam {
     const dt = this.lastMs === null ? 0 : Math.min(100, Math.max(0, nowMs - this.lastMs));
     this.lastMs = nowMs;
     this.hud.refused(nowMs < this.refusedUntil);
+    this.hud.caption(this.captionFrom !== null && nowMs - this.captionFrom < CAPTION_MS);
     const kill = this.kill;
     if (this.state === 'beat' && kill) {
       const replay = this.replay;
@@ -154,6 +171,8 @@ export class KillCam {
         this.leave(nowMs, this.beatWeight(nowMs));
       } else if (replay?.ready && nowMs - this.since >= BEAT_MS) {
         this.state = 'replay';
+        // The beat saw the live killer; the replay's may not be alive yet.
+        this.killerSeen = false;
         this.rig!.handoff(this.beatWeight(nowMs));
         this.playback = new Playback(replay);
         this.times!.readyUnixMs = Date.now();
@@ -178,9 +197,11 @@ export class KillCam {
         frame.renderTick >= kill.tick,
       );
       this.times!.drawnUnixMs ??= Date.now();
-      this.hud.update(frame, kill, this.rig!.view, frame.crafts);
-      this.markers.show(frame.crafts, kill, nowMs);
-      if (frame.done) this.leave(nowMs, 1);
+      // A replay cut short of the caption's tick still ends on it.
+      if (frame.renderTick >= kill.tick + CAPTION_TICKS || frame.done) this.captionFrom ??= nowMs;
+      this.hud.update(frame, kill, this.rig!.view, frame.crafts, this.captionFrom !== null);
+      this.markers.show(frame.crafts, kill, frame.renderTick, nowMs);
+      if (frame.done && nowMs - this.captionFrom! >= CAPTION_MS && !this.held) this.leave(nowMs, 1);
       return { replay: frame, pose, weight: 1 };
     }
     this.hud.hide();
@@ -208,11 +229,20 @@ export class KillCam {
     return BEAT_WEIGHT * ease(Math.min(1, (nowMs - this.since) / BEAT_MS));
   }
 
-  private follow(crafts: { slot: number; x: number; z: number; heading?: number }[], kill: KillRef): void {
+  private follow(
+    crafts: { slot: number; alive: boolean; x: number; z: number; heading?: number }[],
+    kill: KillRef,
+  ): void {
+    // A destroyed victim stays where it went down. A destroyed killer waiting to respawn is nowhere to look.
     const victim = crafts.find((c) => c.slot === kill.victim);
     const killer = crafts.find((c) => c.slot === kill.killer);
     if (victim) this.victimAt = { x: victim.x, z: victim.z };
-    if (killer) this.killerAt = { x: killer.x, z: killer.z, heading: killer.heading };
+    if (killer?.alive) {
+      this.killerSeen = true;
+      this.killerAt = { x: killer.x, z: killer.z, heading: killer.heading };
+    } else if (!this.killerSeen) {
+      this.killerAt = this.victimAt;
+    }
   }
 }
 
@@ -230,14 +260,19 @@ class ReplayHud {
   hide(): void {
     if (!this.on) return;
     this.on = false;
-    this.root.classList.remove('on');
+    this.root.classList.remove('on', 'ended');
   }
 
   refused(on: boolean): void {
     document.getElementById('replay-gone')!.hidden = !on;
   }
 
-  update(frame: ReplayFrame, kill: KillRef, view: KillView, crafts: Placed[]): void {
+  /** The caption, which outlives the replay when the respawn cuts it short. */
+  caption(on: boolean): void {
+    document.getElementById('replay-verdict')!.classList.toggle('on', on);
+  }
+
+  update(frame: ReplayFrame, kill: KillRef, view: KillView, crafts: Placed[], ended: boolean): void {
     if (!this.on) {
       this.on = true;
       this.root.classList.add('on');
@@ -248,6 +283,11 @@ class ReplayHud {
       `<span class="${team(kill.killer)}">${callsign(kill.killer)}</span><span class="x">eliminated</span><span class="${team(kill.victim)}">${callsign(kill.victim)}</span>`,
     );
     this.text('replay-speed', frame.speed < 0.95 ? `${frame.speed.toFixed(1)}×` : '');
+    this.html(
+      'replay-verdict',
+      `<span class="${team(kill.victim)}">${callsign(kill.victim)}</span> was destroyed by <span class="${team(kill.killer)}">${callsign(kill.killer)}</span>`,
+    );
+    this.root.classList.toggle('ended', ended);
     for (const v of VIEWS) document.getElementById(`replay-${v}`)!.classList.toggle('on', v === view);
     const bar = document.getElementById('replay-progress')!;
     bar.style.transform = `scaleX(${Math.max(0, Math.min(1, frame.progress)).toFixed(4)})`;
@@ -267,16 +307,20 @@ class ReplayHud {
   }
 }
 
-/** Team-coloured rings on the floor under the killer and the victim while a replay plays. */
+/**
+ * Team-coloured rings on the floor under the killer and the victim while a replay plays, and the shock ring that
+ * spreads from the victim's explosion.
+ */
 export class Markers {
   private readonly killer: Mesh;
   private readonly victim: Mesh;
+  private readonly shock: Mesh;
   private readonly tints = [hdr(palette.coral, 0.8), hdr(palette.violet, 0.8)] as const;
 
   constructor(fx: Object3D) {
-    const ring = (inner: number, outer: number) => {
+    const ring = (inner: number, outer: number, segments = 72) => {
       const mesh = new ThreeMesh(
-        new RingGeometry(inner, outer, 72),
+        new RingGeometry(inner, outer, segments),
         new MeshBasicMaterial({ transparent: true, blending: AdditiveBlending, depthWrite: false }),
       );
       mesh.rotation.x = -Math.PI / 2;
@@ -287,9 +331,11 @@ export class Markers {
     };
     this.killer = ring(1.2, 1.32);
     this.victim = ring(1.2, 1.26);
+    this.shock = ring(0.92, 1, 96);
   }
 
-  show(crafts: Placed[], kill: KillRef, nowMs: number): void {
+  /** Place the rings for the replay's crafts at tick time `r`. */
+  show(crafts: Placed[], kill: KillRef, r: number, nowMs: number): void {
     const place = (mesh: Mesh, slot: number, level: number) => {
       const c = crafts.find((craft) => craft.slot === slot);
       mesh.visible = !!c;
@@ -300,14 +346,20 @@ export class Markers {
       material.color.copy(this.tints[c.violet ? 1 : 0]);
       material.opacity = level;
     };
-    // The killer's ring breathes, so the eye finds it; the victim's is quieter and goes once it is destroyed.
-    place(this.killer, kill.killer, 0.75 + 0.25 * Math.sin(nowMs / 220));
+    // The killer's ring breathes, so the eye finds it; the victim's is quieter. Neither marks a destroyed craft.
+    const killer = crafts.find((c) => c.slot === kill.killer);
+    place(this.killer, kill.killer, killer?.alive ? 0.75 + 0.25 * Math.sin(nowMs / 220) : 0);
     const victim = crafts.find((c) => c.slot === kill.victim);
     place(this.victim, kill.victim, victim?.alive ? 0.45 : 0);
+    const since = (r - kill.tick) / 30 / SHOCK_S;
+    place(this.shock, kill.victim, since >= 0 && since < 1 ? 1 - since : 0);
+    this.shock.scale.setScalar(0.4 + 5 * Math.sqrt(Math.max(0, since)));
+    this.shock.visible &&= since >= 0 && since < 1;
   }
 
   hide(): void {
     this.killer.visible = false;
     this.victim.visible = false;
+    this.shock.visible = false;
   }
 }
