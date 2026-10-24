@@ -297,6 +297,13 @@ issue per piece of work.
 - [prototype/assets/CREDITS.md](prototype/assets/CREDITS.md): the sources and licences of the models and the HDRI.
 - [Arena](https://docs.getfelix.dev/built-on-felix/arena/) in the Felix docs: how the game uses Felix.
 
+## Felix version
+
+The Felix release this repo builds on is in [`.felix-version`](.felix-version).
+When Felix publishes a release, a bot opens a "chore: use Felix <version>" PR
+that moves every pin listed in [`.github/felix-bump.sh`](.github/felix-bump.sh)
+and the lockfiles, and merges it once CI passes. Prereleases are skipped.
+
 ## Contributing
 
 [CONTRIBUTING.md](CONTRIBUTING.md) describes how code, art and pull requests
