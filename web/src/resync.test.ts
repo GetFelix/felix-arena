@@ -74,3 +74,17 @@ it('stays poor when a resync fails, so the next request may try again', async ()
   resync.request();
   expect(resync.count).toBe(2);
 });
+
+it('asks again once the hold is over when a wide jump came during it', async () => {
+  const { clock, joins, resync } = setup();
+  resync.request();
+  joins[0]!();
+  await flush();
+  clock.ms = 100;
+  resync.request();
+  resync.behind(0);
+  expect(resync.count).toBe(1);
+  clock.ms = RESYNC_HOLD_MS;
+  resync.behind(0);
+  expect(resync.count).toBe(2);
+});

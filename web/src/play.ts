@@ -647,7 +647,18 @@ async function main(): Promise<void> {
     let generation = 0;
     const joinFrom = () => {
       const mine = ++generation;
-      const feed = new GapFeed(() => link, onFrame, { stats: debug.gaps, tooFar: () => resync.request() });
+      const feed = new GapFeed(
+        () => link,
+        (frame, catchUp) => {
+          if (mine === generation) onFrame(frame, catchUp);
+        },
+        {
+          stats: debug.gaps,
+          tooFar: () => {
+            if (mine === generation) resync.request();
+          },
+        },
+      );
       return joinFromKeyframe(link, (frame, catchUp) => {
         if (mine !== generation) return;
         // A test hook: lose every LOSE-th live tick, as a subscriber with a full queue would.
@@ -658,12 +669,18 @@ async function main(): Promise<void> {
     const resync = new Resync(
       async () => {
         joiningSince = performance.now();
-        behind.clear();
         debug.resyncs++;
-        await joinFrom();
+        try {
+          await joinFrom();
+        } catch (err) {
+          // The old subscription is replaced as far as the page goes, so a failed join leaves it with no ticks at all.
+          link.close();
+          void rejoin();
+          throw err;
+        }
       },
       (poor) => {
-        where.textContent = poor ? 'Connection poor' : place;
+        if (!rejoining) where.textContent = poor ? 'Connection poor' : place;
       },
     );
     resyncing = resync;

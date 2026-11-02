@@ -13,6 +13,7 @@ export class Resync {
   /** How many resyncs have run. */
   count = 0;
   private running = false;
+  private deferred = false;
   private lastMs = -Infinity;
 
   /**
@@ -25,10 +26,17 @@ export class Resync {
     private readonly now: () => number = () => performance.now(),
   ) {}
 
-  /** A jump in the offsets too wide to read back. Starts a resync unless one ran lately. */
+  /**
+   * A jump in the offsets too wide to read back. Starts a resync, or if one ran lately, asks for another once the
+   * hold is over: the jump is still unread.
+   */
   request(): void {
     const now = this.now();
-    if (this.running || now - this.lastMs < RESYNC_HOLD_MS) return;
+    if (this.running || now - this.lastMs < RESYNC_HOLD_MS) {
+      this.deferred = true;
+      return;
+    }
+    this.deferred = false;
     this.running = true;
     this.lastMs = now;
     this.count++;
@@ -42,7 +50,7 @@ export class Resync {
 
   /** Take how far behind the live ticks are, as {@link Behind.ticks} says, once for each live tick. */
   behind(ticks: number): void {
-    if (ticks > BEHIND_TICKS) this.request();
+    if (ticks > BEHIND_TICKS || (this.deferred && this.now() - this.lastMs >= RESYNC_HOLD_MS)) this.request();
     else if (this.poor && !this.running && ticks < BACK_TICKS) this.set(false);
   }
 
