@@ -161,7 +161,7 @@ cosign verify ghcr.io/getfelix/felix-arena-sim:0.1.7 \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
-The release workflow builds all five without publishing on every pull request
+The release workflow builds all four without publishing on every pull request
 that touches `docker/` or the files they copy, so a broken image shows up
 before a tag does.
 
