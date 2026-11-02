@@ -596,11 +596,11 @@ async function main(): Promise<void> {
   };
   const throttle = (bitsPerSecond: number | null) => {
     slow = bitsPerSecond;
-    if ('throttle' in gateway) (gateway as Gateway).throttle(slow);
+    if (gateway && 'throttle' in gateway) (gateway as Gateway).throttle(slow);
     showSlow();
   };
   debug.throttle = throttle;
-  if (THROTTLE !== null) {
+  if (THROTTLE !== null && !OFFLINE) {
     const button = document.getElementById('slow')!;
     button.hidden = false;
     button.addEventListener('click', () => {
@@ -644,6 +644,8 @@ async function main(): Promise<void> {
       throw err;
     }
     joined = true;
+    // A switch flipped while the join was in flight reached the session before it was the page's current one.
+    if (slow !== null) link.throttle(slow);
     return link;
   };
   /**

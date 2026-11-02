@@ -209,6 +209,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: dev/up.sh
+        env:
+          # One match for the whole lane: it measures a minute and a half of play.
+          SIM_WARMUP_SECONDS: '5'
+          SIM_MATCH_SECONDS: '600'
+          SIM_KILL_LIMIT: '999'
       - run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@v2

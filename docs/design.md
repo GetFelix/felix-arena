@@ -420,8 +420,9 @@ fills, which is what a slow player's connection does. The dev stack's scope
 file allows it (`allow_throttle`), and a public gateway should not.
 
 **The throttle lane.** Four bots play a match, two spectators read it at full
-speed and a third is throttled. A match of four players is about 5 KB a second
-on the wire, 40 kbit/s, so the lane's default of 16 kbit/s is below it and the
+speed and a third is throttled. With four players the ticks measured about 5 KB a second
+on the wire, 40 kbit/s (a full eight-player match with bolts is more, the 9 KB
+a second above), so the lane's default of 16 kbit/s is below it and the
 throttled session falls behind (a tab at 256 kbit/s has six times the room it
 needs and never does). The lane, `web/scripts/throttle.ts`, compares the
 other two's median trip time from the sim's commit to the page with a run

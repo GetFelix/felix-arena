@@ -3,7 +3,7 @@
 // behind, and the others' trip time from the sim's commit to the page must stay within 10% of what it was before.
 // Usage: npx vite-node scripts/throttle.ts -- [kilobits a second, default 16] [seconds a phase, default 30]
 import { readFileSync } from 'node:fs';
-import { Behind } from '../src/behind';
+import { Behind, BEHIND_TICKS } from '../src/behind';
 import { decodeTick, loadCore } from '../src/core';
 import { Gateway } from '../src/gateway';
 import { Legs } from '../src/legs';
@@ -17,8 +17,6 @@ const PHASE_MS = Number(seconds) * 1000;
 /** What the others' median may grow by: 10%, and a millisecond for the resolution of a median this small. */
 const GROWTH = 1.1;
 const SLACK_US = 1000;
-/** A client this many ticks late is behind in the sense docs/design.md gives. */
-const BEHIND_TICKS = 15;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 loadCore(readFileSync(new URL('../src/core/felix_arena_core_bg.wasm', import.meta.url)));
@@ -28,7 +26,7 @@ async function spectator(name: string) {
   const answer = await fetch(`${IDP}/token?sub=cleo&aud=felix-arena`);
   const token = ((await answer.json()) as { id_token: string }).id_token;
   const gateway = await Gateway.connect(GATEWAY, ARENA, token);
-  const state = { legs: new Legs(100_000), behind: new Behind(), maxBehind: 0, ticks: 0, missed: 0 };
+  const state = { legs: new Legs(100_000), behind: new Behind(), maxBehind: 0, ticks: 0, missed: 0, playing: false };
   let last: number | null = null;
   await gateway.subscribe('ticks', 'live', 'live', (frame) => {
     const tick = decodeTick(frame.payload);
@@ -39,6 +37,7 @@ async function spectator(name: string) {
       state.maxBehind = Math.max(state.maxBehind, state.behind.ticks);
       timing.free();
     }
+    state.playing = tick.phase === 'playing';
     tick.free();
     state.ticks++;
     if (frame.offset !== null) {
@@ -51,6 +50,7 @@ async function spectator(name: string) {
 
 type Spectator = Awaited<ReturnType<typeof spectator>>;
 const fresh = (s: Spectator) => Object.assign(s.state, { legs: new Legs(100_000), maxBehind: 0, ticks: 0, missed: 0 });
+const playing = async (s: Spectator) => s.state.ticks > 0 && s.state.playing;
 const median = (s: Spectator) => s.state.legs.summary('total').p50;
 const ms = (us: number) => (us / 1000).toFixed(2);
 
@@ -58,8 +58,12 @@ const stops = await Promise.all(['ana', 'ben', 'dan', 'eve'].map((user) => bot(u
 const others = [await spectator('first'), await spectator('second')];
 const slow = await spectator('slow');
 const everyone = [...others, slow];
-// Let the match get going, so every phase is measured under the same load.
-await sleep(10_000);
+// Every phase is measured under the same load: in a match being played, not a warmup or the results.
+for (let waited = 0; !(await playing(slow)); waited += 500) {
+  if (waited > 120_000) throw new Error('the match did not start');
+  await sleep(500);
+}
+await sleep(5000);
 
 everyone.forEach(fresh);
 await sleep(PHASE_MS);
@@ -71,7 +75,12 @@ slow.gateway.onError = (err) => console.log(`slow session: ${err.code}: ${err.me
 slow.gateway.throttle(Number(kbit) * 1000);
 await sleep(PHASE_MS);
 const during = others.map(median);
-const result = { ticks: slow.state.ticks, behind: slow.state.maxBehind, missed: slow.state.missed };
+const result = {
+  ticks: slow.state.ticks,
+  behind: slow.state.maxBehind,
+  missed: slow.state.missed,
+  now: slow.state.behind.ticks,
+};
 
 for (const stop of stops) stop();
 for (const s of everyone) s.gateway.close();
@@ -88,12 +97,16 @@ console.log(
 const failures: string[] = [];
 if (baseline.ticks < PHASE_MS / 40) failures.push(`the slow session took only ${baseline.ticks} ticks at full speed`);
 others.forEach((s, i) => {
-  if (during[i]! > before[i]! * GROWTH + SLACK_US) {
+  if (s.state.ticks < PHASE_MS / 40) failures.push(`${s.name} took only ${s.state.ticks} ticks`);
+  if (!(during[i]! <= before[i]! * GROWTH + SLACK_US)) {
     failures.push(`${s.name}'s median went from ${ms(before[i]!)} to ${ms(during[i]!)} ms`);
   }
 });
-if (result.behind < BEHIND_TICKS && result.missed === 0) {
-  failures.push(`the slow session never fell behind: ${result.behind.toFixed(1)} ticks, ${result.missed} lost`);
+// A slowed link carries fewer ticks than the sim commits, and what it has carried is late by more than the limit.
+if (result.now < BEHIND_TICKS || result.ticks > baseline.ticks * 0.8) {
+  failures.push(
+    `the slow session never fell behind: ${result.now.toFixed(1)} ticks late at the end, ${result.ticks} of ${baseline.ticks} ticks`,
+  );
 }
 if (failures.length > 0) throw new Error(failures.join('\n'));
 process.exit(0);
