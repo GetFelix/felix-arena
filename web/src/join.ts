@@ -47,7 +47,7 @@ export const RESUME_TICKS = KEYFRAME_EVERY;
  */
 export const HOLE_TICKS = 600;
 /** How long that read may take before the join goes on from the keyframe without it. */
-export const HOLE_TIMEOUT_MS = 1500;
+export const HOLE_TIMEOUT_MS = 1000;
 
 /**
  * Subscribe to the tick stream from the newest keyframe. `onTick` gets every tick in order with `catchUp` true for
@@ -104,8 +104,8 @@ async function readHole(gateway: Joinable, from: number, end: number): Promise<E
   try {
     const read = readTicks(reader, 'ticks', from, end, { sub: 0, receivedUs: 0 }, () => late).catch(() => null);
     const frames = await Promise.race([read, timeout]);
-    // A partial hole would fold as a hole of its own, so only a read that reached the keyframe is used.
-    return frames !== null && frames.at(-1)?.offset === end - 1 ? frames : [];
+    // A partial or patchy hole would fold as a hole of its own, so only a read of every offset up to the keyframe is used.
+    return frames !== null && frames.length === end - from && frames.at(-1)?.offset === end - 1 ? frames : [];
   } finally {
     clearTimeout(timer);
   }
