@@ -70,12 +70,18 @@ for (let i = 0; i < JOINS; i++) {
     await sleep(50);
     joined = await seen(cleo);
   }
-  // Let both pages fold a second of live ticks, then compare every tick both have.
-  await sleep(1000);
-  const [watcher, player] = await Promise.all([seen(cleo), seen(ana)]);
-  const common = Object.keys(watcher.states).filter((at) => at in player.states);
+  // Let both pages fold enough live ticks to compare, then compare every tick both have. A page that renders in
+  // software folds fewer than 30 a second, so wait for the count, not for a second to pass.
+  let [watcher, player] = await Promise.all([seen(cleo), seen(ana)]);
+  let common: string[] = [];
+  for (let waited = 0; ; waited += 100) {
+    common = Object.keys(watcher.states).filter((at) => at in player.states);
+    if (common.length >= MIN_COMPARED) break;
+    if (waited > 20_000) throw new Error(`join ${i + 1}: only ${common.length} ticks to compare`);
+    await sleep(100);
+    [watcher, player] = await Promise.all([seen(cleo), seen(ana)]);
+  }
   const differing = common.filter((at) => watcher.states[at] !== player.states[at]);
-  if (common.length < MIN_COMPARED) throw new Error(`join ${i + 1}: only ${common.length} ticks to compare`);
   if (differing.length > 0) {
     const at = differing[0]!;
     throw new Error(`join ${i + 1}: ${differing.length} of ${common.length} ticks differ, first ${at}:
