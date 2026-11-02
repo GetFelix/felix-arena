@@ -7,8 +7,8 @@ export interface SoundSettings {
   effects: number;
 }
 
-/** Quiet by default: the music sits under the game, and the effects are what tells you what happened. */
-export const DEFAULT_SOUND: SoundSettings = { muted: false, music: 0.4, effects: 0.7 };
+/** The music sits under the game, and the effects are what tells you what happened. */
+export const DEFAULT_SOUND: SoundSettings = { muted: false, music: 0.5, effects: 0.7 };
 
 /** Where the saved settings are kept. */
 const KEY = 'felix-arena.sound';

@@ -47,16 +47,19 @@ the same average level (-18 dB RMS) with a limiter above it, and a short fade ou
 
 ## Music
 
-Five tracks, played in a shuffled order. Each was downloaded from the page named, where the licence is CC0.
+Five fast tracks, played in a shuffled order. Each was downloaded from the page named, where the licence is CC0. The
+tempo is measured from the audio, so it is approximate.
 
-| File | Title and author | Page | Download |
-|---|---|---|---|
-| `music/void.ogg` | "Claimed by the Void" by vitalezzz | https://opengameart.org/content/claimed-by-the-void | `claimed_by_the_void_loop.mp3` |
-| `music/temple.ogg` | "Galactic Temple" by yd | https://opengameart.org/content/galactic-temple | `GalacticTemple.ogg` from `GalacticTemple.zip` |
-| `music/synthwave.ogg` | "Calm Ambient 1 (Synthwave 4k)" by cynicmusic (The Cynic Project, cynicmusic.com, pixelsphere.org) | https://opengameart.org/content/calm-ambient-1-synthwave-4k | `001_Synthwave_4k_0.mp3` |
-| `music/outer.ogg` | "Outer Space Loop" by wipics | https://opengameart.org/content/outer-space-loop | `outer_space_2.mp3` |
-| `music/echo.ogg` | "Space Echo" by Centurion_of_war | https://opengameart.org/content/space-echo | `space_echo.ogg` |
+| File | Title and author | Page | Download | Tempo |
+|---|---|---|---|---|
+| `music/final-hour.ogg` | "Final Hour" by isaiah658 | https://opengameart.org/content/final-hour | `Final-Hour-isaiah658.ogg` | drum and bass, about 170 |
+| `music/robotic.ogg` | "Friendly Talk On a Robotic Battlefield (Looped)" by illin | https://opengameart.org/content/friendly-talk-on-a-robotic-battlefield-looped | `Friendly Talk On a Robotic Battlefield_0.ogg`, renamed `robotic-battlefield.ogg` | aggressive electronic, about 158 |
+| `music/shooter.ogg` | "8 bit Epic Space Shooter Music" by HydroGene | https://opengameart.org/content/8-bit-epic-space-shooter-music | `8bit-spaceshooter.mp3` | chiptune action, about 140 |
+| `music/level-1.ogg` | "Level 1" from "5 Chiptunes (Action)" by Juhani Junkala (posted by SubspaceAudio) | https://opengameart.org/content/5-chiptunes-action | `Juhani Junkala [Retro Game Music Pack] Level 1.wav` in the pack's zip, renamed `junkala-level-1.wav` | chiptune action, about 180 |
+| `music/level-3.ogg` | "Level 3" from "5 Chiptunes (Action)" by Juhani Junkala (posted by SubspaceAudio) | https://opengameart.org/content/5-chiptunes-action | `Juhani Junkala [Retro Game Music Pack] Level 3.wav` in the pack's zip, renamed `junkala-level-3.wav` | chiptune action, about 140 |
 
-Changes to every track: converted to 48 kHz stereo Ogg Opus at 48 kbit/s, brought to -20 LUFS with a true peak under
--2 dBFS, and a 3 second fade in and out, so that one track starting as the last ends crosses into it. Nothing else was
+The Junkala pack's own `INFO.txt` says the tracks are released under CC0.
+
+Changes to every track: converted to 48 kHz stereo Ogg Opus at 56 kbit/s, brought to -20 LUFS with a true peak under
+-2 dBFS, and a 2 second fade in and out, so that one track starting as the last ends crosses into it. Nothing else was
 edited, and the music is not looped inside a file.

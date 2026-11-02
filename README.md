@@ -82,7 +82,8 @@ match can continue after its broker
 - **Quality tiers.** High, Medium and Low, chosen from the first seconds of
   frame times or picked in the HUD.
 - **Sound.** Effects for shots, hits, kills, the rail, boost and the round
-  clock, and five calm background tracks, all CC0 and bundled with the game.
+  clock, and five fast, driving background tracks (drum and bass, electronic and
+  chiptune action music), all CC0 and bundled with the game.
   Mute and volume are on the HUD. See [Sound](#sound).
 - **Every hop timed.** `ticks.html` shows the p50 and p99 of each leg from the
   simulation's commit to the page.
@@ -337,7 +338,7 @@ stops either stack.
 
 ## Sound
 
-The game plays sound effects for what happens in the arena and quiet music
+The game plays sound effects for what happens in the arena and fast music
 underneath. Nothing plays until you click or press a key on the page, because
 browsers do not allow a page to start sound before that.
 
@@ -355,19 +356,19 @@ What you hear:
   kill cam replay plays.
 - **The interface.** A click for the HUD buttons, a sound when you switch sound
   on, and a short sweep as a kill cam replay starts and ends.
-- **Music.** Five ambient and low-key electronic tracks in a shuffled order,
+- **Music.** Five high-energy tracks, roughly 140 to 180 beats a minute, in a shuffled order,
   each fading into the next, never the same one twice in a row.
 
 At the bottom left of the page, **Sound** switches everything on or off (the
 **M** key does too), and **Music** and **Effects** set the two volumes. The
-settings are saved in this browser. Music starts at a low level, so the effects
+settings are saved in this browser. Music starts at a moderate level, under the effects, so they
 carry the game.
 
 Page options: `?sound=off` plays nothing and `?sound=on` plays even in an
 automated browser, which is silent by default so a test run does not decode
 music on a busy machine. The benchmark (`&bench`) is always silent.
 
-The files are Ogg Opus, 4.4 MB in all, bundled with the page; the game fetches
+The files are Ogg Opus, 3.5 MB in all, bundled with the page; the game fetches
 nothing from other sites to play them. A browser that cannot play Ogg Opus (an
 older Safari) gets no sound and runs the game as before. On a slow connection
 the next music track may not arrive in time, which leaves a gap between tracks. Every file's author,

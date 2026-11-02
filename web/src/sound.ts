@@ -27,7 +27,7 @@ export interface SoundFiles {
 }
 
 /** Seconds before a track's end that the next one starts. The files fade out and in over this long, so they cross. */
-export const CROSSFADE_S = 3;
+export const CROSSFADE_S = 2;
 /** Seconds before a track's end that the next one starts loading, so a slow link has time to fetch it. */
 export const PREFETCH_S = 25;
 /** Effects playing at once, so a busy fight cannot pile up voices. */

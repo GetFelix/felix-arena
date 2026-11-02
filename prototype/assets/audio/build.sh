@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Rebuilds sfx/ and music/ from the original downloads, so every change made to a file is on record.
 # Usage: build.sh <kenney-sci-fi-sounds/Audio> <kenney-interface-sounds/Audio> <music sources dir>
-# The music directory holds the files named in CREDITS.md under their original names.
+# The music directory holds the files named in CREDITS.md; two were renamed on copying (see the notes there).
 # Needs ffmpeg with libopus.
 set -euo pipefail
 SCIFI=$1 IFACE=$2 MUSIC=$3
@@ -33,7 +33,7 @@ sfx() {
 }
 
 # music <name> <source> <fade in/out seconds>
-# Stereo, brought to -20 LUFS (integrated) with true peak under -2 dBFS, 3 s fades at both ends. Opus at 48 kbit/s.
+# Stereo, brought to -20 LUFS (integrated) with true peak under -2 dBFS, 2 s fades at both ends. Opus at 56 kbit/s.
 music() {
   local name=$1 src=$2 fade=$3
   local len
@@ -42,7 +42,7 @@ music() {
   fadeStart=$(awk -v l="$len" -v f="$fade" 'BEGIN { printf "%.3f", l - f }')
   ffmpeg -hide_banner -loglevel error -y -i "$src" -ac 2 -ar 48000 \
     -af "loudnorm=I=-20:TP=-2:LRA=11,afade=t=in:d=${fade},afade=t=out:st=${fadeStart}:d=${fade}" \
-    -c:a libopus -b:a 48k "$OUT/music/$name.ogg"
+    -c:a libopus -b:a 56k "$OUT/music/$name.ogg"
 }
 
 sfx fire-1 "$SCIFI/laserSmall_000.ogg" 0 0.03
@@ -68,8 +68,8 @@ sfx toggle "$IFACE/toggle_001.ogg" 0 0.03
 sfx replay-in "$IFACE/minimize_004.ogg" 0 0.1
 sfx replay-out "$IFACE/maximize_004.ogg" 0 0.1
 
-music void "$MUSIC/claimed_by_the_void_loop.mp3" 3
-music temple "$MUSIC/GalacticTemple.ogg" 3
-music synthwave "$MUSIC/001_Synthwave_4k_0.mp3" 3
-music outer "$MUSIC/outer_space_2.mp3" 3
-music echo "$MUSIC/space_echo.ogg" 3
+music final-hour "$MUSIC/Final-Hour-isaiah658.ogg" 2
+music robotic "$MUSIC/robotic-battlefield.ogg" 2
+music shooter "$MUSIC/8bit-spaceshooter.mp3" 2
+music level-3 "$MUSIC/junkala-level-3.wav" 2
+music level-1 "$MUSIC/junkala-level-1.wav" 2

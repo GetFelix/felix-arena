@@ -156,7 +156,10 @@ describe('the audio files', () => {
     for (const [sub, f] of [...files('sfx/').map((f) => ['sfx', f]), ...files('music/').map((f) => ['music', f])]) {
       const row = rows.find((r) => r.startsWith(`| \`${sub}/${f}\` |`));
       expect(row, `${sub}/${f}`).toBeDefined();
-      expect(row, `${sub}/${f}`).toMatch(/Sounds|Calm|Claimed|Galactic|Outer|Space|Synthwave|Interface|Sci-Fi/);
+      // An effect names its file in a Kenney pack; a track links the page it came from.
+      expect(row, `${sub}/${f}`).toMatch(
+        sub === 'sfx' ? /(Sci-Fi|Interface) Sounds `/ : /https:\/\/opengameart\.org\/content\//,
+      );
     }
     expect(credits).toContain('CC0 1.0');
   });

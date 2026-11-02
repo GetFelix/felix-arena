@@ -864,8 +864,8 @@ happens to you. A cue repeated inside its minimum gap is dropped, at most 24
 effects play at once, and cues with several files rotate between them with a
 slight change of pitch, so a long fight does not wear. The effects are decoded
 once into Web Audio buffers. The music is played from audio elements, so a
-three-minute track is not held decoded in memory, and each file fades in and
-out over 3 seconds: the next track starts that long before the end of the
+two-minute track is not held decoded in memory, and each file fades in and
+out over 2 seconds: the next track starts that long before the end of the
 current one, and the two cross. Audio starts on the first pointer or key event
 and not before (a gesture the browser does not count, such as a touch's pointerdown, is retried on the next one), holds while the page is hidden, and is silent in an automated
 browser unless `?sound=on` asks for it. Mute (also the M key) and the two volumes are saved in
@@ -876,7 +876,7 @@ the browser (`web/src/sound-settings.ts`).
 its props load first and draw while crafts and effects load. A cold load on a
 fast connection shows the arena in under 2 seconds. Everything is cached
 immutably by content hash. The sound effects (56 KB in all) load with the page;
-a music track (0.3 to 1.3 MB) is fetched only after the first click or key press,
+a music track (0.4 to 1.1 MB) is fetched only after the first click or key press,
 and the next one starts loading 25 seconds before the current one ends.
 
 **Mobile.** Phones and tablets get the lobby, spectating and replays at the Low
