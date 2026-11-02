@@ -871,7 +871,7 @@ cache entries that expire without telling a watch
 | Gateway restarts | Nothing | The browser reconnects and joins from the keyframe | "Reconnecting" for a second or two |
 | Sim crashes | Keeps the log | Ticks stop. Clients show "Server reconnecting" after 500 ms without a tick. The replacement sim reads the `keyframe` state key, reads ticks from it to the tail, rebuilds the match from them (craft, bolt and clock state from the newest tick; scores and the roster's tallies from the keyframe and the events since), and resumes at the next tick in an epoch one past the newest it read. If the newest epoch's ticks hold no keyframe yet (it was restarted twice within two seconds), the keyframe and tail of the epoch before are used. Players take their craft back with their first input; one that stays silent for 10 seconds leaves | The match pauses for the restart, about 3 seconds, and the clock pauses with it. A craft's health regeneration starts over, a dead craft waits out its respawn again and a spawn shield is full |
 | Two sims for one arena briefly | Accepts both writers | Every tick carries the sim's epoch. Clients and replays ignore ticks from an epoch lower than the highest seen | A stutter |
-| Owning broker lost | Promotes a replica holding every acknowledged tick | The sim's commit fails or times out. It pauses game time and retries through `ClusterClient`. Subscriptions follow the shard to its new owner or end, and clients resubscribe from their last offset plus one | A pause of about the failover window, then play continues |
+| Owning broker lost | Promotes a replica holding every acknowledged tick | The sim's commit fails or times out. It retries through `ClusterClient`, which finds the new owner. The gateway ends the subscriptions on the lost shard with `subscription_ended`, and a client joins again from the keyframe | A pause of about the failover window, then play continues |
 | A commit unanswered at failover | May or may not have landed | The sim writes the next tick; the unanswered one may have landed. A commit is not idempotent, so a tick may land twice; readers drop a repeated `(epoch, tick)` | Nothing |
 | Kill cam window trimmed | Refuses with `CursorTooOld` | Skips the replay | "Replay no longer available" |
 | Newest ticks dropped with nothing after them | No signal ([felix#965](https://github.com/GetFelix/felix/issues/965)) | Rarely matters: a tick follows every 33 ms, so a drop shows as a gap at once. During the results screen the sim keeps committing the final keyframe once a second, so the match's last record is never the one lost | Nothing |
@@ -899,7 +899,7 @@ and saying so is honest, and it is what demonstration 4 shows.
 | Frame time | 16.7 ms p95 at 1080p, High or Medium tier, laptop iGPU | Frame timing over a scripted 2-minute match |
 | Sim step | Under 2 ms for 8 players and 64 bolts | Sim timings |
 | Spectator fanout, 0 to 100 | Players' tick latency p50 and the sim's commit p50 within 10% plus 1 ms of the quiet phases | Spectators as Felix subscriptions, with four bot players measuring through the gateway |
-| Failover pause | Under the control plane's failover window plus 1 s | The failover end-to-end test |
+| Failover pause | Under 10 s on the dev cluster, whose control plane declares a broker lost after 3 s | CI's `broker failover` job: the sim's commit time of the last tick before the kill against the first after it |
 
 As in felix-canvas, the 100 spectators are made as Felix subscriptions from a
 small Rust example, because 100 browser tabs are not a measurable population.

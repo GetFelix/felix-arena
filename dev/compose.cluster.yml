@@ -1,0 +1,119 @@
+# Three brokers instead of one, laid over compose.yml. Every stream is
+# replicated to all three, so stopping any one broker leaves a majority that
+# holds every acknowledged tick. `dev/up.sh --cluster` starts it.
+#
+#   broker    health 127.0.0.1:8080
+#   broker-2  health 127.0.0.1:8081
+#   broker-3  health 127.0.0.1:8082
+#
+# The gateway and the sim reach the brokers by the addresses below, not the
+# published ports.
+
+networks:
+  default:
+    ipam:
+      config:
+        # Brokers dial each other by IP; Felix refuses a hostname there.
+        - subnet: 172.30.7.0/24
+
+services:
+  controlplane:
+    environment:
+      # Short liveness windows, so a stopped broker's shards move within a few
+      # seconds rather than the default of about twenty.
+      FELIX_NODE_HEARTBEAT_INTERVAL_MS: "500"
+      FELIX_NODE_EXPIRY_TIMEOUT_MS: "3000"
+      FELIX_NODE_EXPIRY_SWEEP_INTERVAL_MS: "250"
+      FELIX_SHARD_RECONCILE_INTERVAL_MS: "500"
+
+  # The brokers start once the seed has written their token, and the seed
+  # creates the arenas once all three are live, so every shard is placed on
+  # all three from the start.
+  seed:
+    environment:
+      ARENA_REPLICAS: "3"
+      ARENA_WAIT_FOR_BROKERS: "3"
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /state/node.token"]
+      interval: 1s
+      timeout: 2s
+      retries: 60
+
+  broker:
+    depends_on: !override
+      seed:
+        condition: service_healthy
+    environment: &cluster
+      FELIX_NODE_ID: broker-1
+      FELIX_NODE_ADVERTISE_ADDR: 172.30.7.11:5001
+      FELIX_CLIENT_ADVERTISE_ADDR: 172.30.7.11:5000
+      FELIX_TLS_CERT_EXPORT: /state/broker-1-cert.pem
+      # Only the brokers can reach the internal port on this network.
+      FELIX_INTERNAL_ALLOW_UNAUTHENTICATED: "true"
+      FELIX_CONTROLPLANE_SYNC_INTERVAL_MS: "500"
+      # Each log reserves its whole first segment up front. Three brokers of
+      # that fill a CI runner's disk.
+      FELIX_DURABLE_PREALLOCATE: "false"
+    networks:
+      default:
+        ipv4_address: 172.30.7.11
+
+  broker-2:
+    extends:
+      file: compose.yml
+      service: broker
+    depends_on: !override
+      seed:
+        condition: service_healthy
+    environment:
+      <<: *cluster
+      FELIX_NODE_ID: broker-2
+      FELIX_NODE_ADVERTISE_ADDR: 172.30.7.12:5001
+      FELIX_CLIENT_ADVERTISE_ADDR: 172.30.7.12:5000
+      FELIX_TLS_CERT_EXPORT: /state/broker-2-cert.pem
+    ports: !override
+      - "127.0.0.1:5010:5000/udp"
+      - "127.0.0.1:8081:8080"
+    volumes: !override
+      - ./state:/state
+      - felix-data-2:/var/lib/felix
+    networks:
+      default:
+        ipv4_address: 172.30.7.12
+
+  broker-3:
+    extends:
+      file: compose.yml
+      service: broker
+    depends_on: !override
+      seed:
+        condition: service_healthy
+    environment:
+      <<: *cluster
+      FELIX_NODE_ID: broker-3
+      FELIX_NODE_ADVERTISE_ADDR: 172.30.7.13:5001
+      FELIX_CLIENT_ADVERTISE_ADDR: 172.30.7.13:5000
+      FELIX_TLS_CERT_EXPORT: /state/broker-3-cert.pem
+    ports: !override
+      - "127.0.0.1:5020:5000/udp"
+      - "127.0.0.1:8082:8080"
+    volumes: !override
+      - ./state:/state
+      - felix-data-3:/var/lib/felix
+    networks:
+      default:
+        ipv4_address: 172.30.7.13
+
+  # The certificate they trust is the three brokers' together, which up.sh
+  # writes once all three are up; the gateway starts again then.
+  gateway:
+    environment:
+      GATEWAY_FELIX_BROKERS: 172.30.7.11:5000,172.30.7.12:5000,172.30.7.13:5000
+
+  sim:
+    environment:
+      SIM_FELIX_BROKERS: 172.30.7.11:5000,172.30.7.12:5000,172.30.7.13:5000
+
+volumes:
+  felix-data-2:
+  felix-data-3:
