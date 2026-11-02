@@ -167,6 +167,15 @@ describe('interpolation', () => {
     expect(run.maxJump).toBeLessThan(4);
   });
 
+  it('sets nothing aside on a steady link, even with ticks missing on time', () => {
+    const lose = oneInTwenty(truth.length);
+    const arrivals = deliver(truth, steady);
+    const plain = measure(arrivals, lose, truth);
+    const run = measure(arrivals, lose, truth, { setAsideHoldUps: true });
+    expect(run.heldUp).toBe(0);
+    expect(run).toEqual(plain);
+  });
+
   it('sets aside the sim stalling for good: its ticks run late from then on', () => {
     // The sim stalls for 110 ms and does not make the ticks up, so every tick after it comes 110 ms after its turn.
     const steadily = deliver(truth, steady);

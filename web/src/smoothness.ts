@@ -43,7 +43,7 @@ export interface Smoothness {
 const FRAME_MS = 1000 / 60;
 /** The frames of the interpolator's 100 ms blend after a guess, and one more. */
 const RECOVER_FRAMES = Math.round(100 / FRAME_MS) + 1;
-/** An arrival this much later than its tick's turn after the one before it, or a tick missing, is a hold-up. */
+/** An arrival this much later than its tick's turn after the one before it is a hold-up. */
 const HOLD_UP_MS = 2 * TICK_MS;
 /** Frames set aside before a hold-up: the interpolator can start to starve a little before the arrival that ends it. */
 const HOLD_LEAD_FRAMES = Math.ceil((3 * TICK_MS) / FRAME_MS);
@@ -56,9 +56,10 @@ const HOLD_SETTLE_FRAMES = Math.ceil(((STALL_RUN + 4) * TICK_MS) / FRAME_MS);
 /** What {@link measure} can be asked to do. */
 export interface MeasureOptions {
   /**
-   * Leave out the frames around each hold-up in `arrivals` themselves, whatever was lost on top: a gap in the ticks,
-   * or a tick that came later than its turn by more than the interpolator can wait out. A shared runner makes them,
-   * and no interpolator can draw through one. Defaults to counting them against the interpolator.
+   * Leave out the frames around each hold-up in `arrivals` themselves, whatever was lost on top: a tick that came
+   * later than its turn by more than the interpolator can wait out. A shared runner makes them, and no interpolator
+   * can draw through one. A tick that is missing but whose neighbours came on time is not one: bridging it is the
+   * interpolator's job. Defaults to counting hold-ups against the interpolator.
    */
   setAsideHoldUps?: boolean;
 }
@@ -79,7 +80,7 @@ export function measure(
 
 /**
  * The frames, counted at 60 a second from `first`, near a hold-up in `arrivals`: one that came more than
- * {@link HOLD_UP_MS} later than the arrival before it was due, or after a tick that was never sent.
+ * {@link HOLD_UP_MS} later than the arrival before it was due.
  */
 function holdUpFrames(arrivals: Arrival[], first: number): Set<number> {
   const frameOf = (ms: number) => Math.floor((ms - first) / FRAME_MS);
@@ -88,7 +89,7 @@ function holdUpFrames(arrivals: Arrival[], first: number): Set<number> {
     const [before, now] = [arrivals[i - 1]!, arrivals[i]!];
     const ticks = now.snapshot.tick - before.snapshot.tick;
     const late = now.arrivedMs - before.arrivedMs - ticks * TICK_MS;
-    if (ticks <= 1 && late <= HOLD_UP_MS) continue;
+    if (late <= HOLD_UP_MS) continue;
     for (let f = frameOf(before.arrivedMs) - HOLD_LEAD_FRAMES; f <= frameOf(now.arrivedMs) + HOLD_SETTLE_FRAMES; f++) {
       out.add(f);
     }
