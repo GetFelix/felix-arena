@@ -947,11 +947,11 @@ the script says the readers share cpu with the stack.
 players' median trip grows with the number of subscribers. On that runner 10
 spectators took it from 1.7 to 1.85 ms, and 100 took it from 1.7 to 3.2 ms; the
 sim's commit went from 1.0 to 1.2 ms. That is the broker's work for each
-subscriber (about 14 microseconds each) on a stack that has two cpus, not the
+subscriber (roughly 15 microseconds each) on a stack that has two cpus, not the
 readers', so the 10% in demonstration 5 does not hold on this hardware. The
 bound is twice the quiet median plus half a millisecond: it passes what is
 measured and fails if the per-subscriber cost doubles. The tick budget is
-33 ms, so 3.2 ms is well inside it, and the cost is linear in spectators.
+33 ms, so 3.2 ms is well inside it, and 10 and 100 spectators fit a cost that grows with their number.
 
 The sim's commit time is checked the same way. Every tick carries how long the
 previous tick took to commit, from the sim sending it to Felix to Felix
