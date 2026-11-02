@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { decodeTick, loadCore, World } from './core';
 import type { EventFrame, StateValue, Subscribed } from './gateway';
-import { isCatchUp, joinFromKeyframe } from './join';
+import { isCatchUp, joinFromKeyframe, RESUME_TICKS } from './join';
 import { Match } from './match';
 import { drive } from './offline';
 
@@ -86,6 +86,72 @@ describe('joining from a keyframe', () => {
     expect(seen).toEqual([[40, true]]);
     expect([44, 45, 46].map((offset) => isCatchUp(offset, 46))).toEqual([true, false, false]);
     expect(isCatchUp(10, null)).toBe(false);
+  });
+
+  it('reads on from where a page got to when that is close to the keyframe, and from the keyframe otherwise', async () => {
+    const from = async (keyframe: number | null, resumeAfter: number | null) => {
+      let start: number | 'live' | undefined;
+      await joinFromKeyframe(
+        {
+          stateGet: async () => ({ payload: null, version: keyframe, asOf: keyframe }),
+          subscribe: async (_s, _slot, at) => {
+            start = at;
+            return { sub: 1, startOffset: 0, liveOffset: 0 };
+          },
+        },
+        () => {},
+        resumeAfter,
+      );
+      return start;
+    };
+    expect(await from(600, 590)).toBe(591);
+    expect(await from(600, 600 - RESUME_TICKS)).toBe(600 - RESUME_TICKS + 1);
+    expect(await from(600, 600 - RESUME_TICKS - 1)).toBe(600);
+    expect(await from(600, 610)).toBe(600);
+    expect(await from(600, null)).toBe(600);
+    expect(await from(null, 590)).toBe('live');
+  });
+
+  it('keeps the kills between where a page got to and the keyframe it would otherwise jump to', () => {
+    const log = records(1500);
+    const all = new Match();
+    const killOffsets = (m: Match) => m.replays().flatMap(([, kills]) => kills.map((k) => k.replay?.offset));
+    log.forEach((record, i) => {
+      const tick = decodeTick(record);
+      all.update(tick, 0, false, i, () => 0);
+      tick.free();
+    });
+    const tickKeyframe = (i: number) => {
+      const tick = decodeTick(log[i]!);
+      const keyframe = tick.keyframe;
+      tick.free();
+      return keyframe;
+    };
+    const kills = killOffsets(all);
+    expect(kills.length).toBeGreaterThan(3);
+    // A page that folded up to `stopped`, then joined again: from the keyframe after it, or reading on.
+    const fold = (stopped: number, restart: number) => {
+      const m = new Match();
+      for (let i = 0; i <= stopped; i++) {
+        const tick = decodeTick(log[i]!);
+        m.update(tick, 0, false, i, () => 0);
+        tick.free();
+      }
+      for (let i = restart; i < log.length; i++) {
+        const tick = decodeTick(log[i]!);
+        m.update(tick, 0, false, i, () => 0);
+        tick.free();
+      }
+      return killOffsets(m);
+    };
+    // The tick before the first kill that has a keyframe after it within the resume window.
+    const kill = kills.find((offset) => {
+      const key = log.findIndex((_, i) => i > offset! && tickKeyframe(i));
+      return offset! > 100 && key > offset! && key - offset! < RESUME_TICKS;
+    })!;
+    const next = log.findIndex((_, i) => i > kill! && tickKeyframe(i));
+    expect(fold(kill! - 1, next)).not.toContain(kill);
+    expect(fold(kill! - 1, kill!)).toEqual(kills);
   });
 
   it('starts live when the arena has no keyframe yet', async () => {

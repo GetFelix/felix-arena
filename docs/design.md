@@ -741,8 +741,15 @@ jump wider than 15 ticks, cannot catch up by reading back what it missed. It
 joins again from the newest keyframe, the same way it joins a match in
 progress, on the same gateway session: subscribing to the `live` slot again
 replaces the old subscription, and ticks still arriving on the old one are
-dropped. The label at the top of the page says "Connection poor" until the live ticks are within 3
-ticks of the sim. A link that stays too slow resyncs at most once every 5
+dropped. A keyframe holds the tally but not the kills between it and where the
+page had got to. So when the page is at most 60 ticks short of the keyframe, it
+reads on from the tick after the last one it folded, and no kill is missed.
+Further behind than that it takes the keyframe, and its tally is right but the
+kills in between are not on its replay list. A page often resyncs once soon
+after it joins, because the first frames it draws take half a second, so the
+short case is the common one. The label at the top of the page says "Connection
+poor" until the live ticks are within 3 ticks of the sim. A link that stays too
+slow resyncs at most once every 5
 seconds, so it jumps forward repeatedly instead of rejoining without pause; a
 wide jump seen during that wait is acted on when it ends. If the join itself
 fails, the page opens a new session.

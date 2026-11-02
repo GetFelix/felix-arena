@@ -25,21 +25,37 @@ export interface JoinTimes {
 }
 
 /**
+ * The most ticks a join that already holds the match up to some offset reads from there rather than from the
+ * newest keyframe. A keyframe carries the tally but not the kills between it and where the page was, so a short
+ * jump back is worth the extra ticks. Kept under the broker's queue of 64 so the burst is not dropped.
+ */
+export const RESUME_TICKS = 60;
+
+/**
  * Subscribe to the tick stream from the newest keyframe. `onTick` gets every tick in order with `catchUp` true for
  * those already in the log when the subscription began, except the newest of them, which is the first to draw.
+ * A page that has folded every tick up to `resumeAfter` starts at the tick after it instead when that is no more
+ * than {@link RESUME_TICKS} before the keyframe, so the ticks the keyframe would skip still count.
  */
 export async function joinFromKeyframe(
   gateway: Joinable,
   onTick: (frame: EventFrame, catchUp: boolean) => void,
+  resumeAfter: number | null = null,
   now: () => number = () => performance.now(),
 ): Promise<JoinTimes> {
   const startMs = now();
   const keyframe = (await gateway.stateGet('ticks', 'keyframe')).version;
   const keyframeMs = now();
+  const start: number | 'live' =
+    keyframe === null
+      ? 'live'
+      : resumeAfter !== null && resumeAfter < keyframe && keyframe - resumeAfter <= RESUME_TICKS
+        ? resumeAfter + 1
+        : keyframe;
   // Frames can arrive before `subscribed` is handled; they wait for the tail it names.
   let tail: number | null | undefined;
   const early: EventFrame[] = [];
-  const subscribed = await gateway.subscribe('ticks', 'live', keyframe ?? 'live', (frame) => {
+  const subscribed = await gateway.subscribe('ticks', 'live', start, (frame) => {
     if (tail === undefined) early.push(frame);
     else onTick(frame, isCatchUp(frame.offset, tail));
   });

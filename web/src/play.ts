@@ -570,6 +570,8 @@ async function main(): Promise<void> {
   /** The resync of the session now open, which {@link onFrame} tells how far behind the live ticks are. */
   let resyncing: Resync | null = null;
   Object.defineProperty(debug, 'behindTicks', { get: () => behind.ticks });
+  /** The newest log offset handed to {@link onFrame}, which a resync reads on from. */
+  let folded: number | null = null;
   const onFrame = (frame: EventFrame, catchingUp = false) => {
     firstEventMs ??= performance.now();
     let tick: Tick;
@@ -587,6 +589,7 @@ async function main(): Promise<void> {
       }
       timing?.free();
     }
+    if (frame.offset !== null) folded = Math.max(folded ?? -1, frame.offset);
     if (catchingUp) foldTick(tick, frame.offset);
     else onTick(tick, performance.now(), frame.offset, frame.payload, !frame.filled);
     tick.free();
@@ -649,7 +652,7 @@ async function main(): Promise<void> {
     });
     // Each join replaces the live subscription, and ticks still arriving on the one it replaced are dropped.
     let generation = 0;
-    const joinFrom = () => {
+    const joinFrom = (resumeAfter: number | null = null) => {
       const mine = ++generation;
       const feed = new GapFeed(
         () => link,
@@ -663,19 +666,24 @@ async function main(): Promise<void> {
           },
         },
       );
-      return joinFromKeyframe(link, (frame, catchUp) => {
-        if (mine !== generation) return;
-        // A test hook: lose every LOSE-th live tick, as a subscriber with a full queue would.
-        if (LOSE && !catchUp && frame.offset !== null && ++received % LOSE === 0) return;
-        feed.push(frame, catchUp);
-      });
+      return joinFromKeyframe(
+        link,
+        (frame, catchUp) => {
+          if (mine !== generation) return;
+          // A test hook: lose every LOSE-th live tick, as a subscriber with a full queue would.
+          if (LOSE && !catchUp && frame.offset !== null && ++received % LOSE === 0) return;
+          feed.push(frame, catchUp);
+        },
+        resumeAfter,
+      );
     };
     const resync = new Resync(
       async () => {
         joiningSince = performance.now();
         debug.resyncs++;
         try {
-          await joinFrom();
+          // From where this page got to, when that is close: a keyframe alone would skip the kills in between.
+          await joinFrom(folded);
         } catch (err) {
           // The old subscription is replaced as far as the page goes, so a failed join leaves it with no ticks at all.
           link.close();
