@@ -24,7 +24,7 @@ import {
 } from './core';
 import { Effects } from './effects';
 import { type CraftView, Fleet, GUN_HEIGHT } from './fleet';
-import { type EventFrame, Gateway, GatewayError } from './gateway';
+import { type EventFrame, Gateway, refusedForGood } from './gateway';
 import { botCount, botLevel, botTag } from './bots';
 import { type Link, Offline, OFFLINE_PRINCIPAL } from './offline';
 import { Hud, killKey } from './hud';
@@ -753,7 +753,7 @@ async function main(): Promise<void> {
   } else {
     const token = await signIn();
     key = playerKey(await principal(token));
-    gateway = await persist(token, (err) => err instanceof GatewayError && err.code !== 'closed');
+    gateway = await persist(token, refusedForGood);
   }
 
   // Inputs go once a sim tick, on the sim's clock as the ticks show it; a short timer keeps the send close to it.

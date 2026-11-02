@@ -117,7 +117,7 @@ The project succeeds if five demonstrations work in front of a skeptic.
 | 2 | Join mid-match | A spectator opening a match in progress draws a correct frame in under 500 ms p50, and its state hash at a given tick matches a player's |
 | 3 | Slow client isolation | One player throttled below the rate of a match's ticks falls behind alone and says so; the others' tick latency stays within 10% of the run without them, and the throttled one recovers from a keyframe |
 | 4 | Survive broker loss | Kill the broker owning the arena's tick stream mid-match. Play resumes on the new owner with no acknowledged tick lost, and a kill cam whose window spans the failover still plays |
-| 5 | Spectator fanout | 100 spectators on one match. Players' tick latency p50 and the simulation's commit p50 stay within twice the run with none plus 0.5 ms, with the readers on cpus of their own (measured on a 4-cpu runner: 1.4 to 2.2 ms and 1.7 to 3.2 ms for the trip, 0.9 to 1.4 ms and 1.0 to 1.2 ms for the commit) |
+| 5 | Spectator fanout | 100 spectators on one match. Players' tick latency p50 and the simulation's commit p50 stay within twice the run with none plus 0.5 ms, with the readers on cpus of their own (measured on a 4-cpu runner: 1.4 to 2.2 ms and 1.7 to 3.2 ms for the trip, 0.9 to 1.4 ms and 1.0 to 1.2 ms for the commit; one run took the commit from 0.91 to 2.31 ms, over the bound, which is felix#1771). The CI job is informational until a Felix release that fixes it is pinned |
 
 Two criteria are deliberately absent. Player count is not a goal: an arena
 holds 8, and a hundred-player battle royale would be a different design. Nor is
@@ -913,7 +913,7 @@ and saying so is honest, and it is what demonstration 4 shows.
 | Spectator join | Under 500 ms p50 to a correct frame | Cold client, mid-match |
 | Frame time | 16.7 ms p95 at 1080p, High or Medium tier, laptop iGPU | Frame timing over a scripted 2-minute match |
 | Sim step | Under 2 ms for 8 players and 64 bolts | Sim timings |
-| Spectator fanout, 0 to 100 | Players' tick latency p50 and the sim's commit p50 within twice the quiet phases plus 0.5 ms | Spectators as Felix subscriptions on a physical core of their own, with four bot players measuring through the gateway |
+| Spectator fanout, 0 to 100 | Players' tick latency p50 and the sim's commit p50 within twice the quiet phases plus 0.5 ms | Spectators as Felix subscriptions on a physical core of their own, with four bot players measuring through the gateway. Informational in CI until a Felix release that fixes felix#1771 is pinned |
 | Failover pause | Under 10 s on the dev cluster, whose control plane declares a broker lost after 3 s | CI's `broker failover` job: the sim's commit time of the last tick before the kill against the first after it |
 
 As in felix-canvas, the 100 spectators are made as Felix subscriptions from a

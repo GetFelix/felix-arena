@@ -193,6 +193,11 @@ sets `&idp=` and `&gateway=`.
 **`seed` exits with an error.** Run `docker compose logs seed controlplane` to
 see why. `docker compose up --detach` runs it again.
 
+**Postgres logs `duplicate key value violates unique constraint`.** Every start
+runs `seed` again, and it asks the control plane to create the namespace and
+the streams that are already there. The control plane answers that it exists
+and carries on, so the lines are noise and nothing needs fixing.
+
 **The sim keeps restarting.** Run `docker compose logs sim`. A refused token
 (see [Renew the tokens](#renew-the-tokens)) or a broker that is not up is the usual cause.
 

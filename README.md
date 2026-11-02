@@ -255,7 +255,9 @@ and checks that four players' trip time and the sim's commit time stay within tw
 before and after (plus 0.5 ms). The job puts the spectators on a physical core of their own and the
 rest of the stack on the other core, so the readers' own CPU use is not counted against Felix. What
 remains is the broker's work per subscriber: on the 4-cpu runner 100 spectators take a player's
-median trip from about 1.5 to 2.2 ms, and from 1.7 to 3.2 ms in a slower run. To run it yourself, start the dev stack with a match long enough for
+median trip from about 1.5 to 2.2 ms, and from 1.7 to 3.2 ms in a slower run. That per-subscriber cost is
+Felix's ([felix#1771](https://github.com/GetFelix/felix/issues/1771)), so until a release that fixes it is pinned
+the job is informational: it prints the numbers and a miss does not fail CI. To run it yourself, start the dev stack with a match long enough for
 the run, build the example and point the script at it:
 
 ```sh
