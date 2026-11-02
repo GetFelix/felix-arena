@@ -1,5 +1,5 @@
 // Replays from the kill feed through the dev stack (docs/design.md, "Replays from the feed"), on a broker that keeps
-// about a minute of each log (dev/retention.yml). Three bots play short matches while cleo watches. Once a match has
+// about two minutes of each log (dev/retention.yml). Three bots play short matches while cleo watches. Once a match has
 // ended, cleo replays its last kill from the replays panel; a fresh page of cleo's finds that match's kills through
 // the `match/<n>` state keys and replays one too; and once retention has trimmed the match's first kill, replaying it
 // must say "Replay no longer available". Screenshots go to `out`.
