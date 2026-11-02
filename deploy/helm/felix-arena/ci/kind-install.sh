@@ -28,10 +28,27 @@ kubectl port-forward svc/felix-controlplane 18443:8443 >/dev/null &
 forward=$!
 trap 'kill "$forward" 2>/dev/null; rm -rf "$tmp"' EXIT
 token=$(kubectl get secret felix-arena-broker-credential -o jsonpath='{.data.token}' | base64 -d)
-for _ in $(seq 1 30); do curl -sf -H "Authorization: Bearer $token" http://127.0.0.1:18443/v1/fleet/features >/dev/null && break; sleep 1; done
+api=http://127.0.0.1:18443/v1/fleet/features
+# A finalize is refused until a broker is serving, so wait for it to register.
+features='{}'
+for _ in $(seq 1 90); do
+  features=$(curl -sf -H "Authorization: Bearer $token" "$api" || echo '{}')
+  [ "$(jq -r '.serving_nodes // 0' <<<"$features")" -gt 0 ] && break
+  sleep 2
+done
+echo "fleet features: $features"
+# In the order Felix requires. A feature the broker's release does not report is skipped.
 for feature in generation_start majority_ack lease_free_reads fenced_caches jump_hash_routing atomic_commit \
-  stream_incarnations group_cursor_dependencies cache_incarnations head_trim; do
-  curl -fsS -X POST -H "Authorization: Bearer $token" "http://127.0.0.1:18443/v1/fleet/features/$feature/finalize" >/dev/null
+  stream_incarnations group_cursor_dependencies cache_incarnations; do
+  if ! jq -e --arg f "$feature" '.supported | index($f)' <<<"$features" >/dev/null; then
+    echo "skipping $feature: the broker does not report it"
+    continue
+  fi
+  code=$(curl -sS -o "$tmp/finalize.out" -w '%{http_code}' -X POST -H "Authorization: Bearer $token" "$api/$feature/finalize")
+  if [ "$code" != 200 ]; then
+    echo "finalize $feature answered $code: $(cat "$tmp/finalize.out")" >&2
+    exit 1
+  fi
 done
 kubectl rollout status deployment/felix-arena-gateway --timeout 5m
 kubectl rollout status deployment/felix-arena-sim --timeout 5m
