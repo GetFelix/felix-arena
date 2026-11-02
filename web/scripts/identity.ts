@@ -63,16 +63,25 @@ const seen = (page: Page): Promise<Seen> =>
 async function replayRow(page: Page, key: string): Promise<void> {
   const row = page.locator(`#replays-list [data-kill="${key}"]`);
   const deadline = Date.now() + 60_000;
+  let last: unknown;
   while (Date.now() < deadline) {
-    if (await page.locator('#replays').isHidden()) await page.keyboard.press('KeyR');
+    if (await page.locator('#replays').isHidden()) {
+      await page.keyboard.press('KeyR');
+      // The panel shows in the page's next frame, which takes a while in software; pressing again would close it.
+      await page
+        .locator('#replays')
+        .waitFor({ state: 'visible', timeout: 10_000 })
+        .catch(() => {});
+    }
     try {
       await row.click({ timeout: 2_000 });
       return;
-    } catch {
+    } catch (err) {
+      last = err;
       await sleep(250);
     }
   }
-  throw new Error(`the replays panel never let a click through to ${key}`);
+  throw new Error(`the replays panel never let a click through to ${key}: ${String(last)}`);
 }
 
 /** Holds the keys that move toward the nearest enemy on screen. */
