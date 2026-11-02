@@ -199,6 +199,13 @@ arena; `&botcount=1..3` (3 by default) sets how many. They steer through the
 same input path as a player.
 `&length=`, `&warmup=` and `&results=` shorten the match, in seconds.
 
+The play page has a slow-link switch for trying a bad connection: add `&throttle`
+to its URL (`&throttle=64` starts slowed to 64 kbit/s, and the default is 16).
+The development stack's gateway allows it; a public one should not.
+`window.arena.behindTicks` says how far behind the sim the page is, and CI's
+`throttle` job checks that a slowed spectator falls behind while two others'
+trip time stays within 10% of what it was.
+
 `npm run smoke` checks the same path from Node: ticks arrive at 30 Hz, the
 WebAssembly build decodes keyframes to the state hashes the sim logged, a
 range read returns the same records while the live subscription keeps going,

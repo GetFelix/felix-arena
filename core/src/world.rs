@@ -29,6 +29,14 @@ pub const BOOST_COOLDOWN: u8 = 90;
 pub const BOLT_SPEED: i32 = 3000;
 /// Ticks between shots: six a second.
 pub const FIRE_COOLDOWN: u8 = 5;
+/// Heat that locks the blaster. Firing flat out is 15 shots, about 2.3 seconds.
+pub const HEAT_MAX: u8 = 120;
+/// Heat a bolt adds.
+pub const HEAT_PER_SHOT: u8 = 8;
+/// Heat shed each tick the blaster is ready and idle, so a full one is cool again in 40 ticks.
+pub const HEAT_COOL: u8 = 3;
+/// An overheated blaster fires again once its heat has fallen to this.
+pub const HEAT_RESUME: u8 = 40;
 pub const BOLT_DAMAGE: u8 = 12;
 pub const MAX_HEALTH: u8 = 100;
 /// Ticks without damage before health regenerates.
@@ -745,18 +753,32 @@ pub fn steer(craft: &mut Craft, control: Option<Input>) -> Option<Shot> {
                 (vx, vz) = (fixed::scale(dx, BOOST_SPEED), fixed::scale(dz, BOOST_SPEED));
                 craft.boost_cooldown = BOOST_COOLDOWN;
             }
-            if input.buttons & FIRE != 0 && craft.fire_cooldown == 0 && craft.charge == 0 {
+            if input.buttons & FIRE != 0
+                && craft.fire_cooldown == 0
+                && craft.charge == 0
+                && (craft.rail > 0 || !craft.overheated)
+            {
                 // Firing gives up spawn protection.
                 craft.protected = false;
                 if craft.rail > 0 {
                     craft.charge = RAIL_CHARGE;
                 } else {
                     craft.fire_cooldown = FIRE_COOLDOWN;
+                    craft.heat = (craft.heat + HEAT_PER_SHOT).min(HEAT_MAX);
+                    craft.overheated = craft.heat == HEAT_MAX;
                     shot = Some(muzzle(craft, input.aim, input.seq, false));
                 }
             }
         }
         None => (vx, vz) = toward(vx, vz, 0, 0, COAST_DRAG),
+    }
+    // The blaster sheds heat on every tick it is ready and not fired, so a craft that fires as fast as it can never
+    // cools, however it taps the trigger, and a locked one cools even with the trigger held.
+    if craft.fire_cooldown == 0 {
+        craft.heat = craft.heat.saturating_sub(HEAT_COOL);
+        if craft.overheated && craft.heat <= HEAT_RESUME {
+            craft.overheated = false;
+        }
     }
 
     let (mut x, mut z) = (

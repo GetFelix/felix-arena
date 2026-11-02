@@ -30,6 +30,7 @@ export async function bot(user: string, arena: string): Promise<() => void> {
       x: c.x,
       z: c.z,
       rail: c.rail,
+      heat: c.heat,
       lastInput: c.lastInput,
       protected: c.protected,
     }));

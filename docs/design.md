@@ -75,6 +75,21 @@ during which the craft keeps moving and aiming; then a beam goes from its nose
 along its aim to the first enemy craft whose edge is within 0.6 m of it, or the
 first wall or cover. Dying loses the rail.
 
+**Blaster heat.** Each bolt adds 8 heat, up to a cap of 120. The blaster sheds
+3 heat on every tick when it could fire and does not, so firing as fast as it
+can never cools it, however the trigger is tapped. Fifteen shots in a row,
+about 2.3 seconds, reach the cap and lock the blaster. A locked blaster cools
+even with the trigger held, and fires again once its heat has fallen to 40,
+about a second later. A player who never lets go gets a first burst of 15
+shots, then a cycle of 11 shots and a one-second lock, over and over. Pausing
+between shots cools it: one shot every 8 ticks, about 3.75 a second, or slower
+never locks it. The rail adds no heat, and the blaster cools
+while the rail charges. The tick carries each craft's heat and whether it is
+locked, so the kill cam replays the same overheats. The HUD shows your heat
+beside the boost, turning amber near the cap and orange when locked, and a
+locked craft glows orange above its hull. Bots ease off before the cap, each
+burst at a different heat.
+
 **Controls.** WASD or the left stick moves; the craft strafes, so it always
 faces where you aim. The keys move the craft up, left, down and right on the
 screen, worked out at the craft's own place in the view, and the game camera
@@ -89,7 +104,7 @@ the victim, killer and orbit views, and Space skips to the respawn.
 
 | Weapon | Behaviour | Why it is here |
 |---|---|---|
-| Blaster | Default. A bolt at 30 m/s, 12 damage, 6 shots a second | A projectile with travel time is visible in replays and forgiving of latency |
+| Blaster | Default. A bolt at 30 m/s, 12 damage, 6 shots a second, locked for about a second by 2.3 seconds of fire | A projectile with travel time is visible in replays and forgiving of latency |
 | Rail | Picked up from the centre crystal, which spawns one every 30 seconds. Charges for 0.5 s, then a hitscan beam for 70 damage; 3 shots | One high-stakes moment per half minute, which is what makes a kill cam worth watching |
 
 ## Success criteria
@@ -100,7 +115,7 @@ The project succeeds if five demonstrations work in front of a skeptic.
 |---|---|---|
 | 1 | Kill cam | After a kill, the victim's screen is playing the replay within 800 ms of the kill's tick being committed, every time. The replay's records are fetched in under 250 ms p95. Two browsers replaying the same kill hash identical tick bytes |
 | 2 | Join mid-match | A spectator opening a match in progress draws a correct frame in under 500 ms p50, and its state hash at a given tick matches a player's |
-| 3 | Slow client isolation | One player throttled to 256 kbit/s falls behind alone and says so; the others' tick latency stays within 10% of the run without them, and the throttled one recovers from a keyframe |
+| 3 | Slow client isolation | One player throttled below the rate of a match's ticks falls behind alone and says so; the others' tick latency stays within 10% of the run without them, and the throttled one recovers from a keyframe |
 | 4 | Survive broker loss | Kill the broker owning the arena's tick stream mid-match. Play resumes on the new owner with no acknowledged tick lost, and a kill cam whose window spans the failover still plays |
 | 5 | Spectator fanout | 100 spectators on one match. Players' tick latency p50 stays within 10% of the run with none, and the simulation's commit latency stays flat |
 
@@ -331,7 +346,7 @@ without the ones before it:
 | Header | Epoch (2 bytes), flags with the keyframe bit (1) and the timed bit (2), reserved (1), match number (4), tick number (4), little-endian | 12 bytes |
 | Timing, with the timed bit | Commit start in µs since the Unix epoch (8), the sim step (4), the previous tick's commit in µs (4) | 16 bytes |
 | Match | Phase: warmup, playing or results (1), ticks left in the phase (2), team scores (2 × 2), ticks until a rail is on the crystal, 0 while one is (2) | 9 bytes |
-| Crafts | A count (1), then per craft: slot (1), flags with alive (bit 0), team (bit 1), spawn protection (bit 2) and the fire cooldown (bits 3 to 7) (1), position and velocity in centimetres (4 × 2), heading (2), health (1), boost cooldown (1), last input sequence applied (2), rail shots in the low 2 bits and rail charge ticks above them (1) | 17 bytes each |
+| Crafts | A count (1), then per craft: slot (1), flags with alive (bit 0), team (bit 1), spawn protection (bit 2) and the fire cooldown (bits 3 to 7) (1), position and velocity in centimetres (4 × 2), heading (2), health (1), boost cooldown (1), last input sequence applied (2), blaster heat in the low 7 bits and overheated in the top bit (1), rail shots in the low 2 bits and rail charge ticks above them (1) | 18 bytes each |
 | Projectiles | A count (2), then per live bolt: id (2), owner (1), position (4), heading (2) | 9 bytes each |
 | Events | A count (2), then each a kind byte and its fields: joined (slot, team, player key), left, spawned, fired (slot, bolt, input sequence), hit (target, attacker, bolt, damage), killed (victim, killer, `replay_from`: the 8-byte offset its kill cam starts from, all ones for none), picked up (slot), railed (slot, target or 255, where the beam ended) | 2 to 11 bytes each |
 | Keyframe only | The roster: a count (1), then per player, slot, team, player key, kills and deaths | 1 + 14 bytes a player |
@@ -342,7 +357,7 @@ clock, scores and rail timer are in every tick, so any one tick can draw the
 HUD; kills and deaths are on the keyframe's roster, and the page counts the
 `killed` events since it.
 
-A busy tick with 8 crafts and 30 bolts is about 450 bytes; a typical one is
+A busy tick with 8 crafts and 30 bolts is about 460 bytes; a typical one is
 under 300. A 5-minute match is about 3 MB of log.
 
 **Events are in the tick that caused them.** A kill is not a separate record:
@@ -413,7 +428,24 @@ and is the place the browser's WebSocket ends. It differs in three ways:
 - **Range reads.** The kill cam's fetch is felix-gateway's `read` feature (0.6.0), Felix's `Client::read` from one offset to another, also authorized as a subscribe.
 
 The [throttle](https://github.com/GetFelix/felix-gateway/blob/main/docs/protocol.md#throttle)
-message carries over unchanged, for demonstration 3.
+message carries over unchanged, for demonstration 3. The gateway reads one
+session's subscriptions no faster than a link of the given speed would carry
+them, so Felix keeps delivering at full speed and that session's own queue
+fills, which is what a slow player's connection does. The dev stack's scope
+file allows it (`allow_throttle`), and a public gateway should not.
+
+**The throttle lane.** Four bots play a match, two spectators read it at full
+speed and a third is throttled. With four players the ticks measured about 5 KB a second
+on the wire, 40 kbit/s (a full eight-player match with bolts is more, the 9 KB
+a second above), so the lane's default of 16 kbit/s is below it and the
+throttled session falls behind (a tab at 256 kbit/s has six times the room it
+needs and never does). The lane, `web/scripts/throttle.ts`, compares the
+other two's median trip time from the sim's commit to the page with a run
+before the throttle, allows it to grow by 10% plus a millisecond, and requires
+the throttled session to fall 15 ticks behind, measured by `web/src/behind.ts`:
+how much later than the best trip of the last minute the newest tick came. The
+play page has the same switch, shown with `&throttle` (`&throttle=64` starts
+slowed to 64 kbit/s), and `window.arena.behindTicks` is that measure.
 
 **Latency budget, in-region, one way, p50:**
 

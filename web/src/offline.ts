@@ -1,7 +1,7 @@
 // A development stand-in for the gateway: core's world runs in the page as the sim, at 30 Hz, with three bots, and
 // its ticks reach the page as they would through Felix. `play.html?offline` uses it, so the game can be seen and
 // played without the dev stack. It is not part of the game.
-import { decodeInput, decodeTick, World } from './core';
+import { decodeInput, decodeTick, heatMax, World } from './core';
 import type { EventFrame, GatewayError, StateValue, Subscribed } from './gateway';
 import { BOT_PROFILES, type BotLevel, type BotProfile } from './bots';
 import { TICK_MS } from './interpolation';
@@ -83,6 +83,7 @@ export class Offline implements Link {
       x: c.x,
       z: c.z,
       rail: c.rail,
+      heat: c.heat,
       protected: c.protected,
     }));
     const railThere = tick.railIn === 0;
@@ -134,6 +135,8 @@ export interface BotState {
   /** Ticks left in the current burst or pause. */
   phase?: number;
   firing?: boolean;
+  /** The heat, as a fraction of the cap, at which this burst ends. */
+  cutoff?: number;
 }
 
 /**
@@ -142,7 +145,7 @@ export interface BotState {
  * other. `profile` sets how well it aims, how soon it reacts, how it bursts, and whether it chases or holds.
  */
 export function drive(
-  me: { slot: number; violet: boolean; x: number; z: number; rail: number },
+  me: { slot: number; violet: boolean; x: number; z: number; rail: number; heat?: number },
   crafts: { slot: number; violet: boolean; alive: boolean; x: number; z: number; protected?: boolean }[],
   bot: BotState,
   railThere: boolean,
@@ -177,6 +180,12 @@ export function drive(
       if ((bot.phase = (bot.phase ?? 0) - 1) <= 0) {
         bot.firing = !bot.firing;
         bot.phase = bot.firing ? profile.burstTicks : profile.pauseTicks;
+        // Each burst lets up at a different heat, so a bot sometimes still overheats.
+        bot.cutoff = 0.55 + Math.random() * 0.45;
+      }
+      if (bot.firing && (me.heat ?? 0) / heatMax() >= (bot.cutoff ?? 1)) {
+        bot.firing = false;
+        bot.phase = profile.pauseTicks;
       }
       if (bot.firing && Math.random() < profile.fireChance) buttons |= 1;
     }
