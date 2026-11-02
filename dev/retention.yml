@@ -1,10 +1,14 @@
 # Broker-wide retention short enough to watch it trim a tick log: 64 KB
-# segments and about 512 KB kept per log, a little over a minute of ticks at
-# 30 Hz. CI's `kill feed` job uses it to see a replay refused as trimmed.
+# segments and 768 KB kept per log, about three minutes of ticks at 30 Hz with
+# four players. CI's `kill feed` job uses it to see a replay refused as
+# trimmed. Too short and a slow runner's fresh page cannot replay a kill before
+# it goes; too long and the spectator's page, which keeps five matches, drops
+# the match before retention trims it (matches
+# are set by SIM_MATCH_SECONDS and friends in ci.yml).
 # Use: ARENA_COMPOSE_EXTRA=retention.yml dev/up.sh
 services:
   broker:
     environment:
       FELIX_DURABLE_SEGMENT_BYTES: "65536"
-      FELIX_DURABLE_RETENTION_BYTES: "524288"
+      FELIX_DURABLE_RETENTION_BYTES: "786432"
       FELIX_DURABLE_RETENTION_INTERVAL_SECONDS: "1"
