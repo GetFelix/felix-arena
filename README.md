@@ -73,6 +73,10 @@ match can continue after its broker
   seconds of it, with slow motion before the killing shot, then the explosion
   and who destroyed whom, while the live match carries on underneath. Every kill in the feed can be replayed, from this match or an
   earlier one, until retention trims it.
+- **Lost ticks are read back.** A client whose delivery queue overflowed sees a
+  jump in the log, reads the missing ticks from it and folds them in order, so
+  no kill or score is missing. `play.html?...&lose=7` throws away every seventh
+  live tick on arrival, to try it.
 - **Offline play.** `play.html?offline` runs `core` in the page against three
   bots, with no servers.
 - **Quality tiers.** High, Medium and Low, chosen from the first seconds of

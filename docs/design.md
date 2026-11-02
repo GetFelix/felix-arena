@@ -679,6 +679,25 @@ crafts carry on at the pace they last moved, and that guess is
 blended into the real ticks over 100 ms. A death, a respawn or a move of more
 than 3 m is shown at the tick it happened, not slid into.
 
+**Ticks that never arrive.** A subscriber whose queue is full loses ticks, and
+what a lost tick carried (a kill, a join, a score) is gone with it, because only
+keyframes hold the tally. The page notices as a jump in log offsets: an event
+frame names the offsets just below it that hold no event (`skipped_before`,
+the generation-start records of a failover), and any jump beyond those is
+ticks that were never delivered. `web/src/gaps.ts` counts them and, for up to
+15 missing ticks, reads them back with the same range read the kill cam uses
+and hands them on in order, ahead of the tick that showed the jump. Holding
+that one tick for the read costs a round trip, which the two-tick render delay
+absorbs on a good link; the ticks read back also give the interpolator real
+positions where it would have guessed. A read that fails or takes longer than
+1.5 seconds is given up on, and the ticks go on without them. A jump wider than
+15 ticks is counted and not read back. The page counts them in
+`window.arena.gaps`, and `play.html?lose=7` discards every seventh live tick on
+arrival so the path can be tested: CI's `gap fill` job has a spectator do that
+while a player plays, then checks that every tick both folded came out the same
+and every kill the player saw after the spectator joined is on the spectator's
+list.
+
 The tests hold this to numbers. `web/src/interpolation.test.ts` records thirty
 seconds of a four-player fight from core's own world, delivers it with jitter
 and one tick in twenty lost (some two in a row), and draws it at 60 frames a
@@ -808,7 +827,7 @@ cache entries that expire without telling a watch
 
 | Failure | What Felix does | What the client or sim does | What the player sees |
 |---|---|---|---|
-| Slow spectator or player | Fills that subscriber's bounded queue and drops new ticks; others untouched | Sees a gap in offsets. Up to 2 missing ticks are interpolated across, and the events in them are fetched with a fill read. Further behind than 15 ticks, it resyncs from the keyframe | "Connection poor" while behind, then normal |
+| Slow spectator or player | Fills that subscriber's bounded queue and drops new ticks; others untouched | Sees a gap in offsets. Up to 15 missing ticks are fetched with a fill read and handed on in order. Further behind than that, it resyncs from the keyframe | "Connection poor" while behind, then normal |
 | A lost input | Nothing; the stream is at most once | The next input repeats it | Nothing |
 | A player's uplink stalls | Nothing | The sim holds the last input for 100 ms, then coasts the craft | Your craft snaps back when you return |
 | Gateway restarts | Nothing | The browser reconnects and joins from the keyframe | "Reconnecting" for a second or two |

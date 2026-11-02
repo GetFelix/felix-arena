@@ -31,6 +31,7 @@ import { KillCam, type KillCamTimes, Markers } from './killcam';
 import { KillRig, VIEWS } from './killcam-rig';
 import { killsOf, type KillRef, type Page, type Reader } from './replay';
 import { joinFromKeyframe, type JoinTimes } from './join';
+import { GapFeed, type GapStats } from './gaps';
 import { Interpolator, snapshot } from './interpolation';
 import { addLights, loadEnvironment } from './lighting';
 import { callsign, Match } from './match';
@@ -58,6 +59,8 @@ const OFFLINE = params.has('offline') || BENCH;
 /** Offline only: `&bots=easy|normal|hard` and `&botcount=1..3`. */
 const BOT_LEVEL = botLevel(params.get('bots'));
 const BOT_COUNT = botCount(params.get('botcount'));
+/** For tests: lose every this-many-th live tick on arrival, as a subscriber with a full queue would. */
+const LOSE = Number(params.get('lose') ?? 0);
 /** How long a try at joining may take before it is given up and made again. */
 const JOIN_TIMEOUT_MS = 10_000;
 
@@ -138,6 +141,8 @@ export interface ArenaDebug {
   replayAt: { r: number; kill: number } | null;
   /** For screenshots: hold the replay at its current moment, or let it play. */
   holdReplay: (held: boolean, ticksFromKill?: number) => void;
+  /** Ticks the live subscription skipped over, and how many were read back; counted from the page's first join. */
+  gaps: GapStats;
   /** The state each recent tick folded to, by `epoch/tick`: the tick's hash and the match's digest. */
   states: Record<string, string>;
 }
@@ -183,6 +188,7 @@ async function main(): Promise<void> {
     bench: null,
     absorbing: null,
     join: null,
+    gaps: { gaps: 0, missed: 0, filled: 0, unfilled: 0 },
     states: {},
     newestTick: null,
     killcams: [],
@@ -570,6 +576,7 @@ async function main(): Promise<void> {
       }
     ).id_token;
   /** Open a gateway session and subscribe to the ticks. A session that closes once joined is opened again. */
+  let received = 0;
   const open = async (token: string): Promise<Gateway> => {
     let late = false;
     const connecting = Gateway.connect(GATEWAY, ARENA, token);
@@ -587,7 +594,15 @@ async function main(): Promise<void> {
     try {
       // Every join, the first and each after a lost session, starts from the newest keyframe.
       joiningSince = performance.now();
-      const times = await within(Promise.race([joinFromKeyframe(link, onFrame), lost]));
+      const feed = new GapFeed(() => link, onFrame, { stats: debug.gaps });
+      const sendOn = LOSE
+        ? (frame: EventFrame, catchUp: boolean) => {
+            // A test hook: lose every LOSE-th live tick, as a subscriber with a full queue would.
+            if (!catchUp && frame.offset !== null && ++received % LOSE === 0) return;
+            feed.push(frame, catchUp);
+          }
+        : (frame: EventFrame, catchUp: boolean) => feed.push(frame, catchUp);
+      const times = await within(Promise.race([joinFromKeyframe(link, sendOn), lost]));
       debug.join ??= {
         ...times,
         signInMs: joinStartMs,
