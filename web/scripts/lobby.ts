@@ -78,7 +78,10 @@ const browser = await chromium.launch({
   args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'],
 });
 const errors: string[] = [];
-const lobby = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
+// The lobby draws its backdrop all the time. At full size it keeps the software renderer so busy that a second page
+// cannot finish joining, so it stays small and grows only for its screenshot.
+const SMALL = { width: 480, height: 270 };
+const lobby = await browser.newPage({ viewport: SMALL });
 lobby.on('pageerror', (e) => errors.push(`lobby: ${String(e)}`));
 await lobby.goto(`${root}/lobby.html?as=cleo&quality=medium`, { waitUntil: 'load', timeout: NAV_TIMEOUT_MS });
 const arenas = () => lobby.evaluate(() => (window.lobby as LobbyDebug | undefined)?.arenas ?? {});
@@ -95,10 +98,18 @@ async function spectator(): Promise<{ context: BrowserContext; page: Page; key: 
   const context = await browser.newContext({ viewport: { width: 640, height: 360 } });
   const page = await context.newPage();
   page.on('pageerror', (e) => errors.push(`cleo: ${String(e)}`));
+  const logged: string[] = [];
+  page.on('console', (m) => m.type() === 'error' && logged.push(m.text()));
   await page.goto(`${root}/play.html?arena=alpha&as=cleo&quality=low`, { waitUntil: 'load', timeout: NAV_TIMEOUT_MS });
+  // A page that never lists itself says why: its state and what it logged.
   const key = await until('the spectator to write its member key', 120_000, () =>
     page.evaluate(() => window.arena?.member ?? null),
-  );
+  ).catch(async (err: unknown) => {
+    const state = await page
+      .evaluate(() => ({ reconnects: window.arena?.reconnects, ticks: window.arena?.ticks, slot: window.arena?.slot }))
+      .catch(() => null);
+    throw new Error(`${String(err)}; page ${JSON.stringify(state)}; console errors ${JSON.stringify(logged)}`);
+  });
   await until('the member list to have the spectator', 10_000, async () => listed(key));
   if (!members.get(key)!.payload.startsWith('watch:'))
     throw new Error(`cleo is listed as ${members.get(key)!.payload}`);
@@ -108,7 +119,10 @@ async function spectator(): Promise<{ context: BrowserContext; page: Page; key: 
 // A tab that closes normally sends the leave beacon.
 const first = await spectator();
 await until('the lobby to count the spectator', 15_000, async () => ((await arenas()).alpha?.spectators ?? 0) >= 1);
+await lobby.setViewportSize({ width: 1920, height: 1080 });
+await sleep(1000);
 await lobby.screenshot({ path: join(out, 'lobby.png'), timeout: 240_000 });
+await lobby.setViewportSize(SMALL);
 console.log('saved lobby.png');
 let closed = Date.now();
 await first.page.goto('about:blank');
