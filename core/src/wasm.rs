@@ -207,6 +207,18 @@ pub fn boost_ticks() -> u8 {
     crate::world::BOOST_COOLDOWN
 }
 
+/// The heat that locks the blaster.
+#[wasm_bindgen(js_name = heatMax)]
+pub fn heat_max() -> u8 {
+    crate::world::HEAT_MAX
+}
+
+/// The heat an overheated blaster must fall to before it fires again.
+#[wasm_bindgen(js_name = heatResume)]
+pub fn heat_resume() -> u8 {
+    crate::world::HEAT_RESUME
+}
+
 /// Ticks a rail charges before it fires.
 #[wasm_bindgen(js_name = railChargeTicks)]
 pub fn rail_charge_ticks() -> u8 {
@@ -461,6 +473,16 @@ impl JsCraft {
     #[wasm_bindgen(getter, js_name = boostCooldown)]
     pub fn boost_cooldown(&self) -> u8 {
         self.0.boost_cooldown
+    }
+    /// How hot the blaster is, up to `heatMax()`.
+    #[wasm_bindgen(getter)]
+    pub fn heat(&self) -> u8 {
+        self.0.heat
+    }
+    /// The blaster is locked until it cools to `heatResume()`.
+    #[wasm_bindgen(getter)]
+    pub fn overheated(&self) -> bool {
+        self.0.overheated
     }
     /// Rail shots left.
     #[wasm_bindgen(getter)]

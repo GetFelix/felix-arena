@@ -1,7 +1,10 @@
 use std::time::{Duration, Instant};
 
 use crate::input::{BOOST, FIRE};
-use crate::world::{BOLT_DAMAGE, MAX_HEALTH, RESPAWN_AFTER, SPAWN_PROTECTION, SPAWN_SIGHT};
+use crate::world::{
+    BOLT_DAMAGE, HEAT_MAX, HEAT_PER_SHOT, HEAT_RESUME, MAX_HEALTH, RESPAWN_AFTER, SPAWN_PROTECTION,
+    SPAWN_SIGHT,
+};
 use crate::{
     CRAFT_RADIUS, Event, Input, Phase, Rules, Team, Tick, Timing, World, bolt_ticks, player_key,
     steer,
@@ -120,7 +123,7 @@ fn a_busy_tick_fits_the_design_budget() {
     let tick = world.snapshot(0);
     let bytes = tick.encode(None).len();
     assert!(
-        bytes <= 12 + 9 + 1 + 8 * 17 + 2 + tick.bolts.len() * 9 + 2 + tick.events.len() * 11,
+        bytes <= 12 + 9 + 1 + 8 * 18 + 2 + tick.bolts.len() * 9 + 2 + tick.events.len() * 11,
         "{bytes}"
     );
     assert!(!tick.bolts.is_empty());
@@ -249,6 +252,141 @@ fn a_boost_dashes_and_cools_down() {
     assert_eq!(world.crafts()[0].boost_cooldown, 90);
     world.step(|_| Some(boost));
     assert!(world.crafts()[0].vz < 2000);
+}
+
+/// Steps a world holding `buttons` for `ticks`, and answers how many bolts were fired.
+fn hold(world: &mut World, buttons: u8, ticks: u32) -> usize {
+    let held = Input {
+        seq: 1,
+        move_x: 0,
+        move_z: 0,
+        aim: 0,
+        buttons,
+    };
+    (0..ticks)
+        .filter(|_| {
+            world.step(|_| Some(held));
+            world
+                .snapshot(0)
+                .events
+                .iter()
+                .any(|e| matches!(e, Event::Fired { .. }))
+        })
+        .count()
+}
+
+#[test]
+fn holding_fire_overheats_the_blaster_until_it_cools() {
+    let mut world = free_play(0);
+    world.join(1);
+    // Fifteen bolts fill the blaster and lock it.
+    assert_eq!(
+        hold(&mut world, FIRE, 75),
+        usize::from(HEAT_MAX / HEAT_PER_SHOT)
+    );
+    assert!(world.crafts()[0].overheated);
+    assert!(world.crafts()[0].heat > HEAT_MAX - 5 * 3);
+    // Letting go cools it, and it fires again only once below the resume heat.
+    while world.crafts()[0].heat > HEAT_RESUME {
+        assert!(world.crafts()[0].overheated);
+        hold(&mut world, 0, 1);
+    }
+    assert!(!world.crafts()[0].overheated);
+    assert_eq!(hold(&mut world, FIRE, 1), 1);
+}
+
+#[test]
+fn bursts_with_pauses_never_overheat() {
+    let mut world = free_play(0);
+    world.join(1);
+    for _ in 0..20 {
+        assert_eq!(hold(&mut world, FIRE, 25), 5);
+        hold(&mut world, 0, 30);
+        assert!(!world.crafts()[0].overheated);
+    }
+}
+
+#[test]
+fn tapping_the_trigger_does_not_cool_the_blaster() {
+    let mut world = free_play(0);
+    world.join(1);
+    // One tick of fire in every five is the fastest the blaster shoots, the same as holding it.
+    let mut shots = 0;
+    for _ in 0..15 {
+        shots += hold(&mut world, FIRE, 1);
+        hold(&mut world, 0, 4);
+    }
+    assert_eq!(shots, 15);
+    assert!(world.crafts()[0].overheated);
+}
+
+#[test]
+fn a_locked_blaster_cools_with_the_trigger_held() {
+    let mut world = free_play(0);
+    world.join(1);
+    hold(&mut world, FIRE, 75);
+    assert!(world.crafts()[0].overheated);
+    // It fires again once cool, without the trigger being released.
+    assert!(hold(&mut world, FIRE, 40) > 0);
+}
+
+#[test]
+fn the_rail_adds_no_heat() {
+    let mut world = free_play(0);
+    world.join(1);
+    world.crafts_mut()[0].rail = 1;
+    hold(&mut world, FIRE, 1);
+    assert!(world.crafts()[0].charge > 0);
+    // The rail fires when its charge runs out, before the blaster is used again.
+    hold(&mut world, FIRE, 15);
+    assert_eq!(world.crafts()[0].rail, 0);
+    assert_eq!(world.crafts()[0].heat, 0);
+}
+
+#[test]
+fn a_rail_still_charges_on_a_locked_blaster() {
+    let mut world = free_play(0);
+    world.join(1);
+    hold(&mut world, FIRE, 75);
+    assert!(world.crafts()[0].overheated);
+    world.crafts_mut()[0].rail = 1;
+    world.crafts_mut()[0].fire_cooldown = 0;
+    hold(&mut world, FIRE, 1);
+    assert!(world.crafts()[0].charge > 0);
+}
+
+#[test]
+fn a_record_with_more_heat_than_the_cap_is_refused() {
+    let mut world = free_play(0);
+    world.join(1);
+    let mut tick = world.snapshot(0);
+    // A value no other field of this tick holds, so it can be found in the record.
+    tick.crafts[0].heat = 119;
+    let mut record = tick.encode(None);
+    let at: Vec<usize> = (0..record.len()).filter(|&i| record[i] == 119).collect();
+    assert_eq!(at.len(), 1);
+    assert!(Tick::decode(&record).is_some());
+    record[at[0]] = HEAT_MAX + 1;
+    assert!(Tick::decode(&record).is_none());
+}
+
+#[test]
+fn a_record_in_the_older_craft_layout_is_refused() {
+    let mut world = free_play(0);
+    world.join(1);
+    world.join(2);
+    let record = Tick::decode(&world.snapshot(0).encode(None))
+        .unwrap()
+        .0
+        .encode(None);
+    // Header 12, match 9, the count 1, then 18 bytes a craft; the heat byte is the second from the craft's end.
+    let mut older = record.clone();
+    for craft in (0..2).rev() {
+        older.remove(22 + craft * 18 + 16);
+    }
+    assert_eq!(older.len(), record.len() - 2);
+    assert!(Tick::decode(&record).is_some());
+    assert!(Tick::decode(&older).is_none());
 }
 
 #[test]
@@ -407,7 +545,7 @@ fn unknown_bits_are_refused() {
     let record = tick.encode(None);
     // The flags, the reserved byte, the phase and the first craft's rail
     // charge. Every bit of a craft's flags has a meaning.
-    for (at, bit) in [(2, 4), (3, 1), (12, 4), (38, 128)] {
+    for (at, bit) in [(2, 4), (3, 1), (12, 4), (39, 128)] {
         let mut changed = record.clone();
         changed[at] |= bit;
         assert!(Tick::decode(&changed).is_none(), "byte {at}");
@@ -919,8 +1057,8 @@ fn spawn_protection_rides_in_the_crafts_flags() {
     let tick = world.snapshot(0);
     assert!(tick.crafts[0].protected && !tick.crafts[1].protected);
     let record = tick.encode(None);
-    // Header 12, match 9, the craft count 1, then the first craft's slot.
+    // Header 12, match 9, the craft count 1, then the first craft's slot and flags; crafts are 18 bytes.
     assert_eq!(record[23] & 4, 4);
-    assert_eq!(record[23 + 17] & 4, 0);
+    assert_eq!(record[23 + 18] & 4, 0);
     assert_eq!(Tick::decode(&record), Some((tick, None)));
 }

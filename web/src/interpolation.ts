@@ -8,6 +8,10 @@ export const TICK_MS = 1000 / 30;
 export const MIN_DELAY_MS = 2 * TICK_MS;
 /** The most the render delay grows to on a jittery link. */
 export const MAX_DELAY_MS = 100;
+/** Arrivals that must all sit this far above the window's earliest before the sim is taken to have stalled. */
+const STALL_MS = 2 * TICK_MS;
+/** How many arrivals in a row that takes: a quarter of a second, longer than a delay spike on a bad link lasts. */
+const STALL_RUN = 8;
 /** Ticks kept: a second. */
 const KEEP = 30;
 /** Arrivals the clock and the jitter are judged over: two seconds. */
@@ -27,6 +31,52 @@ const SLEW = 0.1;
 /** Further than this from its target, in milliseconds, the render clock jumps instead. */
 const RESYNC_MS = 300;
 
+/**
+ * When the sim's clock reads zero on the page's clock: each recent tick's arrival less its place on that clock, of
+ * which the earliest is the tick the network delayed least. The sim skips the ticks that fall due while it is stalled
+ * instead of making them up, so after a stall its tick numbers lag wall time for good and every arrival sits higher.
+ * The earliest of the old arrivals would then run the page's clock ahead of the ticks for the whole window, so once a
+ * run of arrivals all sit above them, the older ones are dropped.
+ */
+export class ArrivalClock {
+  private offsets: number[] = [];
+
+  constructor(private readonly size: number) {}
+
+  /** Take the tick `tick` that arrived at `arrivedMs`. Answers whether it showed a stall, and the clock moved. */
+  add(tick: number, arrivedMs: number): boolean {
+    this.offsets.push(arrivedMs - tick * TICK_MS);
+    if (this.offsets.length > this.size) this.offsets.shift();
+    const run = this.offsets.slice(-STALL_RUN);
+    const before = this.offsets.slice(0, -STALL_RUN);
+    if (before.length > 0 && run.length === STALL_RUN && run.every((o) => o > Math.min(...before) + STALL_MS)) {
+      this.offsets = run;
+      return true;
+    }
+    return false;
+  }
+
+  /** The earliest arrival, or `Infinity` before any. */
+  get earliest(): number {
+    return Math.min(...this.offsets);
+  }
+
+  /** The 95th percentile of how much later than the earliest each arrival was. */
+  get lateness(): number {
+    const earliest = this.earliest;
+    const late = this.offsets.map((t) => t - earliest).sort((x, y) => x - y);
+    return late[Math.floor((late.length - 1) * 0.95)]!;
+  }
+
+  get length(): number {
+    return this.offsets.length;
+  }
+
+  clear(): void {
+    this.offsets = [];
+  }
+}
+
 /** A craft as a tick has it. Positions in centimetres, velocities in centimetres a second, headings in 65536ths. */
 export interface CraftState {
   slot: number;
@@ -42,6 +92,9 @@ export interface CraftState {
   /** Rail shots left, and ticks until a charging rail fires. */
   rail: number;
   charge: number;
+  /** How hot the blaster is, up to core's `heatMax()`, and whether it is locked until it cools. */
+  heat: number;
+  overheated: boolean;
   /** Under spawn protection: just respawned, and not hurt until it fires or the protection runs out. */
   protected: boolean;
 }
@@ -83,6 +136,8 @@ export function snapshot(tick: Tick): Snapshot {
       lastInput: c.lastInput,
       rail: c.rail,
       charge: c.charge,
+      heat: c.heat,
+      overheated: c.overheated,
       protected: c.protected,
     })),
     bolts: bolts.map((b) => ({ id: b.id, owner: b.owner, x: b.x, z: b.z, heading: b.heading })),
@@ -106,7 +161,7 @@ export interface View {
 export class Interpolator {
   private ticks: Snapshot[] = [];
   /** Each recent arrival's time less its tick's place on the sim's clock, newest last. */
-  private arrivals: number[] = [];
+  private arrivals = new ArrivalClock(WINDOW);
   private renderMs: number | null = null;
   private lastSampleMs: number | null = null;
   private delay = MIN_DELAY_MS;
@@ -136,15 +191,15 @@ export class Interpolator {
     if (this.ticks.length > KEEP) this.ticks.shift();
     // A tick read back from the log arrived late for reasons that say nothing about the link.
     if (!timed) return;
-    this.arrivals.push(arrivedMs - tick.tick * TICK_MS);
-    if (this.arrivals.length > WINDOW) this.arrivals.shift();
-    this.delay = Math.min(MAX_DELAY_MS, Math.max(MIN_DELAY_MS, TICK_MS + lateness(this.arrivals) + MARGIN_MS));
+    // The render clock follows its target slowly, so it jumps to a target that has moved by a stall.
+    if (this.arrivals.add(tick.tick, arrivedMs)) this.renderMs = null;
+    this.delay = Math.min(MAX_DELAY_MS, Math.max(MIN_DELAY_MS, TICK_MS + this.arrivals.lateness + MARGIN_MS));
   }
 
   /** Forget every tick, as after a resync. */
   reset(): void {
     this.ticks = [];
-    this.arrivals = [];
+    this.arrivals.clear();
     this.renderMs = null;
     this.lastSampleMs = null;
     this.delay = MIN_DELAY_MS;
@@ -156,7 +211,7 @@ export class Interpolator {
   sample(nowMs: number): View | null {
     if (this.ticks.length === 0) return null;
     // The earliest arrival in the window is the one the network delayed least; the render time trails it.
-    const target = nowMs - Math.min(...this.arrivals) - this.delay;
+    const target = nowMs - this.arrivals.earliest - this.delay;
     const dt = this.lastSampleMs === null ? 0 : Math.max(0, nowMs - this.lastSampleMs);
     this.lastSampleMs = nowMs;
     if (this.renderMs === null || Math.abs(target - this.renderMs - dt) > RESYNC_MS) {
@@ -241,13 +296,6 @@ export class Interpolator {
       return { ...c, x: c.x + px * ticksOn, z: c.z + pz * ticksOn };
     });
   }
-}
-
-/** The 95th percentile of how much later than the earliest each arrival in the window was. */
-function lateness(arrivals: number[]): number {
-  const earliest = Math.min(...arrivals);
-  const late = arrivals.map((t) => t - earliest).sort((x, y) => x - y);
-  return late[Math.floor((late.length - 1) * 0.95)]!;
 }
 
 /** The crafts `f` of the way from tick `a` to tick `b`. */
