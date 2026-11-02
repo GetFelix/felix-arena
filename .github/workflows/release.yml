@@ -12,6 +12,12 @@ on:
   pull_request:
     paths:
       - docker/**
+      - core/**
+      - sim/**
+      - web/**
+      - Cargo.toml
+      - Cargo.lock
+      - rust-toolchain.toml
       - dev/idp.mjs
       - dev/seed.mjs
       - dev/scope.toml
@@ -50,8 +56,9 @@ jobs:
         run: |
           # A pull request's ref name has a slash in it.
           name="felix-arena-web-${GITHUB_REF_NAME//\//-}"
-          cp -r web/dist "$name"
-          tar -czf "$name.tar.gz" "$name"
+          mkdir pkg
+          cp -r web/dist "pkg/$name"
+          tar -C pkg -czf "$name.tar.gz" "$name"
           sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
       # The gateway image carries the same files.
       - uses: actions/upload-artifact@v4
@@ -63,7 +70,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: web-package
-          path: felix-arena-web-*
+          path: felix-arena-web-*.tar.gz*
           if-no-files-found: error
           retention-days: 1
 
@@ -281,9 +288,13 @@ jobs:
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
+          # There is no checkout here for gh to find the repository in.
+          GH_REPO: ${{ github.repository }}
         run: |
+          prerelease=()
+          case "$GITHUB_REF_NAME" in *-*) prerelease=(--prerelease) ;; esac
           gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" \
-            --notes-file notes.md felix-arena-web-*
+            "${prerelease[@]}" --notes-file notes.md felix-arena-web-*.tar.gz*
 
   site:
     needs: release
