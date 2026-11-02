@@ -15,6 +15,8 @@ if (!root || !out) throw new Error('usage: lobby.ts <web root url> <out dir>');
 const GATEWAY = process.env.ARENA_GATEWAY ?? 'ws://127.0.0.1:8787/ws';
 const IDP = process.env.ARENA_IDP ?? 'http://127.0.0.1:9400';
 const TTL_MS = 30_000;
+/** A software-rendered page on a busy runner can take longer than Playwright's 30 s default to reach `load`. */
+const NAV_TIMEOUT_MS = 120_000;
 mkdirSync(out, { recursive: true });
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -78,7 +80,7 @@ const browser = await chromium.launch({
 const errors: string[] = [];
 const lobby = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
 lobby.on('pageerror', (e) => errors.push(`lobby: ${String(e)}`));
-await lobby.goto(`${root}/lobby.html?as=cleo&quality=medium`, { waitUntil: 'load' });
+await lobby.goto(`${root}/lobby.html?as=cleo&quality=medium`, { waitUntil: 'load', timeout: NAV_TIMEOUT_MS });
 const arenas = () => lobby.evaluate(() => (window.lobby as LobbyDebug | undefined)?.arenas ?? {});
 await until('the lobby to list alpha and bravo, both playing', 120_000, async () => {
   const a = await arenas();
@@ -93,7 +95,7 @@ async function spectator(): Promise<{ context: BrowserContext; page: Page; key: 
   const context = await browser.newContext({ viewport: { width: 640, height: 360 } });
   const page = await context.newPage();
   page.on('pageerror', (e) => errors.push(`cleo: ${String(e)}`));
-  await page.goto(`${root}/play.html?arena=alpha&as=cleo&quality=low`, { waitUntil: 'load' });
+  await page.goto(`${root}/play.html?arena=alpha&as=cleo&quality=low`, { waitUntil: 'load', timeout: NAV_TIMEOUT_MS });
   const key = await until('the spectator to write its member key', 120_000, () =>
     page.evaluate(() => window.arena?.member ?? null),
   );
