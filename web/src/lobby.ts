@@ -205,8 +205,6 @@ async function main(): Promise<void> {
   const lobby = new Lobby(document.getElementById('arenas')!, document.getElementById('count')!, debug);
   backdrop().catch((error: unknown) => console.error('the backdrop did not load', error));
 
-  const answer = await fetch(`${IDP}/token?sub=${encodeURIComponent(USER)}&aud=felix-arena`);
-  const token = ((await answer.json()) as { id_token: string }).id_token;
   const link = document.getElementById('link')!;
   const count = document.getElementById('count')!;
   // The lobby is a scope of its own: of the scope file's resources it reaches only the shared lobby cache.
