@@ -1,6 +1,10 @@
 # What the gateway lets a browser session reach in one arena. dev/seed.mjs
 # creates these streams for arenas `alpha` and `bravo`.
 
+# Lets a page slow its own connection, for the slow-link switch on the play page
+# and CI's throttle lane. Leave it off on a public gateway.
+allow_throttle = true
+
 [scope]
 field = "arena"
 
