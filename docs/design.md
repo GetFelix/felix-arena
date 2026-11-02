@@ -864,7 +864,7 @@ happens to you. A cue repeated inside its minimum gap is dropped, at most 24
 effects play at once, and cues with several files rotate between them with a
 slight change of pitch, so a long fight does not wear. The effects are decoded
 once into Web Audio buffers. The music is played from audio elements, so a
-two-minute track is not held decoded in memory, and each file fades in and
+track of a minute or two is not held decoded in memory, and each file fades in and
 out over 2 seconds: the next track starts that long before the end of the
 current one, and the two cross. Audio starts on the first pointer or key event
 and not before (a gesture the browser does not count, such as a touch's pointerdown, is retried on the next one), holds while the page is hidden, and is silent in an automated

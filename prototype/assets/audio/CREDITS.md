@@ -61,5 +61,5 @@ tempo is measured from the audio, so it is approximate.
 The Junkala pack's own `INFO.txt` says the tracks are released under CC0.
 
 Changes to every track: converted to 48 kHz stereo Ogg Opus at 56 kbit/s, brought to -20 LUFS with a true peak under
--2 dBFS, and a 2 second fade in and out, so that one track starting as the last ends crosses into it. Nothing else was
-edited, and the music is not looped inside a file.
+-2 dBFS in one pass, so levels land within about 1 LU of that, and a 2 second fade in and out, so that one track starting
+as the last ends crosses into it. Nothing else was edited, and the music is not looped inside a file.

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Rebuilds sfx/ and music/ from the original downloads, so every change made to a file is on record.
 # Usage: build.sh <kenney-sci-fi-sounds/Audio> <kenney-interface-sounds/Audio> <music sources dir>
-# The music directory holds the files named in CREDITS.md; two were renamed on copying (see the notes there).
+# The music directory holds the files named in CREDITS.md; three were renamed on copying (see the notes there).
 # Needs ffmpeg with libopus.
 set -euo pipefail
 SCIFI=$1 IFACE=$2 MUSIC=$3

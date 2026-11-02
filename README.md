@@ -361,8 +361,8 @@ What you hear:
 
 At the bottom left of the page, **Sound** switches everything on or off (the
 **M** key does too), and **Music** and **Effects** set the two volumes. The
-settings are saved in this browser. Music starts at a moderate level, under the effects, so they
-carry the game.
+settings are saved in this browser. Music starts at half volume, below the effects (70%), so
+the effects carry the game.
 
 Page options: `?sound=off` plays nothing and `?sound=on` plays even in an
 automated browser, which is silent by default so a test run does not decode
