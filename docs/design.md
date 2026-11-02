@@ -117,7 +117,7 @@ The project succeeds if five demonstrations work in front of a skeptic.
 | 2 | Join mid-match | A spectator opening a match in progress draws a correct frame in under 500 ms p50, and its state hash at a given tick matches a player's |
 | 3 | Slow client isolation | One player throttled below the rate of a match's ticks falls behind alone and says so; the others' tick latency stays within 10% of the run without them, and the throttled one recovers from a keyframe |
 | 4 | Survive broker loss | Kill the broker owning the arena's tick stream mid-match. Play resumes on the new owner with no acknowledged tick lost, and a kill cam whose window spans the failover still plays |
-| 5 | Spectator fanout | 100 spectators on one match. Players' tick latency p50 and the simulation's commit p50 stay within twice the run with none plus 0.5 ms, with the readers on cpus of their own (measured: 1.7 to 3.2 ms and 1.0 to 1.2 ms on a 4-cpu runner) |
+| 5 | Spectator fanout | 100 spectators on one match. Players' tick latency p50 and the simulation's commit p50 stay within twice the run with none plus 0.5 ms, with the readers on cpus of their own (measured on a 4-cpu runner: 1.4 to 2.2 ms and 1.7 to 3.2 ms for the trip, 0.9 to 1.4 ms and 1.0 to 1.2 ms for the commit) |
 
 Two criteria are deliberately absent. Player count is not a goal: an arena
 holds 8, and a hundred-player battle royale would be a different design. Nor is
@@ -945,8 +945,9 @@ the script says the readers share cpu with the stack.
 
 **What the check found.** Even with the readers on a core of their own, the
 players' median trip grows with the number of subscribers. On that runner 10
-spectators took it from 1.7 to 1.85 ms, and 100 took it from 1.7 to 3.2 ms; the
-sim's commit went from 1.0 to 1.2 ms. That is the broker's work for each
+spectators took it from 1.7 to 1.85 ms, and 100 took it from 1.7 to 3.2 ms in one
+run and from 1.4 to 2.2 ms in another; the sim's commit went from 1.0 to 1.2 ms
+and from 0.9 to 1.4 ms. That is the broker's work for each
 subscriber (roughly 15 microseconds each) on a stack that has two cpus, not the
 readers', so the 10% in demonstration 5 does not hold on this hardware. The
 bound is twice the quiet median plus half a millisecond: it passes what is
