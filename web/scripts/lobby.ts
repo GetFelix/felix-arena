@@ -120,7 +120,10 @@ async function spectator(): Promise<{ context: BrowserContext; page: Page; key: 
 const first = await spectator();
 await until('the lobby to count the spectator', 15_000, async () => ((await arenas()).alpha?.spectators ?? 0) >= 1);
 await lobby.setViewportSize({ width: 1920, height: 1080 });
-await sleep(1000);
+// Two frames at the new size, however long the software renderer takes to draw them.
+await lobby.evaluate(
+  () => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))),
+);
 await lobby.screenshot({ path: join(out, 'lobby.png'), timeout: 240_000 });
 await lobby.setViewportSize(SMALL);
 console.log('saved lobby.png');
