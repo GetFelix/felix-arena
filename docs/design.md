@@ -635,7 +635,7 @@ retention is not applied yet
 ([felix#964](https://github.com/GetFelix/felix/issues/964)). A replay whose
 offset has been trimmed is refused as `CursorTooOld`, which the gateway answers
 as `trimmed`, and the client says "Replay no longer available". CI's `kill
-feed` job runs a broker that keeps about a minute of each log
+feed` job runs a broker that keeps about three minutes of each log
 (`dev/retention.yml`): a spectator replays the last match's final kill from the
 panel, a fresh page finds that match's kills through `match/<n>` and replays
 one, and once retention has passed the match's first kill, replaying it shows

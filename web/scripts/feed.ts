@@ -1,6 +1,6 @@
 // Replays from the kill feed through the dev stack (docs/design.md, "Replays from the feed"), on a broker that keeps
-// about a minute of each log (dev/retention.yml). Three bots play short matches while cleo watches. Once a match has
-// ended, cleo replays its last kill from the replays panel; a fresh page of cleo's finds that match's kills through
+// about three minutes of each log (dev/retention.yml). Three bots play short matches while cleo watches. Once a match
+// has ended, cleo replays its last kill from the replays panel; a fresh page of cleo's finds that match's kills through
 // the `match/<n>` state keys and replays one too; and once retention has trimmed the match's first kill, replaying it
 // must say "Replay no longer available". Screenshots go to `out`.
 // Usage: npx vite-node scripts/feed.ts -- <play page url> <out dir>
@@ -55,7 +55,12 @@ async function until<T>(what: string, check: () => Promise<T | null | undefined 
 async function replay(page: Page, key: string): Promise<Seen['killcams'][number]> {
   if (await page.locator('#replays').isHidden()) await page.keyboard.press('KeyR');
   const before = (await seen(page)).killcams.length;
-  await page.locator(`#replays-list [data-kill="${key}"]`).click();
+  const row = page.locator(`#replays-list [data-kill="${key}"]`);
+  // A page keeps only its latest few matches, so a kill can be gone from the panel if the test waited too long.
+  await row.waitFor({ state: 'visible', timeout: 30_000 }).catch(() => {
+    throw new Error(`the replays panel does not list ${key}`);
+  });
+  await row.click();
   return until(
     'the replay',
     async () => {
@@ -107,7 +112,8 @@ try {
   if (found.length === 0) throw new Error(`a fresh page did not find match ${first} in the log`);
   console.log(`a fresh page found ${found.length} of match ${first}'s kills in the log`);
   const loaded = await replay(fresh, found.at(-1)!.key);
-  if (loaded.failed || loaded.last !== found.at(-1)!.tick + 30) failures.push('a loaded kill did not replay');
+  if (loaded.failed || loaded.last !== found.at(-1)!.tick + 30)
+    failures.push(`a loaded kill did not replay: ${JSON.stringify(loaded)}`);
   await fresh.close();
 
   // The match's first kill, once retention has passed its replay's start.

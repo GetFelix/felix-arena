@@ -56,6 +56,34 @@ const seen = (page: Page): Promise<Seen> =>
     return { slot: a.slot, own: a.own, crafts: a.crafts, killcam: a.killcam, killcams: a.killcams, kills: a.kills };
   });
 
+/**
+ * Click the replays panel's row for `key`. A page's own death starts a kill cam and closes the panel, so open it
+ * again until the click lands, rather than clicking once into a panel that has shut.
+ */
+async function replayRow(page: Page, key: string): Promise<void> {
+  const row = page.locator(`#replays-list [data-kill="${key}"]`);
+  const deadline = Date.now() + 60_000;
+  let last: unknown;
+  while (Date.now() < deadline) {
+    if (await page.locator('#replays').isHidden()) {
+      await page.keyboard.press('KeyR');
+      // The panel shows in the page's next frame, which takes a while in software; pressing again would close it.
+      await page
+        .locator('#replays')
+        .waitFor({ state: 'visible', timeout: 10_000 })
+        .catch(() => {});
+    }
+    try {
+      await row.click({ timeout: 2_000 });
+      return;
+    } catch (err) {
+      last = err;
+      await sleep(250);
+    }
+  }
+  throw new Error(`the replays panel never let a click through to ${key}: ${String(last)}`);
+}
+
 /** Holds the keys that move toward the nearest enemy on screen. */
 async function charge(page: Page, a: Seen): Promise<void> {
   for (const key of ['KeyW', 'KeyA', 'KeyS', 'KeyD']) await page.keyboard.up(key);
@@ -118,9 +146,8 @@ try {
     ['ben', ben],
     ['cleo', cleo],
   ] as const) {
-    if (await page.locator('#replays').isHidden()) await page.keyboard.press('KeyR');
     const before = (await seen(page)).killcams.length;
-    await page.locator(`#replays-list [data-kill="${pick.key}"]`).click();
+    await replayRow(page, pick.key);
     const deadline = Date.now() + 60_000;
     let run: Seen['killcams'][number] | undefined;
     while (Date.now() < deadline) {
