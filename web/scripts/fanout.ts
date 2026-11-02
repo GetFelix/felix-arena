@@ -3,9 +3,10 @@
 // holding spectators as Felix clients (`sim/examples/spectators.rs`), then alone again. A player's median trip, and the
 // sim's commit time, which every tick carries for the one before, may grow by 10% plus a small slack over the
 // slower of the two quiet phases, so a machine that warms up during the run cannot hide a cost.
-// The readers' own CPU is not Felix's cost, so on a shared machine FANOUT_SPECTATOR_CPUS (a `taskset -c` list, such as
-// `3`) keeps them on cores the broker, the sim and these players do not use; CI also pins the stack and this script
-// to the other cores. Without it the numbers include the readers competing for CPU, and the run says so.
+// The readers' own CPU is not Felix's cost, so on a shared Linux machine FANOUT_SPECTATOR_CPUS (a `taskset -c` list,
+// such as `3`) puts them on cores the broker, the sim and these players do not use. Set FANOUT_OTHER_CPUS too once the
+// stack and this script are pinned to the rest (CI does both). Otherwise the numbers include the readers competing
+// for CPU, and the run says so.
 // Usage: npx vite-node scripts/fanout.ts -- <spectators binary> [spectators, default 100] [seconds a phase, default 20]
 import { spawn } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -25,13 +26,15 @@ const BROKER = process.env.ARENA_BROKER ?? '127.0.0.1:5000';
 const BROKER_CA = process.env.ARENA_BROKER_CA ?? new URL('../../dev/state/broker-cert.pem', import.meta.url).pathname;
 const PHASE_MS = Number(seconds) * 1000;
 const SPECTATOR_CPUS = process.env.FANOUT_SPECTATOR_CPUS?.trim();
+// The caller says it moved the stack and this script off those cpus; the script cannot tell.
+const ISOLATED = Boolean(SPECTATOR_CPUS && process.env.FANOUT_OTHER_CPUS?.trim());
 /**
  * What a median may grow by: 10%, and a little for timer and scheduler noise on a median of about 1 ms. With the
  * readers on their own cores the slack stands for that noise alone. Without that, 100 readers sharing the broker's
- * cores add 0.5 to 0.8 ms of their own, so the slack is a millisecond and the run says it did not isolate them.
+ * cores add most of a millisecond of their own, so the slack is a millisecond and the run says it did not isolate them.
  */
 const GROWTH = 1.1;
-const SLACK_US = SPECTATOR_CPUS ? 300 : 1000;
+const SLACK_US = ISOLATED ? 300 : 1000;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 loadCore(readFileSync(new URL('../src/core/felix_arena_core_bg.wasm', import.meta.url)));
@@ -90,7 +93,7 @@ function holdSpectators(tokenFile: string, readSeconds: number) {
 }
 
 console.log(
-  SPECTATOR_CPUS
+  ISOLATED
     ? `the spectators run on cpu ${SPECTATOR_CPUS}, apart from the stack and the players`
     : 'the spectators share cpu with the stack and the players, so their own cost is in the numbers',
 );

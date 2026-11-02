@@ -939,19 +939,19 @@ Felix's, so CI keeps it out of the numbers. On its 4-cpu runner the spectators
 run under `taskset` on the last cpu alone, and the stack's containers
 (`docker update --cpuset-cpus`) and the players run on the other three. The
 broker still does all the fanout work for the 100 subscribers on its own cpus,
-which is the cost the check is after. The cpus are hyperthreads of two cores, so
+which is the cost the check is after. Docker's own processes are not pinned. The cpus are hyperthreads of two cores, so
 the spectators' cpu shares execution units with one of the others; the pinning
 removes scheduling contention and not that. A runner with fewer than 4 cpus
 fails the job instead of running a check that would measure the readers. Without
 `FANOUT_SPECTATOR_CPUS` (a local run) the script says the readers share cpu with
-the stack and allows a millisecond of slack, because they then add 0.5 to 0.8 ms
-of their own.
+the stack and allows a millisecond of slack, because they then add most of a
+millisecond of their own (main's run 41415086935 grew 1.1 ms on the players' median).
 
 The sim's commit time is checked the same way. Every tick carries how long the
 previous tick took to commit, from the sim sending it to Felix to Felix
 answering that it is durable. Felix fans a tick out after that, so the number
 cannot show fanout work; it moves only if the spectators take CPU from the
-sim or the broker, which is what the cpu pinning above keeps them from doing.
+sim or the broker, which the cpu pinning above mostly keeps them from doing.
 
 The players are gateway sessions in Node rather than browsers, as in the
 throttle lane, so the check measures the server path and not the page's

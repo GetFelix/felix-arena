@@ -565,13 +565,14 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - run: cargo build --release --locked -p felix-arena-sim --example spectators
       # The 100 readers' own CPU is not Felix's cost. They get the last cpu to themselves; the stack's containers
-      # and the players run on the rest.
+      # and the players run on the rest (cpu ids are 0 to nproc-1 on a runner). The runner's cpus are hyperthreads, so
+      # `lscpu -e` is printed to show which core the spectators share.
       - name: Keep the spectators' cpu apart from the stack and the players
         run: |
           cpus="$(nproc)"
-          echo "$cpus cpus"
+          lscpu -e
           if ((cpus < 4)); then
-            echo "a $cpus-cpu runner cannot give the spectators a cpu of their own and leave the stack three" >&2
+            echo "a $cpus-cpu runner cannot give the spectators a cpu of their own and leave the stack three; use a larger runner" >&2
             exit 1
           fi
           last=$((cpus - 1))

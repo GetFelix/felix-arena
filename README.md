@@ -264,8 +264,10 @@ cd web && npm run core && npx vite-node scripts/fanout.ts -- ../target/release/e
 ```
 
 Run that way, the readers share your machine with the broker, so the script allows a millisecond
-instead of 0.3 ms and says so. On Linux, set `FANOUT_SPECTATOR_CPUS` to a cpu list (for example `3`)
-to run them there with `taskset`, and keep the rest off it.
+instead of 0.3 ms and says so. On Linux you can isolate them as CI does: pin the stack with
+`docker update --cpuset-cpus 0-2 $(docker compose -f dev/compose.yml ps -q)`, run the script under
+`taskset -c 0-2`, and set `FANOUT_SPECTATOR_CPUS=3 FANOUT_OTHER_CPUS=0-2` so the readers run on cpu 3
+and the script uses the tighter slack.
 
 A page more than 15 ticks behind rejoins from the keyframe and says "Connection poor" until it is
 close again, which CI's `resync` job checks by slowing a watcher's link and then lifting the slowdown.
