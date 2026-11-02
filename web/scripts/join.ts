@@ -70,26 +70,36 @@ for (let i = 0; i < JOINS; i++) {
     await sleep(50);
     joined = await seen(cleo);
   }
-  // Let both pages fold a second of live ticks, then compare every tick both have.
-  await sleep(1000);
-  const [watcher, player] = await Promise.all([seen(cleo), seen(ana)]);
-  const common = Object.keys(watcher.states).filter((at) => at in player.states);
+  const j = joined!.join!;
+  // The first frame must be the match as it was then: ana's newest tick at that moment, give or take.
+  const atDraw = await seen(ana);
+  const anaThen = atDraw.newestTick! - Math.round((atDraw.atUnixMs - j.drawnAtUnixMs!) / (1000 / 30));
+  if (Math.abs(anaThen - j.drawnTick!) > STALE_TICKS) {
+    throw new Error(`join ${i + 1} drew tick ${j.drawnTick} while ana was at about ${anaThen}`);
+  }
+  // Let both pages fold enough live ticks to compare, then compare every tick both have. A page that renders in
+  // software folds fewer than 30 a second, so wait for the count, not for a second to pass. Catch-up ticks are folded
+  // too, so only ticks after the first frame count toward it.
+  let [watcher, player] = await Promise.all([seen(cleo), seen(ana)]);
+  let common: string[] = [];
+  let live = 0;
+  for (let waited = 0; ; waited += 100) {
+    common = Object.keys(watcher.states).filter((at) => at in player.states);
+    live = common.filter((at) => Number(at.split('/')[1]) > j.drawnTick!).length;
+    if (live >= MIN_COMPARED) break;
+    if (waited > 20_000) throw new Error(`join ${i + 1}: only ${live} live ticks to compare`);
+    await sleep(100);
+    [watcher, player] = await Promise.all([seen(cleo), seen(ana)]);
+  }
   const differing = common.filter((at) => watcher.states[at] !== player.states[at]);
-  if (common.length < MIN_COMPARED) throw new Error(`join ${i + 1}: only ${common.length} ticks to compare`);
   if (differing.length > 0) {
     const at = differing[0]!;
     throw new Error(`join ${i + 1}: ${differing.length} of ${common.length} ticks differ, first ${at}:
   cleo ${watcher.states[at]}
   ana  ${player.states[at]}`);
   }
-  const j = joined!.join!;
-  // The first frame must be the match as it was then: ana's newest tick at that moment, give or take.
-  const anaThen = player.newestTick! - Math.round((player.atUnixMs - j.drawnAtUnixMs!) / (1000 / 30));
-  if (Math.abs(anaThen - j.drawnTick!) > STALE_TICKS) {
-    throw new Error(`join ${i + 1} drew tick ${j.drawnTick} while ana was at about ${anaThen}`);
-  }
   const drawnAt = `${Object.keys(watcher.states)[0]?.split('/')[0]}/${j.drawnTick}`;
-  if (watcher.states[drawnAt] !== player.states[drawnAt]) {
+  if (watcher.states[drawnAt] === undefined || watcher.states[drawnAt] !== player.states[drawnAt]) {
     throw new Error(`join ${i + 1}'s first frame, ${drawnAt}, is not ana's state at that tick`);
   }
   const r = (ms: number) => Math.round(ms);
