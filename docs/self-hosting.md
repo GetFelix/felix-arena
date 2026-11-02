@@ -11,7 +11,7 @@ You do not need to clone this repository, install Rust or Node, or build anythin
 
 - Docker with Compose v2 (`docker compose version` prints a version), or Podman
   with the `docker-compose` provider (see [Podman](#podman)).
-- About 2 GB of free memory and two CPU cores.
+- About 1 GB of free memory, 2 GB of disk for the images and two CPU cores.
 - Free ports 8787 and 9400 on the machine.
 - A browser with WebGL, such as a recent Chrome, Edge, Firefox or Safari.
 
@@ -25,7 +25,7 @@ curl -fsSLO https://raw.githubusercontent.com/GetFelix/felix-arena/main/deploy/c
 docker compose up --detach
 ```
 
-The first start pulls about 400 MB of images and takes a minute or two. Check on it:
+The first start pulls about 1 GB of images (Postgres is a third of it) and takes a minute or two. Later starts take under half a minute. Check on it:
 
 ```bash
 docker compose ps
@@ -131,9 +131,8 @@ docker compose pull
 docker compose up --detach
 ```
 
-With `ARENA_VERSION` set, change it first. A new release may change what a tick
-holds. The sim then starts a new epoch (a fresh numbering of ticks) and the
-older ticks stay readable.
+With `ARENA_VERSION` set, change it first. The arenas, who may play and the
+recorded ticks stay.
 
 ### Renew the tokens
 
@@ -145,7 +144,7 @@ docker compose run --rm seed
 docker compose up --detach --force-recreate broker gateway sim
 ```
 
-If you see `unauthenticated` or `token expired` in the broker's or the sim's log, this is the fix.
+If the broker or the sim logs refused tokens, this is the fix too.
 
 ## Check the images
 
@@ -175,19 +174,18 @@ Compose at an empty config: `export DOCKER_CONFIG=$(mktemp -d)`.
 ## Troubleshooting
 
 **A port is already in use.** Something else on the machine has 8787 or 9400.
-Stop it. Compose cannot move the ports on its own, because the sign-in page's
-address is part of what Felix trusts.
+Stop it, then run `docker compose up --detach` again.
 
-**The page loads, then says it cannot reach the gateway, or sign-in fails.**
-Open the page at `127.0.0.1`, as above. A different host name is a different
-address for the sign-in page, and the browser stops it.
+**The page loads but sign-in or the game does not.** Open the page at
+`127.0.0.1`, as above. The game looks for the sign-in page at
+`http://127.0.0.1:9400` and the gateway at `127.0.0.1:8787` unless the address
+sets `&idp=` and `&gateway=`.
 
-**`seed` exits with an error.** Run `docker compose logs seed controlplane`.
-The control plane takes up to a minute to be ready on a first start, and a
-`seed` that started too early says so. `docker compose up --detach` again tries it again.
+**`seed` exits with an error.** Run `docker compose logs seed controlplane` to
+see why. `docker compose up --detach` runs it again.
 
-**The sim keeps restarting.** Run `docker compose logs sim`. A refused or
-expired token (see [Renew the tokens](#renew-the-tokens)) and a broker that has not started yet are the usual causes.
+**The sim keeps restarting.** Run `docker compose logs sim`. A refused token
+(see [Renew the tokens](#renew-the-tokens)) or a broker that is not up is the usual cause.
 
 **You want to start over.** `docker compose down --volumes`, then `up` again.
 

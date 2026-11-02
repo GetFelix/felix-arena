@@ -142,14 +142,13 @@ Felix instead.
 
 ## Release images
 
-Each release also publishes five container images to GitHub's registry, for
+Each release also publishes four container images to GitHub's registry, for
 `linux/amd64` and `linux/arm64`. Each is signed with cosign:
 
 | Image | What it is |
 | --- | --- |
 | `ghcr.io/getfelix/felix-arena-sim` | The simulation (`docker/sim.Dockerfile`). |
-| `ghcr.io/getfelix/felix-arena-gateway` | felix-gateway with the arena's scope built in (`dev/scope.toml`). |
-| `ghcr.io/getfelix/felix-arena-web` | The built web client behind nginx, on port 8080. |
+| `ghcr.io/getfelix/felix-arena-gateway` | felix-gateway with the arena's scope (`dev/scope.toml`) and the built web client, served from the gateway's port. |
 | `ghcr.io/getfelix/felix-arena-seed` | The job that creates the arenas and the tokens the broker and the sim use. |
 | `ghcr.io/getfelix/felix-arena-idp` | The stand-in identity provider, for trying the game. Never expose it. |
 
@@ -162,9 +161,24 @@ cosign verify ghcr.io/getfelix/felix-arena-sim:0.1.7 \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
-The release workflow builds all five without publishing on every pull request
+The release workflow builds all four without publishing on every pull request
 that touches `docker/` or the files they copy, so a broken image shows up
 before a tag does.
+
+## Self-hosting
+
+[docs/self-hosting.md](docs/self-hosting.md) runs the whole game on one machine
+from the release images and one compose file, with no clone, Rust or Node:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/GetFelix/felix-arena/main/deploy/compose.yml
+docker compose up --detach
+# open http://127.0.0.1:8787/play.html?arena=alpha&as=ana
+```
+
+The guide also covers changing the arenas and players, playing with other
+people, updating, renewing the tokens, Podman and troubleshooting. The `self-host`
+CI job runs this file against freshly built images and plays in a browser.
 
 ## Development stack
 
@@ -326,6 +340,7 @@ issue per piece of work.
 ## Documentation
 
 - [docs/design.md](docs/design.md): the game, the architecture, the data model, the kill cam, failure modes, targets and the build order.
+- [docs/self-hosting.md](docs/self-hosting.md): run the game on your own machine.
 - [docs/art.md](docs/art.md): the art direction, from the palette and lighting to the rules that keep new content consistent.
 - [prototype/assets/CREDITS.md](prototype/assets/CREDITS.md): the sources and licences of the models and the HDRI.
 - [Arena](https://docs.getfelix.dev/built-on-felix/arena/) in the Felix docs: how the game uses Felix.

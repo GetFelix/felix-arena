@@ -1,7 +1,7 @@
 name: Release
 
 # A v* tag releases that version: the built web client and the images
-# ghcr.io/getfelix/felix-arena-{sim,gateway,web,seed,idp} (amd64 and arm64,
+# ghcr.io/getfelix/felix-arena-{sim,gateway,seed,idp} (amd64 and arm64,
 # signed with cosign), in one GitHub release.
 #
 # A pull request that changes the images, and a manual run, build everything
@@ -53,7 +53,7 @@ jobs:
           cp -r web/dist "$name"
           tar -czf "$name.tar.gz" "$name"
           sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
-      # The web image is built from the same files.
+      # The gateway image carries the same files.
       - uses: actions/upload-artifact@v4
         with:
           name: web-dist
@@ -78,7 +78,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [sim, gateway, web, seed, idp]
+        image: [sim, gateway, seed, idp]
         arch: [amd64, arm64]
         include:
           - arch: amd64
@@ -93,7 +93,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: The built web client
-        if: matrix.image == 'web'
+        if: matrix.image == 'gateway'
         uses: actions/download-artifact@v4
         with:
           name: web-dist
@@ -160,7 +160,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [sim, gateway, web, seed, idp]
+        image: [sim, gateway, seed, idp]
     env:
       IMAGE: ghcr.io/getfelix/felix-arena-${{ matrix.image }}
     steps:
@@ -268,7 +268,7 @@ jobs:
             echo "| Image | Digest |"
             echo "| --- | --- |"
           } >> notes.md
-          for image in sim gateway web seed idp; do
+          for image in sim gateway seed idp; do
             ref="ghcr.io/getfelix/felix-arena-${image}"
             digest=$(cat "merged/merged-${image}/merged")
             cosign verify "${ref}@${digest}" \
