@@ -100,7 +100,7 @@ The project succeeds if five demonstrations work in front of a skeptic.
 |---|---|---|
 | 1 | Kill cam | After a kill, the victim's screen is playing the replay within 800 ms of the kill's tick being committed, every time. The replay's records are fetched in under 250 ms p95. Two browsers replaying the same kill hash identical tick bytes |
 | 2 | Join mid-match | A spectator opening a match in progress draws a correct frame in under 500 ms p50, and its state hash at a given tick matches a player's |
-| 3 | Slow client isolation | One player throttled to 256 kbit/s falls behind alone and says so; the others' tick latency stays within 10% of the run without them, and the throttled one recovers from a keyframe |
+| 3 | Slow client isolation | One player throttled below the rate of a match's ticks falls behind alone and says so; the others' tick latency stays within 10% of the run without them, and the throttled one recovers from a keyframe |
 | 4 | Survive broker loss | Kill the broker owning the arena's tick stream mid-match. Play resumes on the new owner with no acknowledged tick lost, and a kill cam whose window spans the failover still plays |
 | 5 | Spectator fanout | 100 spectators on one match. Players' tick latency p50 stays within 10% of the run with none, and the simulation's commit latency stays flat |
 
@@ -413,7 +413,23 @@ and is the place the browser's WebSocket ends. It differs in three ways:
 - **Range reads.** The kill cam's fetch is felix-gateway's `read` feature (0.6.0), Felix's `Client::read` from one offset to another, also authorized as a subscribe.
 
 The [throttle](https://github.com/GetFelix/felix-gateway/blob/main/docs/protocol.md#throttle)
-message carries over unchanged, for demonstration 3.
+message carries over unchanged, for demonstration 3. The gateway reads one
+session's subscriptions no faster than a link of the given speed would carry
+them, so Felix keeps delivering at full speed and that session's own queue
+fills, which is what a slow player's connection does. The dev stack's scope
+file allows it (`allow_throttle`), and a public gateway should not.
+
+**The throttle lane.** Four bots play a match, two spectators read it at full
+speed and a third is throttled. A match of four players is about 5 KB a second
+on the wire, 40 kbit/s, so the lane's default of 16 kbit/s is below it and the
+throttled session falls behind (a tab at 256 kbit/s has six times the room it
+needs and never does). The lane, `web/scripts/throttle.ts`, compares the
+other two's median trip time from the sim's commit to the page with a run
+before the throttle, allows it to grow by 10% plus a millisecond, and requires
+the throttled session to fall 15 ticks behind, measured by `web/src/behind.ts`:
+how much later than the best trip of the last minute the newest tick came. The
+play page has the same switch, shown with `&throttle` (`&throttle=64` starts
+slowed to 64 kbit/s), and `window.arena.behindTicks` is that measure.
 
 **Latency budget, in-region, one way, p50:**
 
