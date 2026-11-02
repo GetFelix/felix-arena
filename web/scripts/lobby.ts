@@ -127,8 +127,10 @@ await lobby.evaluate(
 await lobby.screenshot({ path: join(out, 'lobby.png'), timeout: 240_000 });
 await lobby.setViewportSize(SMALL);
 console.log('saved lobby.png');
-let closed = Date.now();
+// The beacon goes out as the page unloads, so the clock starts once the navigation has finished, however long a
+// loaded runner took to get there.
 await first.page.goto('about:blank');
+let closed = Date.now();
 await until('the closed tab to leave the member list', TTL_MS, async () => !listed(first.key));
 const beacon = Date.now() - closed;
 console.log(`a tab that closed normally left the member list after ${beacon} ms`);
