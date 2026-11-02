@@ -251,7 +251,7 @@ Three processes sit around Felix: the browser client, a stateless
 gateway that bridges WebSocket to Felix's QUIC protocol, and a Rust simulation
 that is the single authority for each arena, stepping it at 30 Hz. The client
 and the simulation are this project's own. The gateway is
-[felix-gateway](https://github.com/GetFelix/felix-gateway) 0.6.0, whose
+[felix-gateway](https://github.com/GetFelix/felix-gateway) 0.8.0, whose
 `binary_events` feature carries the game's ticks as binary frames, whose
 `state` feature reads the keyframe pointer, and whose `read` feature returns a
 fixed range of the log for the kill cam beside the live subscription. The plan is to ship it in this project's own image, which
