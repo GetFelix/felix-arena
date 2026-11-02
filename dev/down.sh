@@ -5,6 +5,6 @@ set -euo pipefail
 cd "$(dirname "$0")"
 source ./engine.sh
 
-"${compose[@]}" down --volumes --remove-orphans
+"${compose_all[@]}" down --volumes --remove-orphans
 rm -rf state
 echo "The development stack is down."

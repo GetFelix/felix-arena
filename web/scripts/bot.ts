@@ -1,7 +1,7 @@
 // A bot for the CI scripts: a gateway session that reads ticks and steers its craft as the offline bots do.
 // Load core before calling it.
 import { decodeTick, Inputs } from '../src/core';
-import { Gateway } from '../src/gateway';
+import { Gateway, type EventFrame } from '../src/gateway';
 import { drive } from '../src/offline';
 
 const GATEWAY = process.env.ARENA_GATEWAY ?? 'ws://127.0.0.1:8787/ws';
@@ -21,7 +21,7 @@ export async function bot(user: string, arena: string): Promise<() => void> {
   const state = { turn: user === 'eve' ? -1 : 1 };
   let slot: number | null = null;
   let control = [0, 0, 0, 0];
-  await gateway.subscribe('ticks', 'live', 'live', (frame) => {
+  const onFrame = (frame: EventFrame) => {
     const tick = decodeTick(frame.payload);
     const crafts = tick.crafts.map((c) => ({
       slot: c.slot,
@@ -40,7 +40,21 @@ export async function bot(user: string, arena: string): Promise<() => void> {
     const me = crafts.find((c) => c.slot === slot);
     control = me?.alive && tick.phase === 'playing' ? drive(me, crafts, state, tick.railIn === 0) : [0, 0, 0, 0];
     tick.free();
-  });
+  };
+  await gateway.subscribe('ticks', 'live', 'live', onFrame);
+  // A tick stream that moves to another broker ends the subscription; the bot subscribes again.
+  gateway.onError = (err) => {
+    if (err.code !== 'subscription_ended') return;
+    void (async () => {
+      for (;;) {
+        try {
+          return await gateway.subscribe('ticks', 'live', 'live', onFrame);
+        } catch {
+          await new Promise((resolve) => setTimeout(resolve, 500));
+        }
+      }
+    })();
+  };
   const timer = setInterval(
     () => gateway.send('input', inputs.next(control[0]!, control[1]!, control[2]!, control[3]!)),
     33,

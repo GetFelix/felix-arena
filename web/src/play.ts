@@ -621,7 +621,11 @@ async function main(): Promise<void> {
     let joined = false;
     const lost = new Promise<never>((_, reject) => {
       link.onError = (err) => {
-        if (err.code !== 'closed') status.textContent = String(err.message);
+        // A tick stream that moves to another broker ends the subscription and leaves the session open.
+        if (err.code === 'subscription_ended' && joined) {
+          link.close();
+          void rejoin();
+        } else if (err.code !== 'closed') status.textContent = String(err.message);
         else if (joined) void rejoin();
         else reject(err);
       };
