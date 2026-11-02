@@ -76,17 +76,17 @@ along its aim to the first enemy craft whose edge is within 0.6 m of it, or the
 first wall or cover. Dying loses the rail.
 
 **Blaster heat.** Each bolt adds 8 heat, up to a cap of 120. The blaster sheds
-3 heat on every tick it is ready to fire and does not, so firing as fast as
-it can never cools it, however the trigger is tapped. Fifteen shots in a row,
+3 heat on every tick when it could fire and does not, so firing as fast as it
+can never cools it, however the trigger is tapped. Fifteen shots in a row,
 about 2.3 seconds, reach the cap and lock the blaster. A locked blaster cools
 even with the trigger held, and fires again once its heat has fallen to 40,
-about a second later; a player who never lets go gets a cycle of a long burst,
-a short lock, then a shorter burst. A pause of a few ticks between shots
-cools it a little, so short bursts with gaps never lock it. The rail adds no
-heat, and a craft holding one cools its blaster while it fires the rail. The
-tick carries each craft's heat and whether it is locked, so every client draws
-the same bar and the kill cam replays the same overheats. The HUD shows your
-heat beside the boost, turning amber near the cap and orange when locked, and a
+about a second later. A player who never lets go gets a first burst of 15
+shots, then a cycle of 11 shots and a one-second lock, over and over. Pausing
+between shots cools it: one shot every 8 ticks, about 3.75 a second, or slower
+never locks it. The rail adds no heat, and the blaster cools
+while the rail charges. The tick carries each craft's heat and whether it is
+locked, so the kill cam replays the same overheats. The HUD shows your heat
+beside the boost, turning amber near the cap and orange when locked, and a
 locked craft glows orange above its hull. Bots ease off before the cap, each
 burst at a different heat.
 

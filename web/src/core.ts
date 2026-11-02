@@ -9,7 +9,6 @@ export {
   decodeInput,
   decodeTick,
   heatMax,
-  heatResume,
   Inputs,
   playerKey,
   Prediction,

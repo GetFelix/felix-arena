@@ -371,6 +371,25 @@ fn a_record_with_more_heat_than_the_cap_is_refused() {
 }
 
 #[test]
+fn a_record_in_the_older_craft_layout_is_refused() {
+    let mut world = free_play(0);
+    world.join(1);
+    world.join(2);
+    let record = Tick::decode(&world.snapshot(0).encode(None))
+        .unwrap()
+        .0
+        .encode(None);
+    // Header 12, match 9, the count 1, then 18 bytes a craft; the heat byte is the second from the craft's end.
+    let mut older = record.clone();
+    for craft in (0..2).rev() {
+        older.remove(22 + craft * 18 + 16);
+    }
+    assert_eq!(older.len(), record.len() - 2);
+    assert!(Tick::decode(&record).is_some());
+    assert!(Tick::decode(&older).is_none());
+}
+
+#[test]
 fn bolts_hit_damage_and_kill() {
     let mut world = free_play(0);
     world.join(1); // Coral, at (-17.5, -2) m
@@ -1038,8 +1057,8 @@ fn spawn_protection_rides_in_the_crafts_flags() {
     let tick = world.snapshot(0);
     assert!(tick.crafts[0].protected && !tick.crafts[1].protected);
     let record = tick.encode(None);
-    // Header 12, match 9, the craft count 1, then the first craft's slot.
+    // Header 12, match 9, the craft count 1, then the first craft's slot and flags; crafts are 18 bytes.
     assert_eq!(record[23] & 4, 4);
-    assert_eq!(record[23 + 17] & 4, 0);
+    assert_eq!(record[23 + 18] & 4, 0);
     assert_eq!(Tick::decode(&record), Some((tick, None)));
 }
