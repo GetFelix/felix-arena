@@ -59,8 +59,8 @@ services:
       FELIX_BOOTSTRAP_TOKEN: ${ARENA_BOOTSTRAP_TOKEN:-arena-bootstrap}
       # The IdP is plain HTTP on this stack's network.
       FELIX_CONTROLPLANE_OIDC_ALLOW_INSECURE_HTTP: "true"
-      # The broker and the sim read their tokens once at startup, and so do
-      # browsers' for a session. 30 days between `docker compose run seed`.
+      # The broker and the sim read their tokens once at startup, so these last
+      # 30 days; the guide renews them with `docker compose run seed`.
       FELIX_EXCHANGE_TOKEN_TTL_SECONDS: "2592000"
       RUST_LOG: info
     healthcheck:
@@ -102,7 +102,8 @@ services:
           -nodes -days 3650 -subj /CN=localhost -addext subjectAltName=DNS:localhost,DNS:broker \
           -addext basicConstraints=critical,CA:FALSE -addext extendedKeyUsage=serverAuth \
           -keyout /tls/tls.key -out /tls/tls.crt
-        # The broker runs as uid 65532.
+        # The broker runs as uid 65532. The other containers on this private
+        # volume can read the key too; it signs nothing outside the stack.
         chmod 644 /tls/tls.crt /tls/tls.key
     volumes:
       - tls:/tls

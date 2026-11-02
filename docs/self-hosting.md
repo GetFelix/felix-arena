@@ -11,7 +11,7 @@ You do not need to clone this repository, install Rust or Node, or build anythin
 
 - Docker with Compose v2 (`docker compose version` prints a version), or Podman
   with the `docker-compose` provider (see [Podman](#podman)).
-- About 1 GB of free memory, 2 GB of disk for the images and two CPU cores.
+- About 1 GB of free memory, 2 GB of free disk and two CPU cores.
 - Free ports 8787 and 9400 on the machine.
 - A browser with WebGL, such as a recent Chrome, Edge, Firefox or Safari.
 
@@ -25,7 +25,7 @@ curl -fsSLO https://raw.githubusercontent.com/GetFelix/felix-arena/main/deploy/c
 docker compose up --detach
 ```
 
-The first start pulls about 1 GB of images (Postgres is a third of it) and takes a minute or two. Later starts take under half a minute. Check on it:
+The first start pulls the images and takes a minute or two. Later starts take under half a minute. Check on it:
 
 ```bash
 docker compose ps
@@ -37,7 +37,7 @@ When `gateway` and `sim` say `running`, open two browser windows:
 - <http://127.0.0.1:8787/play.html?arena=alpha&as=ben>
 
 Each window signs in as the name after `as=` and puts that player's craft in
-arena `alpha`. `ana` and `ben` are on opposite teams. W, A, S and D move, the
+arena `alpha`. Teams alternate as people join. W, A, S and D move, the
 mouse aims, the left button fires and Space boosts. The match starts after a
 ten-second warmup, even if you are alone.
 
@@ -71,8 +71,12 @@ Only the gateway (port 8787) and the sign-in page (port 9400) are reachable from
 
 ## Settings
 
-Everything has a default. To change one, copy [`deploy/.env.example`](../deploy/.env.example) to
-`.env` next to `compose.yml`, edit it, and run `docker compose up --detach` again.
+Everything has a default. To change one, download [`deploy/.env.example`](../deploy/.env.example)
+as `.env` next to `compose.yml`, edit it, and run `docker compose up --detach` again:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/GetFelix/felix-arena/main/deploy/.env.example -o .env
+```
 
 | Setting | Default | What it does |
 | --- | --- | --- |
@@ -82,7 +86,11 @@ Everything has a default. To change one, copy [`deploy/.env.example`](../deploy/
 | `ARENA_WATCHERS` | `cleo` | Who may only watch. |
 | `SIM_MATCH_SECONDS` | `300` | How long a match lasts. |
 | `SIM_KILL_LIMIT` | `25` | The kills that end a match early. |
+| `SIM_WARMUP_SECONDS`, `SIM_RESULTS_SECONDS` | `10`, `15` | The pause before a match and after it. |
 | `ARENA_BIND` | `127.0.0.1` | The host address the two ports listen on. |
+| `ARENA_IDP_URL` | `http://127.0.0.1:9400` | The address a browser reaches the sign-in page at. |
+| `POSTGRES_PASSWORD`, `ARENA_BOOTSTRAP_TOKEN` | `felix`, `arena-bootstrap` | Secrets that never leave the stack's own network. Change them if others share the machine. Set them before the first `up`. |
+| `FELIX_VERSION` | the release this one was built for | The release of Felix's own images. |
 
 The names in `ARENA_PLAYERS` and `ARENA_WATCHERS` are the names you pick at sign-in.
 Changing them or the arenas needs the seed job to run again, which `up` does for you.
@@ -148,7 +156,8 @@ If the broker or the sim logs refused tokens, this is the fix too.
 
 ## Check the images
 
-Every image is signed. The release's notes on GitHub list each image's digest. To check one:
+Every image is signed. The release's notes on GitHub list each image's digest. With
+[cosign](https://docs.sigstore.dev/cosign/system_config/installation/) installed, check one:
 
 ```bash
 cosign verify ghcr.io/getfelix/felix-arena-sim:latest \
@@ -158,7 +167,7 @@ cosign verify ghcr.io/getfelix/felix-arena-sim:latest \
 
 ## Podman
 
-Run the same file with `podman compose`, through the `docker-compose` provider
+Everything above works with `podman compose` in place of `docker compose`, through the `docker-compose` provider
 (version 2.20 or later):
 
 ```bash
