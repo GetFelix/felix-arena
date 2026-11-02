@@ -45,7 +45,7 @@ presence and the lobby are
 a TTL, and who may play or watch is a Felix RBAC role, enforced through tokens
 the control plane
 [narrows](https://github.com/GetFelix/felix/blob/main/docs/auth.md#control-plane-token-exchange-flow)
-to one arena. Tick streams are to be replicated across three brokers, so a
+to one arena. Tick streams are replicated across three brokers, so a
 match can continue after its broker
 [fails](https://github.com/GetFelix/felix/blob/main/docs/semantics.md#failover).
 

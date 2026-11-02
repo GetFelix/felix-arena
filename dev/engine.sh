@@ -29,3 +29,9 @@ if [[ "$engine" == podman && -z "${DOCKER_CONFIG:-}" ]]; then
   DOCKER_CONFIG="$(mktemp -d)"
   export DOCKER_CONFIG
 fi
+
+# The cluster file needs Compose 2.24 or later. On an older one, down.sh and
+# up.sh's clean start still work on the single-broker stack.
+if ! "${compose_all[@]}" config --quiet >/dev/null 2>&1; then
+  compose_all=("${compose[@]}")
+fi

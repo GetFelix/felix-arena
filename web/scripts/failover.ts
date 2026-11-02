@@ -146,7 +146,7 @@ const browser = await chromium.launch({
 const page = await browser.newPage({ viewport: { width: 640, height: 360 } });
 const pageErrors: string[] = [];
 page.on('pageerror', (e) => pageErrors.push(String(e)));
-await page.goto(`${base}?arena=${ARENA}&as=cleo`, { waitUntil: 'load' });
+await page.goto(`${base}?arena=${ARENA}&as=cleo&quality=low`, { waitUntil: 'load' });
 await page.waitForSelector('#loading', { state: 'detached', timeout: 180_000 });
 type Page = Pick<ArenaDebug, 'newestTick' | 'reconnects'>;
 const arena = () =>
@@ -204,13 +204,20 @@ try {
   );
   console.log(`the spectator's session: ${events.join(', ') || 'nothing ended'}`);
 
+  // The commit time is when the sim began a commit, which may have hung through the election, so the wait the
+  // spectator saw is bounded too.
+  const waited = resumed.at - last.at;
+  console.log(`the spectator waited ${waited} ms between them`);
   if (pause >= MAX_PAUSE_MS) failures.push(`the pause was ${Math.round(pause)} ms, over ${MAX_PAUSE_MS}`);
+  if (waited >= MAX_PAUSE_MS + 1000) failures.push(`the spectator waited ${waited} ms for the next tick`);
   if (resumed.epoch !== last.epoch) failures.push(`the sim's epoch went ${last.epoch} to ${resumed.epoch}`);
   if (resumed.match !== last.match) failures.push(`the match went ${last.match} to ${resumed.match}`);
   if (resumed.tick <= last.tick) failures.push(`the tick numbering went back, ${last.tick} to ${resumed.tick}`);
   if ((await owner()) === leader) failures.push(`${STREAM} is still owned by ${leader}`);
 
   // Every tick handed out before the kill was committed, so the new owner must hold it, as the same bytes.
+  // The spectator keeps receiving while the log is read, so only the ticks it held when the read began are compared.
+  const held = seen.slice();
   const logged = new Map<number, Uint8Array>();
   const reader = await Gateway.connect(GATEWAY, ARENA, await signIn('cleo'));
   for (let from = seen[0]!.offset; ; ) {
@@ -220,10 +227,10 @@ try {
     from = page.nextOffset;
   }
   const same = (a: Uint8Array | undefined, b: Uint8Array) => a?.length === b.length && a.every((v, k) => v === b[k]);
-  const before = seen.filter((t) => t.at < killedAt);
+  const before = held.filter((t) => t.at < killedAt);
   const lost = before.filter((t) => !logged.has(t.offset));
   const changed = before.filter((t) => logged.has(t.offset) && !same(logged.get(t.offset), t.bytes));
-  const afterwards = seen.filter((t) => t.at >= killedAt && !same(logged.get(t.offset), t.bytes));
+  const afterwards = held.filter((t) => t.at >= killedAt && !same(logged.get(t.offset), t.bytes));
   console.log(`${before.length} ticks were handed out before the kill; ${lost.length} are missing from the log`);
   if (lost.length > 0) failures.push(`${lost.length} acknowledged ticks are gone, from tick ${lost[0]!.tick}`);
   if (changed.length > 0)
@@ -277,6 +284,12 @@ try {
   for (const stop of stops) stop();
   spectator.close();
   await browser.close();
-  if (service) compose('start', service);
+  if (service) {
+    try {
+      compose('start', service);
+    } catch (err) {
+      console.error(`could not start ${service} again: ${err}`);
+    }
+  }
 }
 process.exit(0);

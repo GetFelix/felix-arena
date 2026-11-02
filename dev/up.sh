@@ -10,9 +10,11 @@ cd "$(dirname "$0")"
 source ./engine.sh
 
 health=("${ARENA_BROKER_PORT:-8080}")
+cluster_file=()
 if [[ "${1:-}" == "--cluster" ]]; then
   compose+=(-f compose.cluster.yml)
-  health=(8080 8081 8082)
+  cluster_file=(-f dev/compose.cluster.yml)
+  health=("${ARENA_BROKER_PORT:-8080}" 8081 8082)
 fi
 
 "${compose_all[@]}" down --volumes --remove-orphans >/dev/null 2>&1 || true
@@ -62,7 +64,7 @@ for _ in $(seq 1 90); do
     fi
     echo "Felix is ready, with arenas alpha and bravo."
     echo "  gateway:      ws://127.0.0.1:8787"
-    echo "  sim's ticks:  $engine compose -f dev/compose.yml logs -f sim"
+    echo "  sim's ticks:  $engine compose -f dev/compose.yml ${cluster_file[*]} logs -f sim"
     exit 0
   fi
   sleep 2
