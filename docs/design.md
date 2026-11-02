@@ -276,7 +276,7 @@ and never per match. That sidesteps the lack of an all-or-nothing create
 | Match start offsets | Stream state keys on the tick stream | `match/<n>` | Written atomically with the match's first tick |
 | Player inputs | Ephemeral stream | `arena.input.<arena>` | None, at most once by design |
 | Who is connected | Cache keys with TTL | `arena.members.<arena>` / `<session>` | TTL 30 s, refreshed every 10 s |
-| Simulation epoch | Counter | `arena.epoch.<arena>` / `sim` | Log-backed |
+| Simulation epoch | A field in every tick | Header of the tick records | Log-backed: a new sim starts one past the newest tick's |
 | Lobby: every arena's status | Cache keys with TTL | `arena.lobby` / `<arena>` | TTL 10 s, refreshed by the sim |
 | Who may play, who may watch | Felix RBAC roles | `role:arena-<arena>-play`, `role:arena-<arena>-watch` | Control plane store |
 
@@ -883,10 +883,10 @@ artifact.
 | A lost input | Nothing; the stream is at most once | The next input repeats it | Nothing |
 | A player's uplink stalls | Nothing | The sim holds the last input for 100 ms, then coasts the craft | Your craft snaps back when you return |
 | Gateway restarts | Nothing | The browser reconnects and joins from the keyframe | "Reconnecting" for a second or two |
-| Sim crashes | Keeps the log | Ticks stop. Clients show "Server reconnecting" after 500 ms without a tick. The replacement sim reads the `keyframe` state key, reads ticks from it to the tail to recover the latest state, adds 1 to the epoch counter and resumes at the next tick | The match pauses for the restart, about 3 seconds, and the clock pauses with it |
+| Sim crashes | Keeps the log | Ticks stop. Clients show "Server reconnecting" after 500 ms without a tick. The replacement sim reads the `keyframe` state key, reads ticks from it to the tail, rebuilds the match from them (craft, bolt and clock state from the newest tick; scores and the roster's tallies from the keyframe and the events since), and resumes at the next tick in an epoch one past the newest it read. If the newest epoch's ticks hold no keyframe yet (it was restarted twice within two seconds), the keyframe and tail of the epoch before are used. Players take their craft back with their first input; one that stays silent for 10 seconds leaves | The match pauses for the restart, about 3 seconds, and the clock pauses with it. A craft's health regeneration starts over, a dead craft waits out its respawn again and a spawn shield is full |
 | Two sims for one arena briefly | Accepts both writers | Every tick carries the sim's epoch. Clients and replays ignore ticks from an epoch lower than the highest seen | A stutter |
 | Owning broker lost | Promotes a replica holding every acknowledged tick | The sim's commit fails or times out. It pauses game time and retries through `ClusterClient`. Subscriptions follow the shard to its new owner or end, and clients resubscribe from their last offset plus one | A pause of about the failover window, then play continues |
-| A commit unanswered at failover | May or may not have landed | The sim retries the same tick. A commit is not idempotent, so it may land twice; readers drop a repeated `(epoch, tick)` | Nothing |
+| A commit unanswered at failover | May or may not have landed | The sim writes the next tick; the unanswered one may have landed. A commit is not idempotent, so a tick may land twice; readers drop a repeated `(epoch, tick)` | Nothing |
 | Kill cam window trimmed | Refuses with `CursorTooOld` | Skips the replay | "Replay no longer available" |
 | Newest ticks dropped with nothing after them | No signal ([felix#965](https://github.com/GetFelix/felix/issues/965)) | Rarely matters: a tick follows every 33 ms, so a drop shows as a gap at once. During the results screen the sim keeps committing the final keyframe once a second, so the match's last record is never the one lost | Nothing |
 
@@ -933,7 +933,7 @@ signed release images, a Docker Compose install and a Helm chart.
 | Identity provider | Your own, or Dex in the compose file |
 | Gateway | `ghcr.io/getfelix/felix-arena-gateway`, which also serves the built web client |
 | Simulation | `ghcr.io/getfelix/felix-arena-sim`, one replica or a few |
-| Seed | A one-shot job that creates arenas: streams, caches, counter and roles |
+| Seed | A one-shot job that creates arenas: streams, caches and roles |
 
 A deployment sets the broker's low-delay batching settings and keeps
 `drop_new`. A standalone broker needs a long-lived node token until

@@ -233,6 +233,35 @@ jobs:
       - if: failure()
         run: docker compose -f dev/compose.yml logs --no-color
 
+  restart:
+    name: sim restart
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - run: dev/up.sh
+        env:
+          SIM_WARMUP_SECONDS: '5'
+          SIM_KILL_LIMIT: '99'
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@0.2.129
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Killing the sim mid-match pauses play for under 5 s, and the match goes on in the next epoch with its scores
+        working-directory: web
+        run: |
+          npm ci
+          npm run core
+          npx vite-node scripts/restart.ts
+      - if: failure()
+        run: docker compose -f dev/compose.yml logs --no-color
+
   lobby:
     name: lobby
     runs-on: ubuntu-latest
@@ -426,3 +455,55 @@ jobs:
           npx vite-node scripts/identity.ts -- http://127.0.0.1:4173/play.html
       - if: failure()
         run: docker compose -f dev/compose.yml logs --no-color
+
+  self-host:
+    name: self-host
+    runs-on: ubuntu-latest
+    env:
+      ARENA_VERSION: local
+      COMPOSE: docker compose -f deploy/compose.yml
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@0.2.129
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Build the web client and the four images the guide pulls
+        run: |
+          (cd web && npm ci && npm run core && npm run build)
+          for image in sim gateway seed idp; do
+            docker build -f "docker/$image.Dockerfile" -t "ghcr.io/getfelix/felix-arena-$image:local" .
+          done
+      - name: The guide's compose file starts, and the sim holds 30 Hz
+        run: |
+          $COMPOSE up --detach
+          for _ in $(seq 1 60); do curl -sf http://127.0.0.1:8787/play.html >/dev/null && break; sleep 2; done
+          curl -sf http://127.0.0.1:8787/oidc
+          for _ in $(seq 1 45); do
+            hz="$($COMPOSE logs --no-color sim 2>&1 | grep 'ticks committed' | grep -E 'arena="?alpha"? ' \
+              | tail -n +2 | tail -1 | grep -oE 'hz=[0-9.]+' | cut -d= -f2 || true)"
+            if [[ -n "$hz" ]] && awk -v hz="$hz" 'BEGIN { exit !(hz >= 28 && hz <= 31) }'; then exit 0; fi
+            sleep 2
+          done
+          echo "the sim did not report 30 Hz" >&2
+          exit 1
+      - name: A browser signs in through it and plays
+        working-directory: web
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          node scripts/input-to-pixel.mjs 'http://127.0.0.1:8787/play.html?arena=alpha&as=ana&quality=low'
+      - name: Stopping and starting keeps the arenas, and the ticks flow again
+        run: |
+          $COMPOSE down
+          $COMPOSE up --detach
+          for _ in $(seq 1 60); do curl -sf http://127.0.0.1:8787/play.html >/dev/null && break; sleep 2; done
+          cd web && node scripts/input-to-pixel.mjs 'http://127.0.0.1:8787/play.html?arena=alpha&as=ana&quality=low'
+      - if: failure()
+        run: $COMPOSE logs --no-color

@@ -449,6 +449,93 @@ fn bolts_hit_damage_and_kill() {
     assert_eq!(world.crafts()[1].health, MAX_HEALTH);
 }
 
+/// A world with a kill in it, and every tick it made on the way.
+fn match_with_a_kill() -> (World, Vec<Tick>) {
+    let mut world = free_play(0);
+    world.join(1);
+    world.join(2);
+    for (slot, x) in [(0, -300), (1, 300)] {
+        let mut craft = world.crafts()[slot];
+        (craft.x, craft.z) = (x, 1250);
+        world.crafts_mut()[slot] = craft;
+    }
+    let fire = Input {
+        seq: 1,
+        move_x: 0,
+        move_z: 0,
+        aim: 0,
+        buttons: FIRE,
+    };
+    let mut ticks = Vec::new();
+    while world.snapshot(0).state.scores == [0, 0] {
+        world.step(|slot| (slot == 0).then_some(fire));
+        ticks.push(world.snapshot(0));
+    }
+    (world, ticks)
+}
+
+#[test]
+fn a_recovered_world_carries_the_match_on_with_the_same_scores() {
+    let (mut world, ticks) = match_with_a_kill();
+    let keyframe = ticks.iter().rposition(Tick::is_keyframe).unwrap();
+    assert!(
+        keyframe + 1 < ticks.len(),
+        "the kill comes after a keyframe"
+    );
+    let rules = Rules {
+        warmup: u16::MAX,
+        ..Rules::default()
+    };
+    let mut recovered = World::recover(rules, &ticks[keyframe], &ticks[keyframe + 1..]).unwrap();
+    let last = ticks.last().unwrap();
+    assert_eq!(recovered.tick(), last.tick);
+    assert_eq!(recovered.state(), last.state);
+    assert_eq!(recovered.crafts(), &last.crafts[..]);
+    // Both go on to the next keyframe, whose roster carries the tally.
+    while !world.snapshot(0).is_keyframe() {
+        world.step(|_| None);
+        recovered.step(|_| None);
+    }
+    let (was, now) = (world.snapshot(0), recovered.snapshot(0));
+    assert!(was.is_keyframe() && now.is_keyframe());
+    assert_eq!(now.keyframe, was.keyframe);
+    assert_eq!(now.state.scores, [1, 0]);
+    let roster = now.keyframe.unwrap().players;
+    assert_eq!((roster[0].kills, roster[1].deaths), (1, 1));
+}
+
+#[test]
+fn a_new_match_in_the_tail_clears_the_tally() {
+    let (_, ticks) = match_with_a_kill();
+    let keyframe = ticks.iter().rposition(Tick::is_keyframe).unwrap();
+    // The tick after the keyframe starts a fresh match, with a kill in it that
+    // the start wipes.
+    let mut fresh = ticks[keyframe + 1].clone();
+    fresh.state.phase = Phase::Playing;
+    fresh.state.scores = [0, 0];
+    fresh.events.push(Event::Killed {
+        victim: 1,
+        killer: 0,
+        replay_from: None,
+    });
+    let mut base = ticks[keyframe].clone();
+    base.keyframe.as_mut().unwrap().players[0].kills = 3;
+    let rules = Rules::default();
+    let mut world = World::recover(rules, &base, &[fresh]).unwrap();
+    while !world.snapshot(0).is_keyframe() {
+        world.step(|_| None);
+    }
+    let roster = world.snapshot(0).keyframe.unwrap().players;
+    assert!(roster.iter().all(|p| (p.kills, p.deaths) == (0, 0)));
+}
+
+#[test]
+fn only_a_keyframe_can_be_recovered_from() {
+    let (_, ticks) = match_with_a_kill();
+    let plain = ticks.iter().find(|t| !t.is_keyframe()).unwrap();
+    assert!(World::recover(Rules::default(), plain, &[]).is_none());
+}
+
 fn world_health_before(hits: usize) -> u8 {
     MAX_HEALTH - (hits as u8) * BOLT_DAMAGE
 }

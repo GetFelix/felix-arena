@@ -7,6 +7,7 @@ mod config;
 mod inputs;
 mod latency;
 mod lobby;
+mod recovery;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -19,9 +20,7 @@ use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
 use crate::config::Config;
-
-/// Until the sim keeps an epoch counter, every run is epoch 0.
-const EPOCH: u16 = 0;
+use crate::recovery::Recovered;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -47,6 +46,7 @@ async fn main() -> Result<()> {
             config.tenant.clone(),
             config.namespace.clone(),
         );
+        let recovered = recover(&client, &config, arena).await;
         let inbox = Arc::default();
         let status = Arc::default();
         let members = Arc::default();
@@ -74,7 +74,8 @@ async fn main() -> Result<()> {
         ));
         arenas.spawn(arena::run(
             arena.clone(),
-            EPOCH,
+            recovered.epoch,
+            recovered.world,
             config.rules,
             inbox,
             status,
@@ -104,6 +105,28 @@ async fn main() -> Result<()> {
         return Err(err).context("an arena stopped");
     }
     Ok(())
+}
+
+/// Where `arena` left off, asked again until the log answers: starting over
+/// on a failed read would write a low epoch that readers ignore.
+async fn recover(client: &ClusterClient, config: &Config, arena: &str) -> Recovered {
+    loop {
+        match recovery::load(
+            client,
+            &config.tenant,
+            &config.namespace,
+            arena,
+            config.rules,
+        )
+        .await
+        {
+            Ok(recovered) => return recovered,
+            Err(err) => {
+                warn!(arena, error = %format!("{err:#}"), "cannot read the log to recover");
+                tokio::time::sleep(Duration::from_secs(1)).await;
+            }
+        }
+    }
 }
 
 /// Connect to Felix, retrying until a broker answers: in a fresh deployment

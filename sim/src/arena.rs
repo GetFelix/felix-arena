@@ -35,7 +35,8 @@ pub(crate) fn match_key(number: u32) -> String {
     format!("match/{number}")
 }
 
-/// Step `arena`'s world on a 30 Hz timer forever with the inputs arriving in
+/// Step `arena`'s world, or `resume` when a crashed sim's match is being
+/// carried on, on a 30 Hz timer forever with the inputs arriving in
 /// `inbox`, handing each tick's record and the state keys it writes to
 /// `commit`, which answers with the tick's log offset.
 ///
@@ -45,6 +46,7 @@ pub(crate) fn match_key(number: u32) -> String {
 pub(crate) async fn run<C, F>(
     arena: String,
     epoch: u16,
+    resume: Option<World>,
     rules: Rules,
     inbox: Arc<Mutex<Inbox>>,
     status: Arc<Mutex<Status>>,
@@ -55,15 +57,23 @@ pub(crate) async fn run<C, F>(
 {
     let mut timer = tokio::time::interval(TICK);
     timer.set_missed_tick_behavior(MissedTickBehavior::Skip);
-    let mut world = World::with_rules(0, rules);
-    let mut players = Players::default();
+    let (mut world, mut started_match) = match resume {
+        Some(world) => {
+            // The match's start key is already in the log, and writing it
+            // again would move a replay of the match's start forward.
+            let number = world.snapshot(epoch).match_number;
+            info!(arena = %arena, epoch, tick = world.tick(), number, "recovered from the log");
+            (world, Some(number))
+        }
+        None => (World::with_rules(0, rules), None),
+    };
+    let mut players = Players::recovered(&world, Instant::now());
     let mut last_due: Option<Instant> = None;
     let mut previous_commit: Option<Duration> = None;
     let mut report = Report::new(Instant::now());
     // The match whose start is committed. A start whose commit failed or
     // timed out is written again with the next tick; a timed-out commit may
     // have landed, so the key can end up a tick late, never missing.
-    let mut started_match: Option<u32> = None;
     let mut offsets = Offsets::default();
     let mut phase: Option<Phase> = None;
     loop {
@@ -285,7 +295,7 @@ mod tests {
 
     use tokio::time::Instant;
 
-    use felix_arena_core::{Rules, Tick, Timing};
+    use felix_arena_core::{Rules, Tick, Timing, World};
 
     use felix_arena_core::Event;
 
@@ -329,11 +339,21 @@ mod tests {
         length: Duration,
         answer: impl Fn(u32) -> Result<Duration, ()> + Send + 'static,
     ) -> Vec<(Header, Instant, Vec<(String, Vec<u8>)>)> {
+        resumed_commits(None, length, answer).await
+    }
+
+    /// As [`keyed_commits`], for an arena carrying on with `resume`.
+    async fn resumed_commits(
+        resume: Option<World>,
+        length: Duration,
+        answer: impl Fn(u32) -> Result<Duration, ()> + Send + 'static,
+    ) -> Vec<(Header, Instant, Vec<(String, Vec<u8>)>)> {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let log = Arc::clone(&seen);
         let arena = tokio::spawn(run(
             "a".into(),
             1,
+            resume,
             Rules::default(),
             Arc::default(),
             Arc::default(),
@@ -384,6 +404,26 @@ mod tests {
             let names: Vec<String> = keys.iter().map(|(name, _)| name.clone()).collect();
             assert_eq!(names, expected, "tick {}", header.tick);
         }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_resumed_arena_carries_on_numbering_without_rewriting_the_match_start() {
+        let mut world = World::with_rules(7, Rules::default());
+        for _ in 0..45 {
+            world.step(|_| None);
+        }
+        let seen = resumed_commits(Some(world), Duration::from_secs(1), |_| {
+            Ok(Duration::from_millis(2))
+        })
+        .await;
+        assert_eq!(seen[0].0.tick, 46);
+        assert_eq!(seen[0].0.epoch, 1);
+        // Tick 60 is the next keyframe; no tick writes `match/7`.
+        let names: Vec<&str> = seen
+            .iter()
+            .flat_map(|(_, _, keys)| keys.iter().map(|(name, _)| name.as_str()))
+            .collect();
+        assert_eq!(names, [KEYFRAME_KEY]);
     }
 
     #[tokio::test(start_paused = true)]
