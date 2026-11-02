@@ -13,3 +13,5 @@ Models used from Space Kit: `craft_speederA`, `craft_speederB`, `craft_speederD`
 `turret_single`, `hangar_roundA` and `satelliteDish_large`. They are the GLB
 files from the pack's `Models/GLTF format` folder, unmodified. The style frame and
 the game (`web/src/models.ts`) recolour them at load time by material name.
+
+Sounds and music are credited in [audio/CREDITS.md](audio/CREDITS.md).
