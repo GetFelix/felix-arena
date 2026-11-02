@@ -255,6 +255,27 @@ describe('after the sim stalls', () => {
   });
 });
 
+describe('ticks read back from the log', () => {
+  it('say nothing about the link, so they do not move the delay or the clock', () => {
+    const arrivals = cruise(120).map((s) => ({ snapshot: s, arrivedMs: s.tick * TICK_MS + 20 }));
+    const interpolator = new Interpolator();
+    for (const a of arrivals.slice(0, 60)) interpolator.push(a.snapshot, a.arrivedMs);
+    const before = interpolator.sample(arrivals[59]!.arrivedMs)!;
+    const delay = interpolator.delayMs;
+    // Seconds late, and enough of them to read as a stall if they counted.
+    for (const a of arrivals.slice(60, 90)) interpolator.push(a.snapshot, a.arrivedMs + 5000, false);
+    expect(interpolator.delayMs).toBe(delay);
+    const after = interpolator.sample(arrivals[59]!.arrivedMs + 16)!;
+    expect(Math.abs(after.renderTick - before.renderTick)).toBeLessThan(1);
+  });
+
+  it('leave nothing to sample by until a live tick arrives', () => {
+    const interpolator = new Interpolator();
+    interpolator.push(cruise(2)[1]!, 1000, false);
+    expect(interpolator.sample(1000)).toBeNull();
+  });
+});
+
 describe('ArrivalClock', () => {
   it('moves only when eight arrivals in a row sit more than two ticks above the earliest', () => {
     const clock = new ArrivalClock(60);

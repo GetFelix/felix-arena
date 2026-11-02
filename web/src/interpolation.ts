@@ -209,7 +209,8 @@ export class Interpolator {
 
   /** The view at `nowMs` on the page's clock, or `null` before the first tick. Call once a frame, with rising times. */
   sample(nowMs: number): View | null {
-    if (this.ticks.length === 0) return null;
+    // Nothing to time the page's clock by until a live tick has arrived: a tick read back from the log carries no arrival.
+    if (this.ticks.length === 0 || this.arrivals.length === 0) return null;
     // The earliest arrival in the window is the one the network delayed least; the render time trails it.
     const target = nowMs - this.arrivals.earliest - this.delay;
     const dt = this.lastSampleMs === null ? 0 : Math.max(0, nowMs - this.lastSampleMs);
