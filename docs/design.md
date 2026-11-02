@@ -913,7 +913,7 @@ and saying so is honest, and it is what demonstration 4 shows.
 | Spectator join | Under 500 ms p50 to a correct frame | Cold client, mid-match |
 | Frame time | 16.7 ms p95 at 1080p, High or Medium tier, laptop iGPU | Frame timing over a scripted 2-minute match |
 | Sim step | Under 2 ms for 8 players and 64 bolts | Sim timings |
-| Spectator fanout, 0 to 100 | Players' tick latency p50 and the sim's commit p50 within 10% plus 1 ms of the quiet phases | Spectators as Felix subscriptions, with four bot players measuring through the gateway |
+| Spectator fanout, 0 to 100 | Players' tick latency p50 and the sim's commit p50 within 10% plus 0.3 ms of the quiet phases | Spectators as Felix subscriptions on a cpu of their own, with four bot players measuring through the gateway |
 | Failover pause | Under 10 s on the dev cluster, whose control plane declares a broker lost after 3 s | CI's `broker failover` job: the sim's commit time of the last tick before the kill against the first after it |
 
 As in felix-canvas, the 100 spectators are made as Felix subscriptions from a
@@ -928,17 +928,30 @@ gateway, each timing every tick from the sim's commit to its arrival. It reads
 20 seconds alone, then 20 seconds while `sim/examples/spectators.rs` holds 100
 spectators on the same arena, then 20 seconds alone again. A player's median
 trip may not exceed the slower of the two quiet phases by more than 10% plus
-a millisecond (the 100 readers share a two-core runner with the broker, and cost
-it about 0.5 to 0.7 ms there); taking the slower keeps a machine that warms up
-during the run from hiding a cost. The example counts ticks only once all 100 have
+0.3 ms of timer and scheduler noise; taking the slower keeps a machine that warms
+up during the run from hiding a cost. The example counts ticks only once all 100 have
 subscribed and fails if one sees under 90% of the ticks the sim commits in that
 time, or one does not decode.
+
+The 100 readers are processes too, and on a shared machine their own CPU slows
+the broker, the sim and the players. That is the test machine's cost, not
+Felix's, so CI keeps it out of the numbers. On its 4-cpu runner the spectators
+run under `taskset` on the last cpu alone, and the stack's containers
+(`docker update --cpuset-cpus`) and the players run on the other three. The
+broker still does all the fanout work for the 100 subscribers on its own cpus,
+which is the cost the check is after. The cpus are hyperthreads of two cores, so
+the spectators' cpu shares execution units with one of the others; the pinning
+removes scheduling contention and not that. A runner with fewer than 4 cpus
+fails the job instead of running a check that would measure the readers. Without
+`FANOUT_SPECTATOR_CPUS` (a local run) the script says the readers share cpu with
+the stack and allows a millisecond of slack, because they then add 0.5 to 0.8 ms
+of their own.
 
 The sim's commit time is checked the same way. Every tick carries how long the
 previous tick took to commit, from the sim sending it to Felix to Felix
 answering that it is durable. Felix fans a tick out after that, so the number
 cannot show fanout work; it moves only if the spectators take CPU from the
-sim or the broker, which is what a shared test machine can do.
+sim or the broker, which is what the cpu pinning above keeps them from doing.
 
 The players are gateway sessions in Node rather than browsers, as in the
 throttle lane, so the check measures the server path and not the page's

@@ -1,8 +1,11 @@
 // The spectator fanout check (docs/design.md, demonstration 5), through the dev stack: four bots play a match and each
 // measures the trip of every tick from the sim's commit to its arrival. It does that alone, then with a Rust example
 // holding spectators as Felix clients (`sim/examples/spectators.rs`), then alone again. A player's median trip, and the
-// sim's commit time, which every tick carries for the one before, may grow by 10% plus a millisecond over the
+// sim's commit time, which every tick carries for the one before, may grow by 10% plus a small slack over the
 // slower of the two quiet phases, so a machine that warms up during the run cannot hide a cost.
+// The readers' own CPU is not Felix's cost, so on a shared machine FANOUT_SPECTATOR_CPUS (a `taskset -c` list, such as
+// `3`) keeps them on cores the broker, the sim and these players do not use; CI also pins the stack and this script
+// to the other cores. Without it the numbers include the readers competing for CPU, and the run says so.
 // Usage: npx vite-node scripts/fanout.ts -- <spectators binary> [spectators, default 100] [seconds a phase, default 20]
 import { spawn } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -21,12 +24,14 @@ const CONTROL_PLANE = process.env.ARENA_CONTROL_PLANE ?? 'http://127.0.0.1:8443'
 const BROKER = process.env.ARENA_BROKER ?? '127.0.0.1:5000';
 const BROKER_CA = process.env.ARENA_BROKER_CA ?? new URL('../../dev/state/broker-cert.pem', import.meta.url).pathname;
 const PHASE_MS = Number(seconds) * 1000;
+const SPECTATOR_CPUS = process.env.FANOUT_SPECTATOR_CPUS?.trim();
 /**
- * What a median may grow by: 10%, and a millisecond. The 100 readers share the runner's two cores with the broker, so
- * their own CPU shows up as about 0.5 to 0.7 ms on a median of about 1 ms.
+ * What a median may grow by: 10%, and a little for timer and scheduler noise on a median of about 1 ms. With the
+ * readers on their own cores the slack stands for that noise alone. Without that, 100 readers sharing the broker's
+ * cores add 0.5 to 0.8 ms of their own, so the slack is a millisecond and the run says it did not isolate them.
  */
 const GROWTH = 1.1;
-const SLACK_US = 1000;
+const SLACK_US = SPECTATOR_CPUS ? 300 : 1000;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 loadCore(readFileSync(new URL('../src/core/felix_arena_core_bg.wasm', import.meta.url)));
@@ -50,7 +55,8 @@ async function spectatorToken(): Promise<string> {
 /** Runs the example and answers when every spectator is reading, and how the run ended. */
 function holdSpectators(tokenFile: string, readSeconds: number) {
   const timeout = setTimeout(() => child.kill(), (readSeconds + 90) * 1000);
-  const child = spawn(binary!, [], {
+  const [command, args] = SPECTATOR_CPUS ? ['taskset', ['-c', SPECTATOR_CPUS, binary!]] : [binary!, []];
+  const child = spawn(command, args, {
     env: {
       ...process.env,
       SPECTATORS_COUNT: count,
@@ -83,6 +89,11 @@ function holdSpectators(tokenFile: string, readSeconds: number) {
   return { ready, done, summary, kill: () => child.kill() };
 }
 
+console.log(
+  SPECTATOR_CPUS
+    ? `the spectators run on cpu ${SPECTATOR_CPUS}, apart from the stack and the players`
+    : 'the spectators share cpu with the stack and the players, so their own cost is in the numbers',
+);
 const players = ['ana', 'ben', 'dan', 'eve'];
 const fresh = () => new Map(players.map((user) => [user, new Legs(100_000)]));
 // Each bot adds to whatever is in `trips` now, so each phase starts a new set and keeps the old.
