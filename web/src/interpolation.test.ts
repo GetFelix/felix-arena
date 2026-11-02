@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { decodeTick, loadCore, World } from './core';
 import {
+  ArrivalClock,
   Interpolator,
   MAX_DELAY_MS,
   MIN_DELAY_MS,
@@ -251,5 +252,26 @@ describe('after the sim stalls', () => {
     const interpolator = new Interpolator();
     for (const a of arrivals) interpolator.push(a.snapshot, a.arrivedMs);
     expect(interpolator.delayMs).toBeGreaterThan(MIN_DELAY_MS);
+  });
+});
+
+describe('ArrivalClock', () => {
+  it('moves only when eight arrivals in a row sit more than two ticks above the earliest', () => {
+    const clock = new ArrivalClock(60);
+    for (let n = 0; n < 30; n++) expect(clock.add(n, n * TICK_MS)).toBe(false);
+    // Seven ticks three ticks late is a hiccup; the eighth makes it a new clock.
+    const moved = [];
+    for (let n = 30; n < 38; n++) moved.push(clock.add(n, (n + 3) * TICK_MS));
+    expect(moved).toEqual([false, false, false, false, false, false, false, true]);
+    expect(clock.earliest).toBeCloseTo(3 * TICK_MS);
+    expect(clock.length).toBe(8);
+  });
+
+  it('is not moved by a run that comes back down', () => {
+    const clock = new ArrivalClock(60);
+    for (let n = 0; n < 30; n++) clock.add(n, n * TICK_MS);
+    for (let n = 30; n < 37; n++) clock.add(n, (n + 3) * TICK_MS);
+    expect(clock.add(37, 37 * TICK_MS)).toBe(false);
+    expect(clock.earliest).toBeCloseTo(0);
   });
 });

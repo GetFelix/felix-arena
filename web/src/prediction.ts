@@ -322,7 +322,8 @@ export class Pacer {
 
   /** Learn from the tick `tick` that arrived at `arrivedMs`, whose own craft had applied input `lastInput`. */
   tick(tick: number, arrivedMs: number, lastInput: number | null): void {
-    this.arrivals.add(tick, arrivedMs);
+    // The clock stepped back by the stall, so the slots now numbered below the last one sent are due again.
+    if (this.arrivals.add(tick, arrivedMs)) this.sent = null;
     if (lastInput === null) return;
     // The sim applying no new input, or two at once, means inputs reach it on the edge of its tick: move half a tick.
     // Only ticks in a row say anything: across a lost tick the sim rightly applied two inputs.
