@@ -126,14 +126,16 @@ export class Interpolator {
     return this.ticks.at(-1);
   }
 
-  /** Take a tick that arrived at `arrivedMs` on the page's clock. A tick from an older epoch, or a repeat, is ignored. */
-  push(tick: Snapshot, arrivedMs: number): void {
+  /** Take a tick that arrived at `arrivedMs` on the page's clock, which sets the clock and the delay unless it is not `timed`. A tick from an older epoch, or a repeat, is ignored. */
+  push(tick: Snapshot, arrivedMs: number, timed = true): void {
     const newest = this.newest;
     if (newest && tick.epoch < newest.epoch) return;
     if (newest && tick.epoch === newest.epoch && tick.tick <= newest.tick) return;
     if (newest && tick.epoch > newest.epoch) this.reset();
     this.ticks.push(tick);
     if (this.ticks.length > KEEP) this.ticks.shift();
+    // A tick read back from the log arrived late for reasons that say nothing about the link.
+    if (!timed) return;
     this.arrivals.push(arrivedMs - tick.tick * TICK_MS);
     if (this.arrivals.length > WINDOW) this.arrivals.shift();
     this.delay = Math.min(MAX_DELAY_MS, Math.max(MIN_DELAY_MS, TICK_MS + lateness(this.arrivals) + MARGIN_MS));

@@ -468,7 +468,7 @@ async function main(): Promise<void> {
       }),
   });
 
-  const onTick = (tick: Tick, arrivedMs: number, offset: number | null, payload: Uint8Array) => {
+  const onTick = (tick: Tick, arrivedMs: number, offset: number | null, payload: Uint8Array, timed = true) => {
     debug.ticks++;
     if (OFFLINE && offset !== null) {
       localLog.set(offset, { tick: tick.tick, payload });
@@ -490,9 +490,9 @@ async function main(): Promise<void> {
       spawnedIn.clear();
       pacer = new Pacer();
     }
-    interpolator.push(s, arrivedMs);
+    interpolator.push(s, arrivedMs, timed);
     const mine = own && s.crafts.find((c) => c.slot === own!.slot);
-    pacer.tick(s.tick, arrivedMs, mine ? mine.lastInput : null);
+    pacer.tick(s.tick, arrivedMs, mine ? mine.lastInput : null, timed);
     for (const e of tick.events) {
       if (!(e.kind === 'fired' && e.slot === own?.slot)) {
         due.push({
@@ -560,7 +560,7 @@ async function main(): Promise<void> {
       return;
     }
     if (catchingUp) foldTick(tick, frame.offset);
-    else onTick(tick, performance.now(), frame.offset, frame.payload);
+    else onTick(tick, performance.now(), frame.offset, frame.payload, !frame.filled);
     tick.free();
     if (!catchingUp) joiningSince = null;
     if (!catchingUp && liveMs === null) {

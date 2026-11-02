@@ -57,22 +57,35 @@ const cleo = await open('cleo', `&lose=${LOSE}`);
 const compared = new Set<string>();
 const differing: string[] = [];
 const kills = new Map<string, boolean>();
-let firstTick: number | null = null;
-const started = Date.now();
-while (Date.now() - started < RUN_MS) {
-  await sleep(10_000);
+let first: { match: number; tick: number } | null = null;
+const key = (k: { match: number; tick: number }) => `${k.match}:${k.tick}`;
+/** Whether `k` happened after cleo joined, in this match or a later one. */
+const after = (k: { match: number; tick: number }) =>
+  first !== null && (k.match > first.match || (k.match === first.match && k.tick >= first.tick));
+async function sample(): Promise<Seen> {
   const [watcher, player] = await Promise.all([seen(cleo), seen(ana)]);
-  firstTick ??= Math.min(...Object.keys(watcher.states).map((at) => Number(at.split('/')[1])));
+  first ??= {
+    match: watcher.match?.number ?? 0,
+    tick: Math.min(...Object.keys(watcher.states).map((at) => Number(at.split('/')[1]))),
+  };
   for (const at of Object.keys(watcher.states).filter((at) => at in player.states)) {
     compared.add(at);
     if (watcher.states[at] !== player.states[at] && !differing.includes(at)) differing.push(at);
   }
-  const key = (k: { match: number; tick: number }) => `${k.match}:${k.tick}`;
   const theirs = new Set(watcher.kills.map(key));
-  for (const k of player.kills) if (k.tick >= firstTick) kills.set(key(k), theirs.has(key(k)));
-  for (const k of watcher.kills) if (!player.kills.some((p) => key(p) === key(k))) kills.set(key(k), false);
+  const ours = new Set(player.kills.map(key));
+  for (const k of player.kills) if (after(k)) kills.set(key(k), theirs.has(key(k)));
+  for (const k of watcher.kills) if (!ours.has(key(k))) kills.set(key(k), false);
+  return watcher;
 }
-const [watcher] = await Promise.all([seen(cleo)]);
+const started = Date.now();
+while (Date.now() - started < RUN_MS) {
+  await sleep(10_000);
+  await sample();
+}
+// A kill in the last moments may have reached one page before the other: let both settle, then judge once more.
+await sleep(2000);
+const watcher = await sample();
 for (const stop of stopBots) stop();
 await browser.close();
 

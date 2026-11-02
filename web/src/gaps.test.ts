@@ -94,9 +94,9 @@ it('keeps the catch-up flag of the tick that showed the gap', async () => {
     [1, true],
     [2, true],
     [3, true],
-    [4, false],
-    [5, false],
-    [6, false],
+    [4, true],
+    [5, true],
+    [6, true],
     [7, false],
   ]);
 });
