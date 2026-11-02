@@ -2,6 +2,7 @@
 // Load core before calling it.
 import { decodeTick, Inputs } from '../src/core';
 import { Gateway } from '../src/gateway';
+import type { Legs } from '../src/legs';
 import { drive } from '../src/offline';
 
 const GATEWAY = process.env.ARENA_GATEWAY ?? 'ws://127.0.0.1:8787/ws';
@@ -12,8 +13,8 @@ const FIRST_SEQ: Record<string, number> = { dan: 1000, ben: 15000, eve: 30000 };
 /** Each bot's slot once it has found itself. */
 export const botSlots = new Map<string, number | null>();
 
-/** Play `user` in `arena` until the answer is called. */
-export async function bot(user: string, arena: string): Promise<() => void> {
+/** Play `user` in `arena` until the answer is called. `legs`, when given, names where each tick's trip is added. */
+export async function bot(user: string, arena: string, legs?: () => Legs): Promise<() => void> {
   const answer = await fetch(`${IDP}/token?sub=${user}&aud=felix-arena`);
   const token = ((await answer.json()) as { id_token: string }).id_token;
   const gateway = await Gateway.connect(GATEWAY, arena, token);
@@ -23,6 +24,11 @@ export async function bot(user: string, arena: string): Promise<() => void> {
   let control = [0, 0, 0, 0];
   await gateway.subscribe('ticks', 'live', 'live', (frame) => {
     const tick = decodeTick(frame.payload);
+    const timing = tick.timing;
+    if (timing) {
+      legs?.().add(frame, timing);
+      timing.free();
+    }
     const crafts = tick.crafts.map((c) => ({
       slot: c.slot,
       violet: c.violet,

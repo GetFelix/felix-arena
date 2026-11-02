@@ -206,6 +206,15 @@ The development stack's gateway allows it; a public one should not.
 `throttle` job checks that a slowed spectator falls behind while two others'
 trip time stays within 10% of what it was.
 
+CI's `spectator fanout` job holds 100 spectators on the tick stream, each its own Felix client,
+and checks that four players' trip time and the sim's commit time stay within 10% of a run
+without them. With the dev stack up, build the example and point the script at it:
+
+```sh
+cargo build --release -p felix-arena-sim --example spectators
+cd web && npm run core && npx vite-node scripts/fanout.ts -- ../target/release/examples/spectators 100 30
+```
+
 `npm run smoke` checks the same path from Node: ticks arrive at 30 Hz, the
 WebAssembly build decodes keyframes to the state hashes the sim logged, a
 range read returns the same records while the live subscription keeps going,

@@ -879,15 +879,26 @@ and saying so is honest, and it is what demonstration 4 shows.
 | Spectator join | Under 500 ms p50 to a correct frame | Cold client, mid-match |
 | Frame time | 16.7 ms p95 at 1080p, High or Medium tier, laptop iGPU | Frame timing over a scripted 2-minute match |
 | Sim step | Under 2 ms for 8 players and 64 bolts | Sim timings |
-| Spectator fanout, 0 to 100 | Players' tick latency p50 within 10% | Spectators as Felix subscriptions, plus real browsers for the players |
+| Spectator fanout, 0 to 100 | Players' tick latency p50 and the sim's commit p50 within 10% | Spectators as Felix subscriptions, with four bot players measuring through the gateway |
 | Failover pause | Under the control plane's failover window plus 1 s | The failover end-to-end test |
 
 As in felix-canvas, the 100 spectators are made as Felix subscriptions from a
 small Rust example, because 100 browser tabs are not a measurable population.
-Real browsers carry the player-facing paths. Each spectator is one Felix client
-in the gateway, because a connection carries one token
+Each spectator is one Felix client with its own connection, as it is in the
+gateway, because a connection carries one token
 ([felix#969](https://github.com/GetFelix/felix/issues/969)); that cost is part of
 what demonstration 5 measures.
+
+**The fanout check.** `web/scripts/fanout.ts` plays four bots through the
+gateway, each timing every tick from the sim's commit to its arrival. It reads
+30 seconds alone, then starts `sim/examples/spectators.rs` with 100
+spectators on the same arena and reads 30 seconds more. Each player's median
+trip may grow by 10% plus a millisecond. So may the median of the sim's own
+commit time, which every tick carries for the one before it, and the example
+fails if a spectator sees fewer than 90% of the ticks or one does not decode.
+The players are gateway sessions in Node rather than browsers, as in the
+throttle lane, so the check measures the server path and not the page's
+rendering, which 100 spectators do not touch.
 
 ## Self-hosting
 
