@@ -1,7 +1,7 @@
 // Your own craft and shots: stepped through core the moment an input is sent, and pulled back into line with each
 // tick. docs/design.md, "Interpolation and prediction", describes the rules this follows.
 import { boltSpeed, Prediction, type Tick } from './core';
-import { TICK_MS } from './interpolation';
+import { ArrivalClock, TICK_MS } from './interpolation';
 
 /** One tick of the player's controls, as an input carries them. */
 export interface Control {
@@ -24,6 +24,9 @@ export interface OwnCraft {
   heading: number;
   health: number;
   boostCooldown: number;
+  /** The blaster's heat, up to core's `heatMax()`, and whether it is locked until it cools. */
+  heat: number;
+  overheated: boolean;
   /** Under spawn protection, which firing gives up at once. */
   protected: boolean;
 }
@@ -288,6 +291,8 @@ export class Own {
       heading: base.alive ? aim : base.heading,
       health: base.health,
       boostCooldown: base.boostCooldown,
+      heat: base.heat,
+      overheated: base.overheated,
       protected: base.protected,
     };
     base.free();
@@ -311,7 +316,7 @@ const SETTLE = 12;
  * input the sim skips or applies twice, which the prediction then has to take back.
  */
 export class Pacer {
-  private arrivals: number[] = [];
+  private arrivals = new ArrivalClock(PACE_WINDOW);
   private phase = 0;
   private sent: number | null = null;
   private lastApplied: number | null = null;
@@ -322,8 +327,8 @@ export class Pacer {
 
   /** Learn from the tick `tick` that arrived at `arrivedMs`, whose own craft had applied input `lastInput`. */
   tick(tick: number, arrivedMs: number, lastInput: number | null): void {
-    this.arrivals.push(arrivedMs - tick * TICK_MS);
-    if (this.arrivals.length > PACE_WINDOW) this.arrivals.shift();
+    // The clock stepped back by the stall, so the slots now numbered below the last one sent are due again.
+    if (this.arrivals.add(tick, arrivedMs)) this.sent = null;
     if (lastInput === null) return;
     // The sim applying no new input, or two at once, means inputs reach it on the edge of its tick: move half a tick.
     // Only ticks in a row say anything: across a lost tick the sim rightly applied two inputs.
@@ -347,7 +352,7 @@ export class Pacer {
       this.fallback = nowMs + TICK_MS;
       return true;
     }
-    const slot = Math.floor((nowMs - Math.min(...this.arrivals) - this.phase) / TICK_MS);
+    const slot = Math.floor((nowMs - this.arrivals.earliest - this.phase) / TICK_MS);
     if (this.sent !== null && slot <= this.sent && slot > this.sent - 30) return false;
     this.sent = slot;
     return true;

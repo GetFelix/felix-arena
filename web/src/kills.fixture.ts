@@ -25,6 +25,7 @@ export function botMatch(ticks: number): Fixture {
       x: c.x,
       z: c.z,
       rail: c.rail,
+      heat: c.heat,
     }));
     const railThere = tick.railIn === 0;
     tick.free();

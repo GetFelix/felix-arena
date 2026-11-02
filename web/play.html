@@ -243,6 +243,22 @@
       .meter.boost .bar i {
         background: var(--accent);
       }
+      .meter.heat .bar {
+        width: 90px;
+      }
+      .meter.heat .bar i {
+        background: var(--muted);
+      }
+      .meter.heat.warm .bar i {
+        background: #ffb347;
+      }
+      .meter.heat.hot > span {
+        color: #ff6a3d;
+      }
+      .meter.heat.hot .bar i {
+        background: #ff6a3d;
+        box-shadow: 0 0 8px #ff6a3d;
+      }
       .pips {
         display: flex;
         gap: 4px;
@@ -753,6 +769,10 @@
         <div class="meter boost">
           <span>Boost</span>
           <div class="bar"><i id="boost"></i></div>
+        </div>
+        <div class="meter heat" id="heat-meter">
+          <span>Heat</span>
+          <div class="bar"><i id="heat"></i></div>
         </div>
         <div class="meter">
           <span>Rail</span>
