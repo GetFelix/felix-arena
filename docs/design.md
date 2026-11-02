@@ -75,6 +75,17 @@ during which the craft keeps moving and aiming; then a beam goes from its nose
 along its aim to the first enemy craft whose edge is within 0.6 m of it, or the
 first wall or cover. Dying loses the rail.
 
+**Blaster heat.** Each bolt adds 8 heat. Heat is shed, 3 a tick, only on ticks
+the craft is not holding fire, so holding fire fills the 120 cap in 15 shots,
+about 2.4 seconds, and the blaster locks. It fires again once its heat has
+fallen to 40, which takes about a second with the trigger released. Short
+bursts with pauses never reach the cap. The rail adds no heat and still
+charges while the blaster is locked. The tick carries each craft's heat and
+whether it is locked, so every client draws the same bar and the kill cam
+replays the same overheats. The HUD shows your heat beside the boost, and a
+locked craft glows orange above its hull. Bots let up at a different heat each
+burst, so now and then one still overheats.
+
 **Controls.** WASD or the left stick moves; the craft strafes, so it always
 faces where you aim. The keys move the craft up, left, down and right on the
 screen, worked out at the craft's own place in the view, and the game camera
@@ -89,7 +100,7 @@ the victim, killer and orbit views, and Space skips to the respawn.
 
 | Weapon | Behaviour | Why it is here |
 |---|---|---|
-| Blaster | Default. A bolt at 30 m/s, 12 damage, 6 shots a second | A projectile with travel time is visible in replays and forgiving of latency |
+| Blaster | Default. A bolt at 30 m/s, 12 damage, 6 shots a second, locked for a moment by 2.4 seconds of held fire | A projectile with travel time is visible in replays and forgiving of latency |
 | Rail | Picked up from the centre crystal, which spawns one every 30 seconds. Charges for 0.5 s, then a hitscan beam for 70 damage; 3 shots | One high-stakes moment per half minute, which is what makes a kill cam worth watching |
 
 ## Success criteria
@@ -331,7 +342,7 @@ without the ones before it:
 | Header | Epoch (2 bytes), flags with the keyframe bit (1) and the timed bit (2), reserved (1), match number (4), tick number (4), little-endian | 12 bytes |
 | Timing, with the timed bit | Commit start in µs since the Unix epoch (8), the sim step (4), the previous tick's commit in µs (4) | 16 bytes |
 | Match | Phase: warmup, playing or results (1), ticks left in the phase (2), team scores (2 × 2), ticks until a rail is on the crystal, 0 while one is (2) | 9 bytes |
-| Crafts | A count (1), then per craft: slot (1), flags with alive (bit 0), team (bit 1), spawn protection (bit 2) and the fire cooldown (bits 3 to 7) (1), position and velocity in centimetres (4 × 2), heading (2), health (1), boost cooldown (1), last input sequence applied (2), rail shots in the low 2 bits and rail charge ticks above them (1) | 17 bytes each |
+| Crafts | A count (1), then per craft: slot (1), flags with alive (bit 0), team (bit 1), spawn protection (bit 2) and the fire cooldown (bits 3 to 7) (1), position and velocity in centimetres (4 × 2), heading (2), health (1), boost cooldown (1), last input sequence applied (2), blaster heat in the low 7 bits and overheated in the top bit (1), rail shots in the low 2 bits and rail charge ticks above them (1) | 18 bytes each |
 | Projectiles | A count (2), then per live bolt: id (2), owner (1), position (4), heading (2) | 9 bytes each |
 | Events | A count (2), then each a kind byte and its fields: joined (slot, team, player key), left, spawned, fired (slot, bolt, input sequence), hit (target, attacker, bolt, damage), killed (victim, killer, `replay_from`: the 8-byte offset its kill cam starts from, all ones for none), picked up (slot), railed (slot, target or 255, where the beam ended) | 2 to 11 bytes each |
 | Keyframe only | The roster: a count (1), then per player, slot, team, player key, kills and deaths | 1 + 14 bytes a player |

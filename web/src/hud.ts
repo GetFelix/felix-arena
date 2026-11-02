@@ -1,4 +1,4 @@
-// The live HUD: score and clock, kill feed, your hull, boost and rail, the warmup and respawn banners, and the
+// The live HUD: score and clock, kill feed, your hull, boost, blaster heat and rail, the warmup and respawn banners, and the
 // scoreboard, which Tab shows and the results screen holds open.
 import { callsign, clock, type Kill, type Match, type Standing } from './match';
 
@@ -15,6 +15,10 @@ export interface Status {
   /** 0 when the boost is ready, up to 1 just after a dash. */
   boostCooling: number;
   rail: number;
+  /** 0 for a cool blaster up to 1 at the cap. */
+  heat: number;
+  /** Locked until it cools. */
+  overheated: boolean;
   /** Seconds until you respawn, while dead. */
   respawnIn: number | null;
 }
@@ -59,6 +63,8 @@ export class Hud {
     if (me) {
       this.style('health', `${me.alive ? me.health : 0}%`);
       this.style('boost', `${Math.round((1 - me.boostCooling) * 100)}%`);
+      this.style('heat', `${Math.round(me.heat * 100)}%`);
+      this.toggle('heat-meter', 'hot', me.overheated);
       this.html('rail', [0, 1, 2].map((i) => `<i${i < me.rail ? ' class="on"' : ''}></i>`).join(''));
     }
 
@@ -137,6 +143,10 @@ export class Hud {
     if (this.shown.get(`${id}%`) === width) return;
     this.shown.set(`${id}%`, width);
     el(id).style.width = width;
+  }
+
+  private toggle(id: string, name: string, on: boolean): void {
+    el(id).classList.toggle(name, on);
   }
 
   private hide(id: string, hidden: boolean): void {

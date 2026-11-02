@@ -27,6 +27,13 @@ pub const BOOST_COOLDOWN: u8 = 90;
 pub const BOLT_SPEED: i32 = 3000;
 /// Ticks between shots: six a second.
 pub const FIRE_COOLDOWN: u8 = 5;
+/// Heat that locks the blaster: a bolt adds [`HEAT_PER_SHOT`], so holding fire overheats it in 15 shots, 2.4 seconds.
+pub const HEAT_MAX: u8 = 120;
+pub const HEAT_PER_SHOT: u8 = 8;
+/// Heat shed each tick the trigger is not held, so a full blaster is cool again in 40 ticks.
+pub const HEAT_COOL: u8 = 3;
+/// An overheated blaster fires again once its heat has fallen to this.
+pub const HEAT_RESUME: u8 = 40;
 pub const BOLT_DAMAGE: u8 = 12;
 pub const MAX_HEALTH: u8 = 100;
 /// Ticks without damage before health regenerates.
@@ -693,6 +700,17 @@ pub struct Shot {
 pub fn steer(craft: &mut Craft, control: Option<Input>) -> Option<Shot> {
     craft.boost_cooldown = craft.boost_cooldown.saturating_sub(1);
     craft.fire_cooldown = craft.fire_cooldown.saturating_sub(1);
+    // Heat only builds while the blaster is being fired; the rail has its own charge and adds none.
+    let firing = control.is_some_and(|input| input.buttons & FIRE != 0)
+        && !craft.overheated
+        && craft.rail == 0
+        && craft.alive;
+    if !firing {
+        craft.heat = craft.heat.saturating_sub(HEAT_COOL);
+        if craft.overheated && craft.heat <= HEAT_RESUME {
+            craft.overheated = false;
+        }
+    }
     if let Some(input) = control {
         craft.last_input = input.seq;
     }
@@ -738,13 +756,19 @@ pub fn steer(craft: &mut Craft, control: Option<Input>) -> Option<Shot> {
                 (vx, vz) = (fixed::scale(dx, BOOST_SPEED), fixed::scale(dz, BOOST_SPEED));
                 craft.boost_cooldown = BOOST_COOLDOWN;
             }
-            if input.buttons & FIRE != 0 && craft.fire_cooldown == 0 && craft.charge == 0 {
+            if input.buttons & FIRE != 0
+                && craft.fire_cooldown == 0
+                && craft.charge == 0
+                && (craft.rail > 0 || !craft.overheated)
+            {
                 // Firing gives up spawn protection.
                 craft.protected = false;
                 if craft.rail > 0 {
                     craft.charge = RAIL_CHARGE;
                 } else {
                     craft.fire_cooldown = FIRE_COOLDOWN;
+                    craft.heat = (craft.heat + HEAT_PER_SHOT).min(HEAT_MAX);
+                    craft.overheated = craft.heat == HEAT_MAX;
                     shot = Some(muzzle(craft, input.aim, input.seq, false));
                 }
             }

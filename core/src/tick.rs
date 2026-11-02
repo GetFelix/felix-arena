@@ -2,7 +2,7 @@
 //! The layout is the table in docs/design.md, "Ticks are commits". All
 //! numbers are little-endian.
 
-use crate::world::{MAX_HEALTH, Phase, Team};
+use crate::world::{HEAT_MAX, MAX_HEALTH, Phase, Team};
 
 /// One tick: the whole dynamic state of the match, so any single tick can be
 /// drawn without the ones before it.
@@ -72,6 +72,11 @@ pub struct Craft {
     pub boost_cooldown: u8,
     /// The sequence number of the last input applied to this craft.
     pub last_input: u16,
+    /// How hot the blaster is, up to [`HEAT_MAX`](crate::world::HEAT_MAX).
+    pub heat: u8,
+    /// The blaster hit the cap and stays locked until the heat falls to
+    /// [`HEAT_RESUME`](crate::world::HEAT_RESUME).
+    pub overheated: bool,
     /// Rail shots left, at most 3.
     pub rail: u8,
     /// Ticks until a charging rail fires, or 0 when none is charging.
@@ -186,6 +191,8 @@ const VIOLET: u8 = 2;
 const PROTECTED: u8 = 4;
 const FIRE_SHIFT: u8 = 3;
 const CHARGE_SHIFT: u8 = 2;
+/// The top bit of a craft's heat byte.
+const OVERHEATED: u8 = 0x80;
 /// A railed event's target when the beam hit no craft.
 const NO_TARGET: u8 = 255;
 /// A killed event's `replay_from` when there is none.
@@ -206,6 +213,8 @@ impl Craft {
             health: MAX_HEALTH,
             boost_cooldown: 0,
             last_input: 0,
+            heat: 0,
+            overheated: false,
             rail: 0,
             charge: 0,
             protected: false,
@@ -258,6 +267,7 @@ impl Tick {
             out.push(craft.health);
             out.push(craft.boost_cooldown);
             out.extend_from_slice(&craft.last_input.to_le_bytes());
+            out.push(craft.heat.min(HEAT_MAX) | if craft.overheated { OVERHEATED } else { 0 });
             out.push(craft.rail.min(3) | (craft.charge.min(31) << CHARGE_SHIFT));
         }
         out.extend_from_slice(
@@ -342,11 +352,18 @@ impl Tick {
                     health: r.u8()?,
                     boost_cooldown: r.u8()?,
                     last_input: r.u16()?,
+                    heat: 0,
+                    overheated: false,
                     rail: 0,
                     charge: 0,
                     protected: flags & PROTECTED != 0,
                 })
                 .and_then(|mut craft| {
+                    let heat = r.u8()?;
+                    if heat & !OVERHEATED > HEAT_MAX {
+                        return None;
+                    }
+                    (craft.heat, craft.overheated) = (heat & !OVERHEATED, heat & OVERHEATED != 0);
                     let rail = r.u8()?;
                     if rail >> CHARGE_SHIFT > 31 {
                         return None;

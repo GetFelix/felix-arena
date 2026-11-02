@@ -1,7 +1,10 @@
 use std::time::{Duration, Instant};
 
 use crate::input::{BOOST, FIRE};
-use crate::world::{BOLT_DAMAGE, MAX_HEALTH, RESPAWN_AFTER, SPAWN_PROTECTION, SPAWN_SIGHT};
+use crate::world::{
+    BOLT_DAMAGE, HEAT_MAX, HEAT_PER_SHOT, HEAT_RESUME, MAX_HEALTH, RESPAWN_AFTER, SPAWN_PROTECTION,
+    SPAWN_SIGHT,
+};
 use crate::{
     CRAFT_RADIUS, Event, Input, Phase, Rules, Team, Tick, Timing, World, bolt_ticks, player_key,
     steer,
@@ -120,7 +123,7 @@ fn a_busy_tick_fits_the_design_budget() {
     let tick = world.snapshot(0);
     let bytes = tick.encode(None).len();
     assert!(
-        bytes <= 12 + 9 + 1 + 8 * 17 + 2 + tick.bolts.len() * 9 + 2 + tick.events.len() * 11,
+        bytes <= 12 + 9 + 1 + 8 * 18 + 2 + tick.bolts.len() * 9 + 2 + tick.events.len() * 11,
         "{bytes}"
     );
     assert!(!tick.bolts.is_empty());
@@ -249,6 +252,86 @@ fn a_boost_dashes_and_cools_down() {
     assert_eq!(world.crafts()[0].boost_cooldown, 90);
     world.step(|_| Some(boost));
     assert!(world.crafts()[0].vz < 2000);
+}
+
+/// Steps a world holding `buttons` for `ticks`, and answers how many bolts were fired.
+fn hold(world: &mut World, buttons: u8, ticks: u32) -> usize {
+    let held = Input {
+        seq: 1,
+        move_x: 0,
+        move_z: 0,
+        aim: 0,
+        buttons,
+    };
+    (0..ticks)
+        .filter(|_| {
+            world.step(|_| Some(held));
+            world
+                .snapshot(0)
+                .events
+                .iter()
+                .any(|e| matches!(e, Event::Fired { .. }))
+        })
+        .count()
+}
+
+#[test]
+fn holding_fire_overheats_the_blaster_until_it_cools() {
+    let mut world = free_play(0);
+    world.join(1);
+    // Fifteen bolts fill the blaster, and it stays locked while the trigger is held.
+    assert_eq!(
+        hold(&mut world, FIRE, 75),
+        usize::from(HEAT_MAX / HEAT_PER_SHOT)
+    );
+    assert!(world.crafts()[0].overheated);
+    assert!(world.crafts()[0].heat > HEAT_MAX - 5 * 3);
+    // Letting go cools it, and it fires again only once below the resume heat.
+    while world.crafts()[0].heat > HEAT_RESUME {
+        assert!(world.crafts()[0].overheated);
+        hold(&mut world, 0, 1);
+    }
+    assert!(!world.crafts()[0].overheated);
+    assert_eq!(hold(&mut world, FIRE, 1), 1);
+}
+
+#[test]
+fn bursts_with_pauses_never_overheat() {
+    let mut world = free_play(0);
+    world.join(1);
+    for _ in 0..20 {
+        assert_eq!(hold(&mut world, FIRE, 25), 5);
+        hold(&mut world, 0, 30);
+        assert!(!world.crafts()[0].overheated);
+    }
+}
+
+#[test]
+fn the_rail_adds_no_heat_and_ignores_an_overheated_blaster() {
+    let mut world = free_play(0);
+    world.join(1);
+    hold(&mut world, FIRE, 75);
+    let heat = world.crafts()[0].heat;
+    world.crafts_mut()[0].rail = 1;
+    world.crafts_mut()[0].fire_cooldown = 0;
+    hold(&mut world, FIRE, 1);
+    assert!(world.crafts()[0].charge > 0);
+    assert!(world.crafts()[0].heat <= heat);
+}
+
+#[test]
+fn a_record_with_more_heat_than_the_cap_is_refused() {
+    let mut world = free_play(0);
+    world.join(1);
+    let mut tick = world.snapshot(0);
+    // A value no other field of this tick holds, so it can be found in the record.
+    tick.crafts[0].heat = 119;
+    let mut record = tick.encode(None);
+    let at: Vec<usize> = (0..record.len()).filter(|&i| record[i] == 119).collect();
+    assert_eq!(at.len(), 1);
+    assert!(Tick::decode(&record).is_some());
+    record[at[0]] = HEAT_MAX + 1;
+    assert!(Tick::decode(&record).is_none());
 }
 
 #[test]
@@ -407,7 +490,7 @@ fn unknown_bits_are_refused() {
     let record = tick.encode(None);
     // The flags, the reserved byte, the phase and the first craft's rail
     // charge. Every bit of a craft's flags has a meaning.
-    for (at, bit) in [(2, 4), (3, 1), (12, 4), (38, 128)] {
+    for (at, bit) in [(2, 4), (3, 1), (12, 4), (39, 128)] {
         let mut changed = record.clone();
         changed[at] |= bit;
         assert!(Tick::decode(&changed).is_none(), "byte {at}");
