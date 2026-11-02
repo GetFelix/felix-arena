@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { decodeTick, loadCore, World } from './core';
 import {
+  ArrivalClock,
   Interpolator,
   MAX_DELAY_MS,
   MIN_DELAY_MS,
@@ -215,5 +216,62 @@ describe('interpolation', () => {
     expect(turn(65000, 500, 0.5)).toBeCloseTo((65000 + 518) % 65536, 6);
     expect(turn(500, 65000, 0.5)).toBeCloseTo(65536 + 500 - 518, 6);
     expect(turn(0, 16384, 0.5)).toBe(8192);
+  });
+});
+
+describe('after the sim stalls', () => {
+  /** Ticks that arrive on schedule, except that from `stallAt` the sim has skipped `skipped` ticks of wall time. */
+  function stalled(ticks: Snapshot[], stallAt: number, skipped: number): Arrival[] {
+    return ticks.map((s) => ({
+      snapshot: s,
+      arrivedMs: (s.tick + (s.tick >= stallAt ? skipped : 0)) * TICK_MS + 20,
+    }));
+  }
+
+  it('moves the page clock onto the ticks within a quarter of a second, not the window', () => {
+    const arrivals = stalled(cruise(300), 100, 6);
+    const interpolator = new Interpolator();
+    let next = 0;
+    const settled: View[] = [];
+    for (let now = arrivals[0]!.arrivedMs; now < arrivals.at(-1)!.arrivedMs; now += 1000 / 60) {
+      while (arrivals[next] && arrivals[next]!.arrivedMs <= now) {
+        interpolator.push(arrivals[next]!.snapshot, arrivals[next]!.arrivedMs);
+        next++;
+      }
+      const view = interpolator.sample(now)!;
+      // The 8 ticks it takes to see the stall are 267 ms; after another half second the view is steady again.
+      if (next > 100 + 8 + 15) settled.push(view);
+    }
+    expect(settled.length).toBeGreaterThan(300);
+    expect(settled.filter((v) => v.extrapolating)).toEqual([]);
+    expect(Math.max(...settled.map((v) => v.delayMs))).toBeLessThan(MIN_DELAY_MS + 15);
+  });
+
+  it('does not take a single late tick, or a short run of them, for a stall', () => {
+    const arrivals = deliver(cruise(200), (random) => (random() < 0.1 ? 20 + random() * 40 : random() * 20));
+    const interpolator = new Interpolator();
+    for (const a of arrivals) interpolator.push(a.snapshot, a.arrivedMs);
+    expect(interpolator.delayMs).toBeGreaterThan(MIN_DELAY_MS);
+  });
+});
+
+describe('ArrivalClock', () => {
+  it('moves only when eight arrivals in a row sit more than two ticks above the earliest', () => {
+    const clock = new ArrivalClock(60);
+    for (let n = 0; n < 30; n++) expect(clock.add(n, n * TICK_MS)).toBe(false);
+    // Seven ticks three ticks late is a hiccup; the eighth makes it a new clock.
+    const moved = [];
+    for (let n = 30; n < 38; n++) moved.push(clock.add(n, (n + 3) * TICK_MS));
+    expect(moved).toEqual([false, false, false, false, false, false, false, true]);
+    expect(clock.earliest).toBeCloseTo(3 * TICK_MS);
+    expect(clock.length).toBe(8);
+  });
+
+  it('is not moved by a run that comes back down', () => {
+    const clock = new ArrivalClock(60);
+    for (let n = 0; n < 30; n++) clock.add(n, n * TICK_MS);
+    for (let n = 30; n < 37; n++) clock.add(n, (n + 3) * TICK_MS);
+    expect(clock.add(37, 37 * TICK_MS)).toBe(false);
+    expect(clock.earliest).toBeCloseTo(0);
   });
 });

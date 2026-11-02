@@ -698,7 +698,13 @@ already dead, fades out.
 two ticks around a render time that runs two ticks (67 ms) behind the newest
 received (`web/src/interpolation.ts`). The page's clock for the sim is the
 earliest arrival over the last two seconds, the tick the network delayed
-least. The delay is one tick plus the 95th percentile of how much later than
+least. When the sim stalls it skips the ticks that fell due instead of making
+them up, so its tick numbers fall behind wall time for good and every arrival
+sits later against that clock. Eight arrivals in a row more than two ticks above
+the window's earliest are taken to be that: the older arrivals are dropped and
+the render time jumps to the new clock, rather than running ahead of the ticks
+for the rest of the window (`ArrivalClock`; input pacing uses the same clock).
+The delay is one tick plus the 95th percentile of how much later than
 that the ticks arrived, plus 10 ms, kept between 67 and 100 ms, so it grows
 toward 100 ms when arrival jitter rises. The render time follows its target at
 most 10% faster or slower than real time, so a change in the delay never shows
