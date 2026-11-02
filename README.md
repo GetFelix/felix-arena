@@ -250,6 +250,17 @@ The development stack's gateway allows it; a public one should not.
 `throttle` job checks that a slowed spectator falls behind while two others'
 trip time stays within 10% of what it was.
 
+CI's `spectator fanout` job holds 100 spectators on the tick stream, each its own Felix client,
+and checks that four players' trip time and the sim's commit time stay within 10% (plus half a
+millisecond) of the quiet phases before and after. To run it yourself, start the dev stack with a
+match long enough for the run, build the example and point the script at it:
+
+```sh
+SIM_WARMUP_SECONDS=5 SIM_MATCH_SECONDS=600 SIM_KILL_LIMIT=999 dev/up.sh
+cargo build --release -p felix-arena-sim --example spectators
+cd web && npm run core && npx vite-node scripts/fanout.ts -- ../target/release/examples/spectators 100 20
+```
+
 A page more than 15 ticks behind rejoins from the keyframe and says "Connection poor" until it is
 close again, which CI's `resync` job checks by slowing a watcher's link and then lifting the slowdown.
 Try it by hand with `play.html?arena=alpha&as=cleo&throttle=16`, then click the slow-link switch off.
