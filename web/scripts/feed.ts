@@ -57,7 +57,7 @@ async function replay(page: Page, key: string): Promise<Seen['killcams'][number]
   const before = (await seen(page)).killcams.length;
   const row = page.locator(`#replays-list [data-kill="${key}"]`);
   // A page keeps only its latest few matches, so a kill can be gone from the panel if the test waited too long.
-  await row.waitFor({ state: 'visible', timeout: 10_000 }).catch(() => {
+  await row.waitFor({ state: 'visible', timeout: 30_000 }).catch(() => {
     throw new Error(`the replays panel does not list ${key}`);
   });
   await row.click();

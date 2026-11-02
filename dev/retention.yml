@@ -3,7 +3,8 @@
 # four players. CI's `kill feed` job uses it to see a replay refused as
 # trimmed. Too short and a slow runner's fresh page cannot replay a kill before
 # it goes; too long and the spectator's page, which keeps five matches, drops
-# the match before retention trims it.
+# the match before retention trims it (matches
+# are set by SIM_MATCH_SECONDS and friends in ci.yml).
 # Use: ARENA_COMPOSE_EXTRA=retention.yml dev/up.sh
 services:
   broker:
