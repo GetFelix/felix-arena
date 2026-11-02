@@ -4,6 +4,8 @@ This guide runs the whole game on one machine: Felix, the simulation and the
 page you play in. You need Docker or Podman and a few minutes. At the end you
 and a friend are flying in the same arena.
 
+To run it on a cluster instead, see [On Kubernetes](#on-kubernetes).
+
 It uses the released container images and one file, [`deploy/compose.yml`](../deploy/compose.yml).
 You do not need to clone this repository, install Rust or Node, or build anything.
 
@@ -154,6 +156,96 @@ docker compose up --detach --force-recreate broker gateway sim
 
 If the broker or the sim logs refused tokens, this is the fix too.
 
+## On Kubernetes
+
+The Helm chart in [`deploy/helm/felix-arena`](../deploy/helm/felix-arena) runs the game next to a
+Felix install on a cluster. It deploys the gateway (two copies by default; they also serve the
+game's page), the sim (always one), the sign-in page and a seed Job. It does not install Felix.
+
+You need a cluster, `kubectl` and Helm 3. Every release attaches the chart as
+`felix-arena-<version>.tgz`; from a clone, use the directory. Felix's own chart is
+`deploy/helm/felix` in [GetFelix/felix](https://github.com/GetFelix/felix) (it has no chart repository
+yet, so check out the release tag that matches `.felix-version`). The commands below install both
+charts in one namespace, with Felix's release named `felix`: the chart finds Felix at the
+short names `felix-controlplane`, `felix-controlplane-bootstrap` and `felix-broker`.
+
+1. Make the Secrets Felix's chart needs: `felix-bootstrap` and `felix-raft-peer` (each with a random
+   `token`), and `felix-broker-tls`, a certificate for the name `felix-broker` that the chart and the
+   brokers share. [`ci/kind-install.sh`](../deploy/helm/felix-arena/ci/kind-install.sh) shows the commands.
+2. Install Felix's chart with the brokers off, because they cannot start before the seed has made
+   their token. Use [`ci/felix-values.yaml`](../deploy/helm/felix-arena/ci/felix-values.yaml) as a starting
+   point. Three of its settings matter here: the control plane accepts the sign-in page's plain HTTP
+   address inside the cluster (`FELIX_CONTROLPLANE_OIDC_ALLOW_INSECURE_HTTP`) and signing keys of both
+   kinds (`FELIX_CONTROLPLANE_OIDC_ALLOWED_ALGORITHMS`), and tokens last 30 days
+   (`FELIX_EXCHANGE_TOKEN_TTL_SECONDS`), because the broker and the sim read theirs once.
+3. Install this chart. Point it at Felix and give it the sign-in page's public address:
+
+   ```yaml
+   # arena-values.yaml
+   felix:
+     controlPlaneUrl: http://felix-controlplane:8443
+     brokers: [felix-broker:5000]
+     serverName: felix-broker
+     caSecret: { name: felix-broker-tls, key: tls.crt }   # the certificate the brokers present
+   seed:
+     bootstrapUrl: http://felix-controlplane-bootstrap:9095
+     bootstrapSecret: { name: felix-bootstrap }
+   idp:
+     issuer: https://signin.example.com
+     ingress: { enabled: true, host: signin.example.com, tlsSecret: signin-tls }
+   gateway:
+     ingress: { enabled: true, host: arena.example.com, tlsSecret: arena-tls }
+   ```
+
+   ```bash
+   helm install felix-arena ./deploy/helm/felix-arena -f arena-values.yaml
+   ```
+
+4. Turn the brokers on with the token the seed stored:
+
+   ```bash
+   helm upgrade felix <felix chart> -f felix-values.yaml --set broker.enabled=true \
+     --set broker.credential.existingSecret=felix-arena-broker-credential
+   ```
+
+5. Turn on Felix's fleet features. The seed made the streams before any broker had registered, so Felix
+   does not count this as a new cluster and leaves them off, and the sim's commits are refused until
+   they are on. The broker's token may do it; `ci/kind-install.sh` has the loop. For each name in
+   `generation_start majority_ack lease_free_reads fenced_caches jump_hash_routing atomic_commit
+   stream_incarnations group_cursor_dependencies cache_incarnations head_trim`, in that order, send
+   `POST /v1/fleet/features/<name>/finalize` to the control plane with the token
+   (`kubectl get secret felix-arena-broker-credential -o jsonpath='{.data.token}' | base64 -d`).
+
+The seed creates the tenant, the arenas and who may play (`arenas`, `players`
+and `watchers` in the values), then stores the broker's token and the sim's in
+Secrets. The sim pod starts when its Secret exists. Check on it:
+
+```bash
+kubectl get pods
+kubectl logs deploy/felix-arena-sim
+```
+
+Open the game at the gateway's host, with the sign-in page's address in the
+URL, as in [Playing with other people](#playing-with-other-people):
+`https://arena.example.com/play.html?arena=alpha&as=ana&idp=https://signin.example.com&gateway=wss://arena.example.com/ws`.
+To try it without an ingress, set `idp.issuer: http://127.0.0.1:9400`, forward the two services and open the plain address:
+
+```bash
+kubectl port-forward svc/felix-arena-gateway 8787:80 &
+kubectl port-forward svc/felix-arena-idp 9400:9400 &
+```
+
+The game is then at <http://127.0.0.1:8787/play.html?arena=alpha&as=ana>.
+
+The sign-in page lets in anyone who picks a name. It is the only identity
+provider the chart sets up, so keep it off the internet or limit it with your own network policy.
+
+To change the arenas or the players, run `helm upgrade`: the seed runs again.
+The tokens last as long as the control plane's `FELIX_EXCHANGE_TOKEN_TTL_SECONDS`. To renew them,
+run `helm upgrade` and then restart what reads them:
+`kubectl rollout restart statefulset/felix-broker deployment/felix-arena-sim`.
+The chart's `values.yaml` lists every setting.
+
 ## Check the images
 
 Every image is signed. The release's notes on GitHub list each image's digest. With
@@ -192,6 +284,11 @@ sets `&idp=` and `&gateway=`.
 
 **`seed` exits with an error.** Run `docker compose logs seed controlplane` to
 see why. `docker compose up --detach` runs it again.
+
+**Postgres logs `duplicate key value violates unique constraint`.** Every start
+runs `seed` again, and it asks the control plane to create the namespace and
+the streams that are already there. The control plane answers that it exists
+and carries on, so the lines are noise and nothing needs fixing.
 
 **The sim keeps restarting.** Run `docker compose logs sim`. A refused token
 (see [Renew the tokens](#renew-the-tokens)) or a broker that is not up is the usual cause.

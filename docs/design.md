@@ -117,7 +117,7 @@ The project succeeds if five demonstrations work in front of a skeptic.
 | 2 | Join mid-match | A spectator opening a match in progress draws a correct frame in under 500 ms p50, and its state hash at a given tick matches a player's |
 | 3 | Slow client isolation | One player throttled below the rate of a match's ticks falls behind alone and says so; the others' tick latency stays within 10% of the run without them, and the throttled one recovers from a keyframe |
 | 4 | Survive broker loss | Kill the broker owning the arena's tick stream mid-match. Play resumes on the new owner with no acknowledged tick lost, and a kill cam whose window spans the failover still plays |
-| 5 | Spectator fanout | 100 spectators on one match. Players' tick latency p50 and the simulation's commit p50 stay within twice the run with none plus 0.5 ms, with the readers on cpus of their own (measured on a 4-cpu runner: 1.4 to 2.2 ms and 1.7 to 3.2 ms for the trip, 0.9 to 1.4 ms and 1.0 to 1.2 ms for the commit) |
+| 5 | Spectator fanout | 100 spectators on one match. Players' tick latency p50 and the simulation's commit p50 stay within twice the run with none plus 0.5 ms, with the readers on cpus of their own (measured on a 4-cpu runner: 1.4 to 2.2 ms and 1.7 to 3.2 ms for the trip, 0.9 to 1.4 ms and 1.0 to 1.2 ms for the commit; one run took the commit from 0.91 to 2.31 ms, over the bound, which is felix#1771). The CI job is informational until a Felix release that fixes it is pinned |
 
 Two criteria are deliberately absent. Player count is not a goal: an arena
 holds 8, and a hundred-player battle royale would be a different design. Nor is
@@ -324,8 +324,9 @@ player whose inputs stop is held on the last one for 100 ms, then coasts. When
 a record arrives after one was lost, the buttons of every input it covers that
 the sim has not applied are merged into the newest, so a press is not lost
 with its record. A player's first input joins it to the arena, on the smaller
-team, and ten seconds without one removes it. The `join` input and the member
-keys arrive in M3.
+team, and ten seconds without one removes it. A player still joins with its
+first input rather than a `join` input; the member list, below, says who is
+connected.
 
 ### Ticks are commits
 
@@ -410,7 +411,8 @@ before reading history (`crates/server/felix-broker/src/broker/subscribe.rs`,
 the comment on `subscribe_from`), which is exactly the ordering felix-canvas
 does by hand.
 
-A player who joins also writes its member key and sends a `join` input. The
+Every page that joins, player or spectator, writes its member key. A player
+joins the match with its first input, and the
 sim assigns a team and slot and announces it in the next tick's events. No two
 clients ever race for a slot, because only the sim writes the roster.
 
@@ -741,11 +743,27 @@ jump wider than 15 ticks, cannot catch up by reading back what it missed. It
 joins again from the newest keyframe, the same way it joins a match in
 progress, on the same gateway session: subscribing to the `live` slot again
 replaces the old subscription, and ticks still arriving on the old one are
-dropped. The label at the top of the page says "Connection poor" until the live ticks are within 3
-ticks of the sim. A link that stays too slow resyncs at most once every 5
-seconds, so it jumps forward repeatedly instead of rejoining without pause; a
-wide jump seen during that wait is acted on when it ends. If the join itself
-fails, the page opens a new session.
+dropped. A keyframe holds the tally but not the kills between it and where the
+page had got to. So when the page has folded every tick up to some offset and
+that is at most 30 ticks (one keyframe interval) behind the newest tick, it
+reads on from the tick after it, and the kills in between are counted. A tick
+that was skipped and not read back stops that offset where it is, so a later
+tick cannot hide the hole. A page further behind than 30 ticks takes the
+keyframe, since reading that many ticks through the subscription would overflow
+its queue. It still reads the ticks between its position and the keyframe, up to
+600 of them, in one range read before it subscribes, so their kills are counted.
+The read gets one second, which keeps the join inside the two seconds the page
+holds its last picture. If it is late, fails or the gap is wider, the page
+takes the keyframe alone: its tally is right, but the kills in between are not
+on its replay list, which keeps a link that is too slow from reading the same
+backlog again and again. A page often resyncs once soon after it joins, because
+the first frames it draws take a while (half a second on a fast machine, more on
+a loaded one), so the short case is the common one but the long one happens.
+The label at the top of the page says "Connection poor" until the
+live ticks are within 3 ticks of the sim. A link that stays too slow resyncs at
+most once every 5 seconds, so it jumps forward repeatedly instead of rejoining
+without pause; a wide jump seen during that wait is acted on when it ends. If
+the join itself fails, the page opens a new session.
 `web/src/resync.ts` holds that rule, and `window.arena.resyncs` counts the
 resyncs. CI's `resync` job slows `cleo`'s link below the rate of the ticks,
 requires her page to rejoin and say so, then lifts the slowdown and checks that
@@ -842,11 +860,37 @@ page's own work per frame and the GPU, on screen and as `window.arena.bench`.
 `&quality=` forces a tier (the saved setting is ignored here) and `&seconds=`
 changes the length.
 
+**Sound.** The client plays a sound for each event the render loop already
+handles, so the sound and the picture can never disagree (`web/src/cues.ts`
+maps events to sounds, `web/src/sound.ts` plays them). Your own shots come from
+the prediction, as their flashes do, and every other event comes from the tick
+that carries it, after the interpolation has reached it; events from a tick
+folded during a join make no sound. A replay's events play too, from the same
+place, so a kill cam ends on its explosion. The match clock gives the countdown,
+the start and the end, and the first look at a match, which may be one already
+in progress, never counts as a start.
+
+A sound with a place is panned by where it is on the screen and softened by its
+distance from the listener, which is your craft, or the middle of the arena for
+a spectator (`web/src/spatial.ts`). What happens to others is quieter than what
+happens to you. A cue repeated inside its minimum gap is dropped, at most 24
+effects play at once, and cues with several files rotate between them with a
+slight change of pitch, so a long fight does not wear. The effects are decoded
+once into Web Audio buffers. The music is played from audio elements, so a
+track of a minute or two is not held decoded in memory, and each file fades in and
+out over 2 seconds: the next track starts that long before the end of the
+current one, and the two cross. Audio starts on the first pointer or key event
+and not before (a gesture the browser does not count, such as a touch's pointerdown, is retried on the next one), holds while the page is hidden, and is silent in an automated
+browser unless `?sound=on` asks for it. Mute (also the M key) and the two volumes are saved in
+the browser (`web/src/sound-settings.ts`).
+
 **Asset loading.** Models are small GLB files from the Kenney Space Kit, 10 to
 40 KB each; the HDRI is 1.5 MB and the largest single download. The arena and
 its props load first and draw while crafts and effects load. A cold load on a
 fast connection shows the arena in under 2 seconds. Everything is cached
-immutably by content hash.
+immutably by content hash. The sound effects (56 KB in all) load with the page;
+a music track (0.4 to 1.1 MB) is fetched only after the first click or key press,
+and the next one starts loading 25 seconds before the current one ends.
 
 **Mobile.** Phones and tablets get the lobby, spectating and replays at the Low
 or Medium tier, chosen by the same measurement. Playing on a touch screen is out
@@ -865,7 +909,7 @@ There are two roles per arena, both ordinary Felix RBAC roles:
 | Role | Grants on the arena's resources |
 |---|---|
 | `role:arena-<arena>-play` | Publish on the input stream; subscribe on the tick stream (which includes `state_get`); read and write the member cache; read the lobby cache |
-| `role:arena-<arena>-watch` | Subscribe on the tick stream; read the member cache and the lobby cache |
+| `role:arena-<arena>-watch` | Subscribe on the tick stream; read and write the member cache; read the lobby cache |
 
 `commit` needs `stream.publish` and `state_get` needs `stream.subscribe` on the
 tick stream (`services/felix-broker-service/src/serving/quic/streams/control/commit.rs`).
@@ -879,9 +923,40 @@ Token exchange narrows by a cross product of actions and resources
 grant exactly the actions above and no more: a role that also granted publish
 on the tick stream would put it in every narrowed token.
 
-Membership uses felix-canvas's TTL member list, including its workaround for
-cache entries that expire without telling a watch
-([felix#960](https://github.com/GetFelix/felix/issues/960)).
+Spectators write member keys too, so the lobby can count them; that is why
+the watch role writes the member cache. Felix grants a cache as a whole, not
+per key, so any session in an arena can write or delete any member key and
+inflate or shrink the counts. The counts are a display; nothing decides on
+them, and players are counted from the sim's own roster.
+
+**The member list.** Every open page, playing or watching, writes a key in
+`arena.members.<arena>` under a random session key, holding `play:<name>` or
+`watch:<name>`, and writes it again every 10 seconds. The cache's TTL is 30
+seconds, so a tab that dies without a word drops out within 30 seconds. A tab
+that closes normally deletes its key at once: on `pagehide` it sends
+felix-gateway's leave beacon (`POST /members/leave`), which the browser
+delivers after the page is gone. Felix now tells a watch when an entry expires
+(felix-gateway's protocol, `cache_change`; the gap
+[felix#960](https://github.com/GetFelix/felix/issues/960) described is closed),
+and a reader can drop an entry as soon as its `expires_in_ms` passes.
+
+**The lobby.** Each arena's sim watches its member cache and every 3 seconds
+writes the arena's status to `arena.lobby` under the arena's name, with a 10
+second TTL: match number, phase, seconds left, scores, players from its own
+roster, capacity, and the spectators it counts in the member list. A sim that
+stops drops its arena from the lobby within 10 seconds. The lobby page
+(`web/lobby.html`) joins felix-gateway's scope `lobby`, watches that cache and
+lists one card per arena with a join button. The scope file marks the lobby
+cache `shared` (felix-gateway 0.5.0), because one cache lists every arena, and
+marks every per-arena resource optional, so a lobby session reaches only the
+lobby cache.
+
+CI's `lobby` job runs two bots in each arena and checks that the lobby lists
+both. It opens a spectator tab, then closes it normally and checks that its
+key leaves the member list. It opens a second spectator tab, blocks its
+beacon, kills the tab, and checks that its key lapses within the TTL and that
+the lobby stops counting it. The screenshots are in the job's `lobby-shots`
+artifact.
 
 ## Failure modes
 
@@ -920,7 +995,7 @@ and saying so is honest, and it is what demonstration 4 shows.
 | Spectator join | Under 500 ms p50 to a correct frame | Cold client, mid-match |
 | Frame time | 16.7 ms p95 at 1080p, High or Medium tier, laptop iGPU | Frame timing over a scripted 2-minute match |
 | Sim step | Under 2 ms for 8 players and 64 bolts | Sim timings |
-| Spectator fanout, 0 to 100 | Players' tick latency p50 and the sim's commit p50 within twice the quiet phases plus 0.5 ms | Spectators as Felix subscriptions on a physical core of their own, with four bot players measuring through the gateway |
+| Spectator fanout, 0 to 100 | Players' tick latency p50 and the sim's commit p50 within twice the quiet phases plus 0.5 ms | Spectators as Felix subscriptions on a physical core of their own, with four bot players measuring through the gateway. Informational in CI until a Felix release that fixes felix#1771 is pinned |
 | Failover pause | Under 10 s on the dev cluster, whose control plane declares a broker lost after 3 s | CI's `broker failover` job: the sim's commit time of the last tick before the kill against the first after it |
 
 As in felix-canvas, the 100 spectators are made as Felix subscriptions from a

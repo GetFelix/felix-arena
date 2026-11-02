@@ -1,0 +1,129 @@
+# Default values for the felix-arena chart. docs/self-hosting.md describes the
+# install and what each value sets.
+
+image:
+  # Prepended to every image repository below.
+  registry: ghcr.io
+  # Defaults to the chart's appVersion.
+  tag: ""
+  pullPolicy: IfNotPresent
+  pullSecrets: []
+
+# The Felix release this one runs next to.
+felix:
+  # The control plane's API, e.g. http://felix-controlplane:8443. Required.
+  controlPlaneUrl: ""
+  # Broker addresses as host:port, e.g. [felix-broker:5000]. Required.
+  brokers: []
+  # The name the brokers' certificate is checked against.
+  serverName: localhost
+  # A Secret holding the PEM certificate to trust for the brokers. Empty means
+  # the public roots.
+  caSecret:
+    name: ""
+    key: ca.crt
+  tenant: arena
+  namespace: default
+  # Copies of each arena's streams. Above 1 they acknowledge on a majority, so
+  # an arena survives losing a broker; needs that many brokers.
+  replicas: 1
+
+# The arenas, and who may play in each or only watch. Names are what people
+# pick at the sign-in page.
+arenas: [alpha, bravo]
+players: [ana, ben, dan, eve]
+watchers: [cleo]
+
+gateway:
+  image:
+    repository: getfelix/felix-arena-gateway
+    # Pin by digest in production: images are signed by digest. Wins over the tag.
+    digest: ""
+  # Gateways hold no state, so any number serve any arena.
+  replicas: 2
+  service:
+    type: ClusterIP
+    port: 80
+    annotations: {}
+  # The game and /ws on one host. The controller must pass WebSocket upgrades.
+  ingress:
+    enabled: false
+    className: ""
+    host: ""
+    annotations: {}
+    # A kubernetes.io/tls Secret for the host. Browsers need HTTPS to sign in.
+    tlsSecret: ""
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+  extraEnv: []
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# Exactly one, always: it owns the match clock, and a second would write a
+# second copy of every tick.
+sim:
+  image:
+    repository: getfelix/felix-arena-sim
+    digest: ""
+  # A match's lengths, in seconds, and the kills that end it early.
+  warmupSeconds: 10
+  matchSeconds: 300
+  resultsSeconds: 15
+  killLimit: 25
+  railSeconds: 30
+  resources:
+    requests:
+      cpu: 250m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+  extraEnv: []
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# A Job at every install and upgrade that creates the tenant, the arenas and
+# their roles, and stores the broker's and the sim's tokens in Secrets.
+seed:
+  image:
+    repository: getfelix/felix-arena-seed
+    digest: ""
+  # The control plane's bootstrap listener, e.g.
+  # http://felix-controlplane-bootstrap:9095. Required.
+  bootstrapUrl: ""
+  # A Secret holding the bootstrap token. Required.
+  bootstrapSecret:
+    name: ""
+    key: token
+  # The Secret the broker credential goes to, for the felix chart's
+  # broker.credential.existingSecret. Empty means <release>-broker-credential.
+  brokerCredentialSecret: ""
+
+# The stand-in sign-in page. It signs in anyone who picks a name, and it is the
+# only identity provider this chart wires up.
+idp:
+  image:
+    repository: getfelix/felix-arena-idp
+    digest: ""
+  # The address browsers reach it at, and the issuer Felix trusts. Required.
+  issuer: ""
+  ingress:
+    enabled: false
+    className: ""
+    host: ""
+    annotations: {}
+    tlsSecret: ""
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      memory: 128Mi

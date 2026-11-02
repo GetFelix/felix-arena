@@ -6,6 +6,7 @@ mod arena;
 mod config;
 mod inputs;
 mod latency;
+mod lobby;
 mod recovery;
 
 use std::net::SocketAddr;
@@ -47,6 +48,23 @@ async fn main() -> Result<()> {
         );
         let recovered = recover(&client, &config, arena).await;
         let inbox = Arc::default();
+        let status = Arc::default();
+        let members = Arc::default();
+        tokio::spawn(lobby::watch_members(
+            Arc::clone(&client),
+            config.tenant.clone(),
+            config.namespace.clone(),
+            format!("arena.members.{arena}"),
+            Arc::clone(&members),
+        ));
+        tokio::spawn(lobby::publish(
+            Arc::clone(&client),
+            config.tenant.clone(),
+            config.namespace.clone(),
+            arena.clone(),
+            Arc::clone(&status),
+            members,
+        ));
         tokio::spawn(inputs::follow(
             Arc::clone(&client),
             config.tenant.clone(),
@@ -60,6 +78,7 @@ async fn main() -> Result<()> {
             recovered.world,
             config.rules,
             inbox,
+            status,
             move |record, keys: Vec<(String, Vec<u8>)>| {
                 let (client, tenant, namespace, stream) = (
                     Arc::clone(&client),

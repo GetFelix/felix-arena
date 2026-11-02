@@ -1,5 +1,6 @@
 // The browser end of felix-gateway's protocol, as much of it as the game uses:
-// join, subscriptions in named slots whose events arrive as binary frames, stream state reads and range reads.
+// join, subscriptions in named slots whose events arrive as binary frames, stream state reads, range reads, and cache
+// writes and watches.
 // felix-gateway's docs/protocol.md is the reference.
 
 /** The optional protocol features the game needs. */
@@ -87,6 +88,29 @@ export interface RangePage {
   nextOffset: number;
 }
 
+/** One cache entry as a watch reports it. */
+export interface CacheEntry {
+  key: string;
+  /** `null` when the entry was deleted or expired. */
+  payload: Uint8Array | null;
+  /** Milliseconds until it expires, from when the gateway relayed it; `null` for an entry with no TTL. */
+  expiresInMs: number | null;
+}
+
+/** A cache watch's callbacks: every entry once, then each change. */
+export interface CacheWatcher {
+  entries: (entries: CacheEntry[]) => void;
+  change: (entry: CacheEntry) => void;
+}
+
+function cacheEntry(json: Json): CacheEntry {
+  return {
+    key: String(json.key),
+    payload: typeof json.payload === 'string' ? unbase64(json.payload) : null,
+    expiresInMs: (json.expires_in_ms as number | null) ?? null,
+  };
+}
+
 /** An error the gateway answered with. */
 export class GatewayError extends Error {
   override name = 'GatewayError';
@@ -98,6 +122,17 @@ export class GatewayError extends Error {
   ) {
     super(message);
   }
+}
+
+/** Join answers that trying again cannot change: the person may not open the arena, or the sign-in is bad. */
+const REFUSED_FOR_GOOD = new Set(['forbidden', 'signed_out', 'unsupported', 'bad_request']);
+
+/**
+ * Whether a failed join should end the page's tries. Any other answer, such as `unavailable` while the stack is
+ * still starting, is worth another try.
+ */
+export function refusedForGood(err: unknown): boolean {
+  return err instanceof GatewayError && REFUSED_FOR_GOOD.has(err.code);
 }
 
 type Json = Record<string, unknown>;
@@ -116,6 +151,8 @@ export class Gateway {
   private readonly slots = new Map<string, number>();
   /** Subscribes waiting for an answer, oldest first, by `stream/slot`. */
   private readonly pending = new Map<string, Pending[]>();
+  /** Cache watches by alias. */
+  private readonly watches = new Map<string, CacheWatcher>();
   /** Requests waiting for their answer by id: publishes for an `ack`, state reads for a `state_value`, range reads for `records`. */
   private readonly requests = new Map<number, { resolve: (answer: Json) => void; reject: (err: Error) => void }>();
   private nextId = 1;
@@ -127,6 +164,8 @@ export class Gateway {
     private readonly socket: WebSocket,
     /** Aliases of optional resources this sign-in does not reach, from `hello`. */
     readonly missing: readonly string[],
+    /** How long an entry of each cache with a TTL lasts without a write, from `hello`. */
+    readonly cacheTtlMs: Readonly<Record<string, number>>,
   ) {
     socket.addEventListener('message', (message) => this.receive(message));
     socket.addEventListener('close', () => {
@@ -161,7 +200,13 @@ export class Gateway {
           const features = hello.features as string[];
           const missing = FEATURES.filter((feature) => !features.includes(feature));
           if (missing.length > 0) return fail(new Error(`the gateway lacks ${missing.join(', ')}`));
-          resolve(new Gateway(socket, (hello.missing as string[] | undefined) ?? []));
+          resolve(
+            new Gateway(
+              socket,
+              (hello.missing as string[] | undefined) ?? [],
+              (hello.cache_ttl_ms as Record<string, number> | undefined) ?? {},
+            ),
+          );
         },
         { once: true },
       );
@@ -219,6 +264,22 @@ export class Gateway {
       version: (answer.version as number | null) ?? null,
       asOf: (answer.as_of as number | null) ?? null,
     };
+  }
+
+  /** Write a cache entry, with the cache's TTL. A refusal arrives at {@link onError}. */
+  cachePut(cache: string, key: string, payload: Uint8Array): void {
+    this.socket.send(JSON.stringify({ type: 'cache_put', cache, key, payload: base64(payload) }));
+  }
+
+  /** Delete a cache entry at once. */
+  cacheDelete(cache: string, key: string): void {
+    this.socket.send(JSON.stringify({ type: 'cache_delete', cache, key }));
+  }
+
+  /** Watch a cache: every entry, then every change. Replaces an earlier watch of the same cache. */
+  cacheWatch(cache: string, watcher: CacheWatcher): void {
+    this.watches.set(cache, watcher);
+    this.socket.send(JSON.stringify({ type: 'cache_watch', cache }));
   }
 
   /**
@@ -292,6 +353,10 @@ export class Gateway {
         startOffset: json.start_offset as number | null,
         liveOffset: json.live_offset as number | null,
       });
+    } else if (json.type === 'cache_entries') {
+      this.watches.get(String(json.cache))?.entries((json.entries as Json[]).map(cacheEntry));
+    } else if (json.type === 'cache_change') {
+      this.watches.get(String(json.cache))?.change(cacheEntry(json));
     } else if (json.type === 'ack' || json.type === 'state_value' || json.type === 'records') {
       const id = json.id as number;
       this.requests.get(id)?.resolve(json);

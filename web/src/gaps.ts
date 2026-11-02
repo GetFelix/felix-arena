@@ -100,28 +100,7 @@ export class GapFeed {
   /** The ticks at offsets `from` up to `end`, as frames, or none when they could not be read in time. */
   private async fill(like: EventFrame, from: number, end: number): Promise<EventFrame[]> {
     let given = false;
-    const read = async (): Promise<EventFrame[]> => {
-      const frames: EventFrame[] = [];
-      for (let at = from; at < end && !given; ) {
-        const page = await this.reader().read(this.stream, at, end);
-        for (const record of page.records) {
-          if (record.offset < from || record.offset >= end) continue;
-          frames.push({
-            sub: like.sub,
-            offset: record.offset,
-            skippedBefore: 0,
-            gatewayReceivedUs: 0,
-            gatewaySentUs: 0,
-            receivedUs: like.receivedUs,
-            payload: record.payload,
-            filled: true,
-          });
-        }
-        if (page.nextOffset <= at) break;
-        at = page.nextOffset;
-      }
-      return frames;
-    };
+    const read = () => readTicks(this.reader(), this.stream, from, end, like, () => given);
     let timer: ReturnType<typeof setTimeout> | undefined;
     const late = new Promise<EventFrame[]>((resolve) => {
       timer = setTimeout(() => resolve([]), FILL_TIMEOUT_MS);
@@ -133,4 +112,38 @@ export class GapFeed {
       clearTimeout(timer);
     }
   }
+}
+
+/**
+ * The ticks at offsets `from` up to `end` of `stream`, as frames shaped after `like`, read a page at a time until
+ * `stop` says so. Frames from a read carry no timings.
+ */
+export async function readTicks(
+  reader: Reader,
+  stream: string,
+  from: number,
+  end: number,
+  like: Pick<EventFrame, 'sub' | 'receivedUs'>,
+  stop: () => boolean = () => false,
+): Promise<EventFrame[]> {
+  const frames: EventFrame[] = [];
+  for (let at = from; at < end && !stop(); ) {
+    const page = await reader.read(stream, at, end);
+    for (const record of page.records) {
+      if (record.offset < from || record.offset >= end) continue;
+      frames.push({
+        sub: like.sub,
+        offset: record.offset,
+        skippedBefore: 0,
+        gatewayReceivedUs: 0,
+        gatewaySentUs: 0,
+        receivedUs: like.receivedUs,
+        payload: record.payload,
+        filled: true,
+      });
+    }
+    if (page.nextOffset <= at) break;
+    at = page.nextOffset;
+  }
+  return frames;
 }

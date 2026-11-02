@@ -27,8 +27,8 @@ Violet, flying low-poly hover-craft in a walled arena seen from a top-down
 camera. It is playable: a match runs through Felix from warmup to results,
 with the simulation deciding every hit. When you are destroyed, the kill cam
 replays the last seconds from the match's log, from your view, your killer's,
-or a camera that orbits the fight. Still to come are the lobby and per-arena
-sign-in. It is meant for people who want a small multiplayer game they can
+or a camera that orbits the fight. A lobby lists the live arenas. Still to come
+is per-arena sign-in. It is meant for people who want a small multiplayer game they can
 host themselves, and for game developers evaluating Felix as the backend for
 live play, spectating and replays.
 
@@ -81,6 +81,10 @@ match can continue after its broker
   bots, with no servers.
 - **Quality tiers.** High, Medium and Low, chosen from the first seconds of
   frame times or picked in the HUD.
+- **Sound.** Effects for shots, hits, kills, the rail, boost and the round
+  clock, and five fast, driving background tracks (drum and bass, electronic and
+  chiptune action music), all CC0 and bundled with the game.
+  Mute and volume are on the HUD. See [Sound](#sound).
 - **Every hop timed.** `ticks.html` shows the p50 and p99 of each leg from the
   simulation's commit to the page.
 - **Releases.** Each release carries the built web client, so it can be played
@@ -184,6 +188,11 @@ The guide also covers changing the arenas and players, playing with other
 people, updating, renewing the tokens, Podman and troubleshooting. The `self-host`
 CI job runs this file against freshly built images and plays in a browser.
 
+On a cluster, the Helm chart in `deploy/helm/felix-arena` runs the gateway, the
+sim, the sign-in page and a seed Job next to Felix's own chart; the guide's
+"On Kubernetes" section walks through it, and every release attaches the packaged
+chart. The `helm chart` CI job installs both on kind and plays in a browser.
+
 ## Development stack
 
 `dev/up.sh` starts Felix 0.6.2 (a control plane and one broker), a stand-in identity
@@ -255,7 +264,9 @@ and checks that four players' trip time and the sim's commit time stay within tw
 before and after (plus 0.5 ms). The job puts the spectators on a physical core of their own and the
 rest of the stack on the other core, so the readers' own CPU use is not counted against Felix. What
 remains is the broker's work per subscriber: on the 4-cpu runner 100 spectators take a player's
-median trip from about 1.5 to 2.2 ms, and from 1.7 to 3.2 ms in a slower run. To run it yourself, start the dev stack with a match long enough for
+median trip from about 1.5 to 2.2 ms, and from 1.7 to 3.2 ms in a slower run. That per-subscriber cost is
+Felix's ([felix#1771](https://github.com/GetFelix/felix/issues/1771)), so until a release that fixes it is pinned
+the job is informational: it prints the numbers and a miss does not fail CI. To run it yourself, start the dev stack with a match long enough for
 the run, build the example and point the script at it:
 
 ```sh
@@ -293,6 +304,13 @@ at 500 ms p50, reports signing in and the first draw (on CI's software
 renderer; real-GPU frame times come from the benchmark page), and checks that
 its folded state matches the player's at every tick.
 
+`lobby.html` is the lobby. With the development stack running, open
+`http://localhost:5173/lobby.html` (from `npm run dev`) to see each arena's
+match phase, clock and score, how many players and spectators are in it, and a
+Join button. Each open game page adds itself to its arena's member list and
+drops out within 30 seconds of closing; a stopped sim drops its arena within 10.
+`?as=` picks the user, as on the play page.
+
 CI's `sim restart` job kills the sim container once a kill has been scored and
 starts it again. The sim reads the tail of the tick log, picks the match up where
 it was, and writes its ticks in the next epoch; the job checks that play resumes
@@ -317,6 +335,48 @@ and run `npx vite-node scripts/failover.ts -- http://127.0.0.1:4173/play.html`.
 `dev/up.sh --cluster` waits until every stream has all three copies, because
 stopping a broker earlier can leave a stream without a majority. `dev/down.sh`
 stops either stack.
+
+## Sound
+
+The game plays sound effects for what happens in the arena and fast music
+underneath. Nothing plays until you click or press a key on the page, because
+browsers do not allow a page to start sound before that.
+
+What you hear:
+
+- **Your craft.** Your blaster, a hit on you, a shot your spawn shield stops,
+  your boost, the blaster locking up when it overheats, the rail pickup and the
+  rail shot, your craft coming back, and a heavy blow when you are destroyed.
+- **The rest of the arena.** Other crafts' shots, hits, explosions, rail shots
+  and spawns, quieter, louder the closer they are to your craft, and panned to the
+  side of the screen they are on. A spectator hears the same from the middle of
+  the arena.
+- **The match.** A tick for each of the last three seconds of warmup, a start
+  sound, and an end sound when the results come up. The music ducks while a
+  kill cam replay plays.
+- **The interface.** A click for the HUD buttons, a sound when you switch sound
+  on, and a short sweep as a kill cam replay starts and ends.
+- **Music.** Five high-energy tracks, roughly 140 to 180 beats a minute, in a shuffled order,
+  each fading into the next, never the same one twice in a row.
+
+At the bottom left of the page, **Sound** switches everything on or off (the
+**M** key does too), and **Music** and **Effects** set the two volumes. The
+settings are saved in this browser. Music starts at half volume, below the effects (70%), so
+the effects carry the game.
+
+Page options: `?sound=off` plays nothing and `?sound=on` plays even in an
+automated browser, which is silent by default so a test run does not decode
+music on a busy machine. The benchmark (`&bench`) is always silent.
+
+The files are Ogg Opus, 3.5 MB in all, bundled with the page; the game fetches
+nothing from other sites to play them. A browser that cannot play Ogg Opus (an
+older Safari) gets no sound and runs the game as before. On a slow connection
+the next music track may not arrive in time, which leaves a gap between tracks. Every file's author,
+source, licence and the changes made to it are in
+[prototype/assets/audio/CREDITS.md](prototype/assets/audio/CREDITS.md). To add or
+swap a sound, put the `.ogg` under `prototype/assets/audio/`, name it in
+`CUES` in `web/src/cues.ts`, and list it in the credits; a test fails if a file is
+missing from the credits or an effect is played by no cue.
 
 ## Frame time
 
@@ -372,9 +432,8 @@ compares this with the usual way of building a session-based game.
 ## Status
 
 The look is locked, the game is playable through Felix, a match can be joined
-in progress, and the kill cam replays kills from the log (M0 to M2 and M4). M3
-is done apart from the lobby and member list. The frame-time row for M0's 60 fps target
-waits for a run on an Intel Iris Xe or Apple M1. Each milestone is a
+in progress, the lobby lists the live arenas, and the kill cam replays kills
+from the log (M0 to M4). The frame-time row for M0's 60 fps target waits for a run on an Intel Iris Xe or Apple M1. Each milestone is a
 [GitHub milestone](https://github.com/GetFelix/felix-arena/milestones) with an
 issue per piece of work.
 
@@ -383,7 +442,7 @@ issue per piece of work.
 | [0](https://github.com/GetFelix/felix-arena/milestone/1) | The look, locked | Done |
 | [1](https://github.com/GetFelix/felix-arena/milestone/2) | A browser reaches Felix | Done |
 | [2](https://github.com/GetFelix/felix-arena/milestone/3) | One authority | Done |
-| [3](https://github.com/GetFelix/felix-arena/milestone/4) | Join mid-match | In progress |
+| [3](https://github.com/GetFelix/felix-arena/milestone/4) | Join mid-match | Done |
 | [4](https://github.com/GetFelix/felix-arena/milestone/5) | The kill cam | Done |
 | [5](https://github.com/GetFelix/felix-arena/milestone/6) | Isolation and gaps | Planned |
 | [6](https://github.com/GetFelix/felix-arena/milestone/7) | Per-arena sign-in | Planned |
@@ -396,6 +455,7 @@ issue per piece of work.
 - [docs/self-hosting.md](docs/self-hosting.md): run the game on your own machine.
 - [docs/art.md](docs/art.md): the art direction, from the palette and lighting to the rules that keep new content consistent.
 - [prototype/assets/CREDITS.md](prototype/assets/CREDITS.md): the sources and licences of the models and the HDRI.
+- [prototype/assets/audio/CREDITS.md](prototype/assets/audio/CREDITS.md): the sources, licences and edits of every sound and music file.
 - [Arena](https://docs.getfelix.dev/built-on-felix/arena/) in the Felix docs: how the game uses Felix.
 
 ## Felix version

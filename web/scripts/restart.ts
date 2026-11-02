@@ -84,15 +84,18 @@ try {
   const before = keyed()!;
   console.log(`killing the sim at epoch ${before.epoch}, tick ${before.tick}, scores ${before.scores}`);
   const old = ticks.length;
+  // The container engine can take seconds to answer the kill; that is not the sim's pause.
+  const killStart = performance.now();
   compose('kill', 'sim');
+  const killMs = performance.now() - killStart;
   restart('sim');
   await waitFor('ticks of the next epoch', () => ticks.slice(old).some((t) => t.epoch > before.epoch), 60_000);
   const first = ticks.findIndex((t, i) => i >= old && t.epoch > before.epoch);
   const last = ticks[first - 1]!;
   const resumed = ticks[first]!;
-  const pause = resumed.atMs - last.atMs;
+  const pause = resumed.atMs - last.atMs - killMs;
   console.log(
-    `resumed at epoch ${resumed.epoch}, tick ${resumed.tick} after ${Math.round(pause)} ms, scores ${resumed.scores}`,
+    `resumed at epoch ${resumed.epoch}, tick ${resumed.tick} after ${Math.round(pause)} ms (plus ${Math.round(killMs)} ms in the kill), scores ${resumed.scores}`,
   );
 
   const failures: string[] = [];

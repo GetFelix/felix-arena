@@ -24,14 +24,16 @@ import {
 } from './core';
 import { Effects } from './effects';
 import { type CraftView, Fleet, GUN_HEIGHT } from './fleet';
-import { type EventFrame, Gateway, GatewayError } from './gateway';
+import { type EventFrame, Gateway, refusedForGood } from './gateway';
 import { botCount, botLevel, botTag } from './bots';
 import { type Link, Offline, OFFLINE_PRINCIPAL } from './offline';
+import { OwnWatcher, type Play, PhaseWatcher, playsFor, replayCue } from './cues';
 import { Hud, killKey } from './hud';
 import { KillCam, type KillCamTimes, Markers } from './killcam';
 import { KillRig, VIEWS } from './killcam-rig';
 import { killsOf, type KillRef, type Page, type Reader } from './replay';
-import { joinFromKeyframe, type JoinTimes } from './join';
+import { Folded, joinFromKeyframe, type JoinTimes } from './join';
+import { joinMembers, sessionKey } from './members';
 import { GapFeed, type GapStats } from './gaps';
 import { Behind } from './behind';
 import { Resync } from './resync';
@@ -46,6 +48,9 @@ import { seeded } from './random';
 import { requestedTier, TierChooser, urlTier } from './quality';
 import { createRenderer, Pipeline } from './renderer';
 import { qualitySetting } from './settings';
+import { soundFiles } from './sound-assets';
+import { startSound } from './sound-browser';
+import type { Listener } from './spatial';
 import { blobTexture, flareTexture, glowTexture } from './textures';
 
 const params = new URLSearchParams(location.search);
@@ -157,6 +162,8 @@ export interface ArenaDebug {
   throttle: (bitsPerSecond: number | null) => void;
   /** The state each recent tick folded to, by `epoch/tick`: the tick's hash and the match's digest. */
   states: Record<string, string>;
+  /** This session's key in the arena's member list. */
+  member: string | null;
 }
 
 declare global {
@@ -211,9 +218,15 @@ async function main(): Promise<void> {
     replayAt: null,
     kills: [],
     holdReplay: () => {},
+    member: null,
   };
   window.arena = debug;
 
+  const sound = startSound(
+    soundFiles,
+    BENCH ? new URLSearchParams('sound=off') : params,
+    document.getElementById('sound')!,
+  );
   const renderer = createRenderer();
   document.body.prepend(renderer.domElement);
   const scene = new Scene();
@@ -231,6 +244,16 @@ async function main(): Promise<void> {
     loadCore(),
   ]);
   const arena = buildArena(scene, arenaLayout(), models, renderer.capabilities.getMaxAnisotropy());
+  /** Where sounds are heard from: your craft, or the middle of the arena for a spectator, looking along the camera. */
+  const listener: Listener = { x: 0, z: 0, yaw: 0 };
+  /** Sounds fade with distance over the arena's length. */
+  const hearingReach = arenaLayout().halfX * 2 * 100;
+  const hear = (plays: Play[]) => {
+    for (const p of plays) sound.play(p, listener, hearingReach);
+  };
+  const phases = new PhaseWatcher();
+  const ownSounds = new OwnWatcher();
+  let wasReplay = false;
   const glow = glowTexture();
   const fleet = new Fleet(scene, fx, models, { glow, blob: blobTexture() });
   const effects = new Effects(scene, fx, { glow, flare: flareTexture() }, seeded(1));
@@ -570,6 +593,8 @@ async function main(): Promise<void> {
   /** The resync of the session now open, which {@link onFrame} tells how far behind the live ticks are. */
   let resyncing: Resync | null = null;
   Object.defineProperty(debug, 'behindTicks', { get: () => behind.ticks });
+  /** How far {@link onFrame} has folded the ticks without a hole, which a resync reads on from. */
+  const folded = new Folded();
   const onFrame = (frame: EventFrame, catchingUp = false) => {
     firstEventMs ??= performance.now();
     let tick: Tick;
@@ -587,6 +612,7 @@ async function main(): Promise<void> {
       }
       timing?.free();
     }
+    folded.see(frame.offset, frame.skippedBefore);
     if (catchingUp) foldTick(tick, frame.offset);
     else onTick(tick, performance.now(), frame.offset, frame.payload, !frame.filled);
     tick.free();
@@ -603,6 +629,9 @@ async function main(): Promise<void> {
         id_token: string;
       }
     ).id_token;
+  /** This page's place in the arena's member list, kept across sessions so a rejoin does not list it twice. */
+  const memberKey = sessionKey();
+  let members: ReturnType<typeof joinMembers> | null = null;
   /** The slow link this page is on, in bits a second, kept across sessions. */
   let slow: number | null = THROTTLE !== null && THROTTLE !== '' ? SLOW_KBIT * 1000 : null;
   const showSlow = () => {
@@ -649,8 +678,9 @@ async function main(): Promise<void> {
     });
     // Each join replaces the live subscription, and ticks still arriving on the one it replaced are dropped.
     let generation = 0;
-    const joinFrom = () => {
+    const joinFrom = (resumeAfter: number | null = null) => {
       const mine = ++generation;
+      folded.rejoin();
       const feed = new GapFeed(
         () => link,
         (frame, catchUp) => {
@@ -663,19 +693,24 @@ async function main(): Promise<void> {
           },
         },
       );
-      return joinFromKeyframe(link, (frame, catchUp) => {
-        if (mine !== generation) return;
-        // A test hook: lose every LOSE-th live tick, as a subscriber with a full queue would.
-        if (LOSE && !catchUp && frame.offset !== null && ++received % LOSE === 0) return;
-        feed.push(frame, catchUp);
-      });
+      return joinFromKeyframe(
+        link,
+        (frame, catchUp) => {
+          if (mine !== generation) return;
+          // A test hook: lose every LOSE-th live tick, as a subscriber with a full queue would.
+          if (LOSE && !catchUp && frame.offset !== null && ++received % LOSE === 0) return;
+          feed.push(frame, catchUp);
+        },
+        resumeAfter,
+      );
     };
     const resync = new Resync(
       async () => {
         joiningSince = performance.now();
         debug.resyncs++;
         try {
-          await joinFrom();
+          // From where this page got to, when that is close: a keyframe alone would skip the kills in between.
+          await joinFrom(folded.offset);
         } catch (err) {
           // The old subscription is replaced as far as the page goes, so a failed join leaves it with no ticks at all.
           link.close();
@@ -707,6 +742,13 @@ async function main(): Promise<void> {
       throw err;
     }
     joined = true;
+    // The lobby cache is the one resource every sign-in reaches; the arena's own are optional.
+    if (!link.missing.includes('members')) {
+      members?.stop();
+      const role = link.missing.includes('input') ? 'watch' : 'play';
+      members = joinMembers(link, GATEWAY, ARENA, token, role, USER, memberKey);
+      debug.member = memberKey;
+    }
     // A switch flipped while the join was in flight reached the session before it was the page's current one.
     if (slow !== null) link.throttle(slow);
     return link;
@@ -721,6 +763,7 @@ async function main(): Promise<void> {
         return await open(token ?? (await signIn()));
       } catch (err) {
         if (final(err)) throw err;
+        console.warn('join failed, trying again:', err);
       }
       token = null;
       await sleep(wait);
@@ -753,7 +796,7 @@ async function main(): Promise<void> {
   } else {
     const token = await signIn();
     key = playerKey(await principal(token));
-    gateway = await persist(token, (err) => err instanceof GatewayError && err.code !== 'closed');
+    gateway = await persist(token, refusedForGood);
   }
 
   // Inputs go once a sim tick, on the sim's clock as the ticks show it; a short timer keeps the send close to it.
@@ -826,6 +869,28 @@ async function main(): Promise<void> {
       protected: shielded ?? false,
     }));
 
+    listener.x = ownNow?.x ?? 0;
+    listener.z = ownNow?.z ?? 0;
+    listener.yaw = view.resting.yaw;
+    const replayEdge = replayCue(wasReplay, replay !== null);
+    wasReplay = replay !== null;
+    if (replayEdge) sound.ui(replayEdge);
+    sound.duck(replay !== null);
+    if (frame) {
+      for (const cue of phases.update({
+        phase: match.phase,
+        number: match.number,
+        seconds: match.seconds,
+        waiting: match.waiting,
+      }))
+        sound.ui(cue);
+    }
+    const hull =
+      ownNow && !replay
+        ? { alive: ownNow.alive, boostCooling: ownNow.boostCooldown / boostTicks(), overheated: ownNow.overheated }
+        : null;
+    for (const cue of ownSounds.update(hull)) sound.ui(cue);
+
     const claimed = (!replay && own?.claimed) || new Set<number>();
     const byId = new Map<number, { x: number; z: number }>();
     const violet = new Map(crafts.map((c) => [c.slot, c.violet]));
@@ -841,12 +906,16 @@ async function main(): Promise<void> {
       for (const shot of own.drawShots(now, (id) => byId.has(id), hits)) {
         effects.bolt(mine, shot.x, shot.z, shot.heading, shot.opacity);
       }
-      for (const fired of own.firedSince(shown ?? now)) effects.fired(mine, fired.x, fired.z, fxT);
+      for (const fired of own.firedSince(shown ?? now)) {
+        effects.fired(mine, fired.x, fired.z, fxT);
+        hear(playsFor({ kind: 'fired', slot: own.slot, by: own.slot, damage: 0 }, fired, own.slot));
+      }
     }
 
     const happened = (e: { kind: string; slot: number; by: number; x: number; z: number; damage: number }) => {
       const at = crafts.find((c) => c.slot === e.slot);
       if (!at) return;
+      hear(playsFor(e, at, own?.slot ?? null));
       const angle = (at.heading / 65536) * 2 * Math.PI;
       const nose = [at.x + Math.cos(angle) * 130, at.z + Math.sin(angle) * 130] as const;
       if (e.kind === 'fired') {
