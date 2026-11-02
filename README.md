@@ -261,6 +261,10 @@ cargo build --release -p felix-arena-sim --example spectators
 cd web && npm run core && npx vite-node scripts/fanout.ts -- ../target/release/examples/spectators 100 20
 ```
 
+A page more than 15 ticks behind rejoins from the keyframe and says "Connection poor" until it is
+close again, which CI's `resync` job checks by slowing a watcher's link and then lifting the slowdown.
+Try it by hand with `play.html?arena=alpha&as=cleo&throttle=16`, then click the slow-link switch off.
+
 `npm run smoke` checks the same path from Node: ticks arrive at 30 Hz, the
 WebAssembly build decodes keyframes to the state hashes the sim logged, a
 range read returns the same records while the live subscription keeps going,

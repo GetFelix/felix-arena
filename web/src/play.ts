@@ -35,6 +35,7 @@ import { joinFromKeyframe, type JoinTimes } from './join';
 import { joinMembers, sessionKey } from './members';
 import { GapFeed, type GapStats } from './gaps';
 import { Behind } from './behind';
+import { Resync } from './resync';
 import { Interpolator, snapshot } from './interpolation';
 import { addLights, loadEnvironment } from './lighting';
 import { callsign, Match } from './match';
@@ -149,6 +150,8 @@ export interface ArenaDebug {
   holdReplay: (held: boolean, ticksFromKill?: number) => void;
   /** Ticks the live subscription skipped over, and how many were read back; counted from the page's first join. */
   gaps: GapStats;
+  /** How many times the page joined again from the keyframe because it was too far behind. */
+  resyncs: number;
   /** How many ticks later than the best of the last minute the newest live tick arrived. */
   behindTicks: number;
   /** Slow this session's subscriptions to a link of this many bits a second, or `null` for full speed. */
@@ -201,6 +204,7 @@ async function main(): Promise<void> {
     absorbing: null,
     join: null,
     gaps: { gaps: 0, missed: 0, filled: 0, unfilled: 0 },
+    resyncs: 0,
     behindTicks: 0,
     throttle: () => {},
     states: {},
@@ -567,6 +571,8 @@ async function main(): Promise<void> {
   /** A join whose ticks never come still lets the page draw after this long. */
   const JOIN_HOLD_MS = 2000;
   const behind = new Behind();
+  /** The resync of the session now open, which {@link onFrame} tells how far behind the live ticks are. */
+  let resyncing: Resync | null = null;
   Object.defineProperty(debug, 'behindTicks', { get: () => behind.ticks });
   const onFrame = (frame: EventFrame, catchingUp = false) => {
     firstEventMs ??= performance.now();
@@ -579,7 +585,10 @@ async function main(): Promise<void> {
     // A tick read back from the log arrives late by construction, which says nothing of the link.
     if (!catchingUp && !frame.filled) {
       const timing = tick.timing;
-      if (timing) behind.add(frame.receivedUs - timing.commitStartUs);
+      if (timing) {
+        behind.add(frame.receivedUs - timing.commitStartUs);
+        resyncing?.behind(behind.ticks);
+      }
       timing?.free();
     }
     if (catchingUp) foldTick(tick, frame.offset);
@@ -645,18 +654,51 @@ async function main(): Promise<void> {
         else reject(err);
       };
     });
+    // Each join replaces the live subscription, and ticks still arriving on the one it replaced are dropped.
+    let generation = 0;
+    const joinFrom = () => {
+      const mine = ++generation;
+      const feed = new GapFeed(
+        () => link,
+        (frame, catchUp) => {
+          if (mine === generation) onFrame(frame, catchUp);
+        },
+        {
+          stats: debug.gaps,
+          tooFar: () => {
+            if (mine === generation) resync.request();
+          },
+        },
+      );
+      return joinFromKeyframe(link, (frame, catchUp) => {
+        if (mine !== generation) return;
+        // A test hook: lose every LOSE-th live tick, as a subscriber with a full queue would.
+        if (LOSE && !catchUp && frame.offset !== null && ++received % LOSE === 0) return;
+        feed.push(frame, catchUp);
+      });
+    };
+    const resync = new Resync(
+      async () => {
+        joiningSince = performance.now();
+        debug.resyncs++;
+        try {
+          await joinFrom();
+        } catch (err) {
+          // The old subscription is replaced as far as the page goes, so a failed join leaves it with no ticks at all.
+          link.close();
+          void rejoin();
+          throw err;
+        }
+      },
+      (poor) => {
+        if (!rejoining) where.textContent = poor ? 'Connection poor' : place;
+      },
+    );
+    resyncing = resync;
     try {
       // Every join, the first and each after a lost session, starts from the newest keyframe.
       joiningSince = performance.now();
-      const feed = new GapFeed(() => link, onFrame, { stats: debug.gaps });
-      const sendOn = LOSE
-        ? (frame: EventFrame, catchUp: boolean) => {
-            // A test hook: lose every LOSE-th live tick, as a subscriber with a full queue would.
-            if (!catchUp && frame.offset !== null && ++received % LOSE === 0) return;
-            feed.push(frame, catchUp);
-          }
-        : (frame: EventFrame, catchUp: boolean) => feed.push(frame, catchUp);
-      const times = await within(Promise.race([joinFromKeyframe(link, sendOn), lost]));
+      const times = await within(Promise.race([joinFrom(), lost]));
       debug.join ??= {
         ...times,
         signInMs: joinStartMs,

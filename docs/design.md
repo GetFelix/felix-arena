@@ -738,6 +738,21 @@ while a player plays, then checks that every tick both folded came out the same
 and every kill the player saw after the spectator joined is on the spectator's
 list.
 
+**Too far behind.** A page that is more than 15 ticks behind the sim, or sees a
+jump wider than 15 ticks, cannot catch up by reading back what it missed. It
+joins again from the newest keyframe, the same way it joins a match in
+progress, on the same gateway session: subscribing to the `live` slot again
+replaces the old subscription, and ticks still arriving on the old one are
+dropped. The label at the top of the page says "Connection poor" until the live ticks are within 3
+ticks of the sim. A link that stays too slow resyncs at most once every 5
+seconds, so it jumps forward repeatedly instead of rejoining without pause; a
+wide jump seen during that wait is acted on when it ends. If the join itself
+fails, the page opens a new session.
+`web/src/resync.ts` holds that rule, and `window.arena.resyncs` counts the
+resyncs. CI's `resync` job slows `cleo`'s link below the rate of the ticks,
+requires her page to rejoin and say so, then lifts the slowdown and checks that
+every tick she and `ana` both folded since came out the same.
+
 The tests hold this to numbers. `web/src/interpolation.test.ts` records thirty
 seconds of a four-player fight from core's own world, delivers it with jitter
 and one tick in twenty lost (some two in a row), and draws it at 60 frames a
