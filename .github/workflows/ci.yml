@@ -564,27 +564,31 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: cargo build --release --locked -p felix-arena-sim --example spectators
-      # The 100 readers' own CPU is not Felix's cost. They get the last cpu to themselves; the stack's containers
-      # and the players run on the rest (cpu ids are 0 to nproc-1 on a runner). The runner's cpus are hyperthreads, so
-      # `lscpu -e` is printed to show which core the spectators share.
-      - name: Keep the spectators' cpu apart from the stack and the players
+      # The readers' own CPU is not Felix's cost. They get a physical core to themselves (both hyperthreads of the
+      # last one); the stack's containers and the players run on the rest.
+      - name: Keep the spectators' cpus apart from the stack and the players
         run: |
-          cpus="$(nproc)"
           lscpu -e
-          if ((cpus < 4)); then
-            echo "a $cpus-cpu runner cannot give the spectators a cpu of their own and leave the stack three; use a larger runner" >&2
+          core="$(lscpu -p=CPU,CORE | grep -v '^#' | awk -F, '{c[$2]=c[$2] (c[$2]?",":"") $1} END {n=0; for (k in c) n++; print c[n-1]}')"
+          others="$(lscpu -p=CPU,CORE | grep -v '^#' | awk -F, -v mine="$core" 'BEGIN {split(mine,m,",")} {skip=0; for (i in m) if (m[i]==$1) skip=1; if (!skip) printf "%s%s", (o++?",":""), $1}')"
+          if [[ -z "$others" || -z "$core" ]]; then
+            echo "the runner has no physical core to spare for the spectators; use a larger runner" >&2
             exit 1
           fi
-          last=$((cpus - 1))
-          docker compose -f dev/compose.yml ps --quiet | xargs docker update --cpuset-cpus "0-$((last - 1))" >/dev/null
-          echo "FANOUT_SPECTATOR_CPUS=$last" >> "$GITHUB_ENV"
-          echo "FANOUT_OTHER_CPUS=0-$((last - 1))" >> "$GITHUB_ENV"
-      - name: 100 spectators leave the players' trip time and the sim's commit time within 10% of the quiet phases
+          echo "spectators on $core, everything else on $others"
+          docker compose -f dev/compose.yml ps --quiet | xargs docker update --cpuset-cpus "$others" >/dev/null
+          echo "FANOUT_SPECTATOR_CPUS=$core" >> "$GITHUB_ENV"
+          echo "FANOUT_OTHER_CPUS=$others" >> "$GITHUB_ENV"
+      - name: Diagnostic, 10 spectators
+        continue-on-error: true
         working-directory: web
         run: |
           npm ci
           npm run core
-          taskset -c "$FANOUT_OTHER_CPUS" npx vite-node scripts/fanout.ts -- ../target/release/examples/spectators 100 20
+          taskset -c "$FANOUT_OTHER_CPUS" npx vite-node scripts/fanout.ts -- ../target/release/examples/spectators 10 20
+      - name: 100 spectators leave the players' trip time and the sim's commit time within 10% of the quiet phases
+        working-directory: web
+        run: taskset -c "$FANOUT_OTHER_CPUS" npx vite-node scripts/fanout.ts -- ../target/release/examples/spectators 100 20
       - if: failure()
         run: docker compose -f dev/compose.yml logs --no-color
 
