@@ -56,13 +56,24 @@ const cleo = await open('cleo', `&lose=${LOSE}`);
 
 const compared = new Set<string>();
 const differing: string[] = [];
-/** Each kill either page listed after cleo joined, and which pages listed it. */
-const kills = new Map<string, 'both' | 'ana only' | 'cleo only'>();
 let first: { match: number; tick: number } | null = null;
 const key = (k: { match: number; tick: number }) => `${k.match}:${k.tick}`;
 /** Whether `k` happened after cleo joined, in this match or a later one. */
 const after = (k: { match: number; tick: number }) =>
   first !== null && (k.match > first.match || (k.match === first.match && k.tick >= first.tick));
+/** What each page listed at each look, for saying what happened to a kill that ended up on one list only. */
+const looks: { s: number; ana: Set<string>; cleo: Set<string>; resyncs: number; behind: number }[] = [];
+const started = Date.now();
+async function look(): Promise<void> {
+  const [watcher, player] = await Promise.all([seen(cleo), seen(ana)]);
+  const extra = await cleo.evaluate(() => ({ resyncs: window.arena!.resyncs, behind: window.arena!.behindTicks }));
+  looks.push({
+    s: Math.round((Date.now() - started) / 1000),
+    ana: new Set(player.kills.map(key)),
+    cleo: new Set(watcher.kills.map(key)),
+    ...extra,
+  });
+}
 async function sample(): Promise<Seen> {
   const [watcher, player] = await Promise.all([seen(cleo), seen(ana)]);
   first ??= {
@@ -73,28 +84,48 @@ async function sample(): Promise<Seen> {
     compared.add(at);
     if (watcher.states[at] !== player.states[at] && !differing.includes(at)) differing.push(at);
   }
-  const theirs = new Set(watcher.kills.map(key));
-  const ours = new Set(player.kills.map(key));
-  for (const k of player.kills) if (after(k)) kills.set(key(k), theirs.has(key(k)) ? 'both' : 'ana only');
-  for (const k of watcher.kills) if (!ours.has(key(k))) kills.set(key(k), 'cleo only');
   return watcher;
 }
-const started = Date.now();
 while (Date.now() - started < RUN_MS) {
-  await sleep(10_000);
+  for (let i = 0; i < 5; i++) {
+    await sleep(2000);
+    await look();
+  }
   await sample();
 }
 // A kill in the last moments may have reached one page before the other: let both settle, then judge once more.
 await sleep(2000);
 const watcher = await sample();
+await look();
+const resyncs = looks.at(-1)!.resyncs;
 for (const stop of stopBots) stop();
 await browser.close();
 
-const missing = [...kills].filter(([, held]) => held !== 'both').map(([k, held]) => `${k} (${held})`);
-console.log(`cleo lost every ${LOSE}th live tick:`, watcher.gaps);
+// Judged on the last look: every kill ana lists since cleo joined must be on cleo's list, and the other way round.
+const last = looks.at(-1)!;
+const tickOf = (k: string) => Number(k.split(':')[1]);
+const everAna = new Set(looks.flatMap((l) => [...l.ana]));
+const missing = [...everAna]
+  .filter((k) => after({ match: Number(k.split(':')[0]), tick: tickOf(k) }))
+  .filter((k) => !last.cleo.has(k))
+  .map((k) => {
+    const seenBy = (which: 'ana' | 'cleo') => looks.filter((l) => l[which].has(k)).map((l) => l.s);
+    const cleoHad = seenBy('cleo');
+    const anaHad = seenBy('ana');
+    return (
+      `${k} (ana from ${anaHad[0]}s to ${anaHad.at(-1)}s, cleo ${cleoHad.length ? `${cleoHad[0]}s to ${cleoHad.at(-1)}s` : 'never'}; ` +
+      `cleo had a state at that tick: ${Object.keys(watcher.states).some((at) => at.endsWith(`/${tickOf(k)}`))})`
+    );
+  });
+const extras = [...last.cleo].filter((k) => !last.ana.has(k)).map((k) => `${k} (cleo only)`);
+const kills = new Set([...everAna].filter((k) => after({ match: Number(k.split(':')[0]), tick: tickOf(k) })));
+console.log(`cleo lost every ${LOSE}th live tick:`, watcher.gaps, `${resyncs} resyncs`);
 console.log(
-  `${compared.size} ticks compared, ${differing.length} differ; ${kills.size} kills, ${missing.length} not on both lists`,
+  `${compared.size} ticks compared, ${differing.length} differ; ${kills.size} kills, ${missing.length + extras.length} not on both lists`,
 );
+if (missing.length + extras.length > 0) {
+  console.log('behind, resyncs by look:', looks.map((l) => `${l.s}s:${l.behind.toFixed(0)}/${l.resyncs}`).join(' '));
+}
 if (errors.length) throw new Error(errors.join('\n'));
 if (watcher.gaps.missed < 20) throw new Error(`cleo lost only ${watcher.gaps.missed} ticks`);
 if (watcher.gaps.unfilled > watcher.gaps.missed / 50) {
@@ -103,5 +134,6 @@ if (watcher.gaps.unfilled > watcher.gaps.missed / 50) {
 if (compared.size < MIN_COMPARED) throw new Error(`only ${compared.size} ticks to compare`);
 if (differing.length > 0) throw new Error(`${differing.length} ticks folded differently, first ${differing[0]}`);
 if (kills.size < MIN_KILLS) throw new Error(`only ${kills.size} kills to compare`);
-if (missing.length > 0) throw new Error(`kills not on both lists: ${missing.join(', ')}`);
+if (missing.length + extras.length > 0)
+  throw new Error(`kills not on both lists: ${[...missing, ...extras].join(', ')}`);
 process.exit(0);
