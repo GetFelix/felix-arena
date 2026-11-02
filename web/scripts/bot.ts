@@ -24,10 +24,12 @@ export async function bot(user: string, arena: string, legs?: () => Legs): Promi
   let control = [0, 0, 0, 0];
   await gateway.subscribe('ticks', 'live', 'live', (frame) => {
     const tick = decodeTick(frame.payload);
-    const timing = tick.timing;
-    if (timing) {
-      legs?.().add(frame, timing);
-      timing.free();
+    if (legs) {
+      const timing = tick.timing;
+      if (timing) {
+        legs().add(frame, timing);
+        timing.free();
+      }
     }
     const crafts = tick.crafts.map((c) => ({
       slot: c.slot,

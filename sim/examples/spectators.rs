@@ -2,8 +2,8 @@
 //! received, for the spectator fanout check (`web/scripts/fanout.ts`).
 //!
 //! Every spectator is its own Felix client with its own connection, as it is
-//! in the gateway, where a connection carries one token. They read the live
-//! tail for `SPECTATORS_SECONDS`, then print one summary line.
+//! in the gateway, where a connection carries one token. They all read the live
+//! tail, and print one summary line.
 //!
 //! Settings, from the environment: `SPECTATORS_COUNT` (default 100),
 //! `SPECTATORS_SECONDS` (30), `SPECTATORS_ARENA` (`alpha`),
@@ -12,12 +12,12 @@
 //! `SPECTATORS_FELIX_SERVER_NAME` (`localhost`), `SPECTATORS_FELIX_CA_FILE`
 //! and `SPECTATORS_FELIX_TOKEN_FILE`, the last of which is required.
 //!
-//! It prints `subscribed <n>` once every spectator is reading, and exits
-//! non-zero when one could not subscribe or fell short of the ticks it should
-//! have had.
+//! It prints `subscribed <n>` once every spectator is reading, counts ticks
+//! for `SPECTATORS_SECONDS` from then, and exits non-zero when one could not
+//! subscribe or saw under 90% of the ticks the sim commits in that time.
 
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
@@ -28,6 +28,11 @@ use tokio::time::Instant;
 
 /// The sim commits this many ticks a second.
 const TICK_HZ: u64 = 30;
+/// Connecting and subscribing must finish within this.
+const JOIN_TIMEOUT: Duration = Duration::from_secs(60);
+/// Connections being set up at once. A hundred QUIC handshakes in the same
+/// instant are enough to time out on a busy host.
+const HANDSHAKES: usize = 10;
 /// A spectator must see this share of the ticks committed while it read.
 const MIN_SHARE: f64 = 0.9;
 
@@ -131,48 +136,95 @@ async fn join(settings: &Settings) -> Result<Spectator> {
     })
 }
 
-async fn read(mut spectator: Spectator, end: Instant) -> Result<Seen> {
+/// Reads the tail from the moment it joined, so a spectator that joins early
+/// is not left with a full queue, and counts only what arrives once `window`
+/// is set, for `seconds`.
+async fn read(
+    mut spectator: Spectator,
+    window: Arc<OnceLock<Instant>>,
+    seconds: u64,
+) -> Result<Seen> {
     let mut seen = Seen::default();
     let mut last = None;
-    while let Ok(event) = tokio::time::timeout_at(end, spectator.subscription.next_event()).await {
+    loop {
+        let now = Instant::now();
+        let start = window.get().copied();
+        if start.is_some_and(|start| now >= start + Duration::from_secs(seconds)) {
+            return Ok(seen);
+        }
+        // Ticks come 30 times a second; the timeout only lets a stalled
+        // stream notice that the window has closed.
+        let Ok(event) =
+            tokio::time::timeout(Duration::from_secs(1), spectator.subscription.next_event()).await
+        else {
+            continue;
+        };
         let Some(event) = event.context("read")? else {
             bail!("the subscription ended");
         };
-        if Tick::decode(&event.payload).is_none() {
-            seen.undecodable += 1;
-        }
         if let Some(offset) = event.offset {
-            if let Some(last) = last {
+            if let Some(last) = last
+                && start.is_some()
+            {
                 seen.dropped += offset.saturating_sub(last + 1 + event.skipped_before);
             }
             last = Some(offset);
         }
+        if start.is_none() {
+            continue;
+        }
+        if Tick::decode(&event.payload).is_none() {
+            seen.undecodable += 1;
+        }
         seen.ticks += 1;
     }
-    Ok(seen)
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let settings = Arc::new(Settings::from_env().await?);
-    let mut joining = JoinSet::new();
-    for _ in 0..settings.count {
-        let settings = Arc::clone(&settings);
-        joining.spawn(async move { join(&settings).await });
-    }
-    let mut spectators = Vec::new();
-    while let Some(joined) = joining.join_next().await {
-        spectators.push(joined.context("a spectator panicked")??);
-    }
-    println!("subscribed {}", spectators.len());
-
-    // One window for everyone, started when the last one is in.
-    let started = Instant::now();
-    let end = started + Duration::from_secs(settings.seconds);
+    let window = Arc::new(OnceLock::new());
+    let handshakes = Arc::new(tokio::sync::Semaphore::new(HANDSHAKES));
+    let (joined, mut joins) = tokio::sync::mpsc::channel(settings.count.max(1) as usize);
     let mut reading = JoinSet::new();
-    for spectator in spectators {
-        reading.spawn(read(spectator, end));
+    for _ in 0..settings.count {
+        let (settings, window, joined, handshakes) = (
+            Arc::clone(&settings),
+            Arc::clone(&window),
+            joined.clone(),
+            Arc::clone(&handshakes),
+        );
+        reading.spawn(async move {
+            let spectator = match handshakes.acquire().await {
+                Ok(_slot) => tokio::time::timeout(JOIN_TIMEOUT, join(&settings))
+                    .await
+                    .context("joining timed out")
+                    .and_then(|joined| joined),
+                Err(err) => Err(err.into()),
+            };
+            let spectator = match spectator {
+                Ok(spectator) => spectator,
+                Err(err) => {
+                    let _ = joined.send(Err(format!("{err:#}"))).await;
+                    return Err(err);
+                }
+            };
+            let _ = joined.send(Ok(())).await;
+            read(spectator, window, settings.seconds).await
+        });
     }
+    drop(joined);
+    for _ in 0..settings.count {
+        match joins.recv().await {
+            Some(Ok(())) => {}
+            Some(Err(err)) => bail!("a spectator could not join: {err}"),
+            None => bail!("the spectators stopped before they all joined"),
+        }
+    }
+    println!("subscribed {}", settings.count);
+    let started = Instant::now();
+    let _ = window.set(started);
+
     let mut all = Vec::new();
     while let Some(done) = reading.join_next().await {
         all.push(done.context("a spectator panicked")??);
