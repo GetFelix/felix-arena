@@ -250,3 +250,20 @@ describe('prediction', () => {
     }
   });
 });
+
+describe('the pacer after the sim stalls', () => {
+  it('keeps sending an input every tick through the clock stepping back', () => {
+    const pacer = new Pacer();
+    const sends: number[] = [];
+    // Tick n arrives at n * TICK_MS + 20, except that from tick 100 the sim has skipped six ticks of wall time.
+    const arrival = (n: number) => (n + (n >= 100 ? 6 : 0)) * TICK_MS + 20;
+    let next = 1;
+    for (let now = 0; now < 8000; now += 4) {
+      while (arrival(next) <= now) pacer.tick(next++, arrival(next - 1), null);
+      if (pacer.due(now)) sends.push(now);
+    }
+    const gaps = sends.slice(1).map((t, i) => t - sends[i]!);
+    expect(sends.length).toBeGreaterThan(200);
+    expect(Math.max(...gaps)).toBeLessThan(2.5 * TICK_MS);
+  });
+});
