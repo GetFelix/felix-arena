@@ -298,7 +298,6 @@ jobs:
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
-          # There is no checkout here for gh to find the repository in.
           GH_REPO: ${{ github.repository }}
         run: |
           prerelease=()

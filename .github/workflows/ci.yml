@@ -508,20 +508,22 @@ jobs:
     name: helm chart
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    env:
-      # The Felix release whose chart this one is installed next to.
-      FELIX_CHART_REF: v0.6.2
     steps:
       - uses: actions/checkout@v4
+      # The Felix release whose chart this one is installed next to.
+      - id: felix
+        run: echo "ref=v$(sed -n 's/^version=//p' .felix-version)" >> "$GITHUB_OUTPUT"
       - name: The Felix chart
         uses: actions/checkout@v4
         with:
           repository: GetFelix/felix
-          ref: ${{ env.FELIX_CHART_REF }}
+          ref: ${{ steps.felix.outputs.ref }}
           path: felix
           sparse-checkout: deploy/helm/felix
       - uses: azure/setup-helm@v4
-      - run: helm lint deploy/helm/felix-arena -f deploy/helm/felix-arena/ci/kind-values.yaml
+      - run: |
+          helm lint deploy/helm/felix-arena -f deploy/helm/felix-arena/ci/kind-values.yaml
+          helm package deploy/helm/felix-arena --destination "$RUNNER_TEMP"
       - run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@v2
@@ -558,6 +560,7 @@ jobs:
       - if: failure()
         run: |
           kubectl get pods -o wide
-          kubectl describe pods | tail -120
+          kubectl describe pods | grep -E '^(Name:|Events:)|Warning|Error' | tail -80
           kubectl logs -l app.kubernetes.io/instance=felix-arena --all-containers --tail 100
           kubectl logs felix-broker-0 --tail 100
+          kubectl logs felix-controlplane-0 --tail 100

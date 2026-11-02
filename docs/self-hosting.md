@@ -1,7 +1,7 @@
 # Self-hosting Felix Arena
 
 This guide runs the whole game on one machine: Felix, the simulation and the
-page you play in. [On Kubernetes](#on-kubernetes) covers a cluster. You need Docker or Podman and a few minutes. At the end you
+page you play in. You need Docker or Podman and a few minutes. To run it on a cluster instead, see [On Kubernetes](#on-kubernetes). At the end you
 and a friend are flying in the same arena.
 
 It uses the released container images and one file, [`deploy/compose.yml`](../deploy/compose.yml).
@@ -157,17 +157,26 @@ If the broker or the sim logs refused tokens, this is the fix too.
 ## On Kubernetes
 
 The Helm chart in [`deploy/helm/felix-arena`](../deploy/helm/felix-arena) runs the game next to a
-Felix install on a cluster. It deploys the gateway (two copies by default, and
-the game's page is served from them), the sim (always one), the sign-in page and
-a seed Job. It does not install Felix: use [Felix's own chart](https://docs.getfelix.dev) for the control plane and the brokers.
+Felix install on a cluster. It deploys the gateway (two copies by default; they also serve the
+game's page), the sim (always one), the sign-in page and a seed Job. It does not install Felix.
 
-You need a cluster, `kubectl` and Helm 3. The chart is attached to every
-release as `felix-arena-<version>.tgz`; from a clone, use the directory instead.
+You need a cluster, `kubectl` and Helm 3. Every release attaches the chart as
+`felix-arena-<version>.tgz`; from a clone, use the directory. Felix's own chart is
+`deploy/helm/felix` in [GetFelix/felix](https://github.com/GetFelix/felix) (it has no chart repository
+yet, so check out the release tag that matches `.felix-version`). The commands below install both
+charts in one namespace, with Felix's release named `felix`: the chart finds Felix at the
+short names `felix-controlplane`, `felix-controlplane-bootstrap` and `felix-broker`.
 
-1. Install Felix's chart with its bootstrap listener on, and with the brokers off until the next step.
-   They cannot start before the seed has made their token. `deploy/helm/felix-arena/ci/felix-values.yaml`
-   is a working set of values, and `ci/kind-install.sh` runs these steps on a kind cluster.
-2. Install this chart. Point it at Felix and give it the sign-in page's public address:
+1. Make the Secrets Felix's chart needs: `felix-bootstrap` and `felix-raft-peer` (each with a random
+   `token`), and `felix-broker-tls`, a certificate for the name `felix-broker` that the chart and the
+   brokers share. [`ci/kind-install.sh`](../deploy/helm/felix-arena/ci/kind-install.sh) shows the commands.
+2. Install Felix's chart with the brokers off, because they cannot start before the seed has made
+   their token. Use [`ci/felix-values.yaml`](../deploy/helm/felix-arena/ci/felix-values.yaml) as a starting
+   point. Three of its settings matter here: the control plane accepts the sign-in page's plain HTTP
+   address inside the cluster (`FELIX_CONTROLPLANE_OIDC_ALLOW_INSECURE_HTTP`) and signing keys of both
+   kinds (`FELIX_CONTROLPLANE_OIDC_ALLOWED_ALGORITHMS`), and tokens last 30 days
+   (`FELIX_EXCHANGE_TOKEN_TTL_SECONDS`), because the broker and the sim read theirs once.
+3. Install this chart. Point it at Felix and give it the sign-in page's public address:
 
    ```yaml
    # arena-values.yaml
@@ -181,6 +190,7 @@ release as `felix-arena-<version>.tgz`; from a clone, use the directory instead.
      bootstrapSecret: { name: felix-bootstrap }
    idp:
      issuer: https://signin.example.com
+     ingress: { enabled: true, host: signin.example.com, tlsSecret: signin-tls }
    gateway:
      ingress: { enabled: true, host: arena.example.com, tlsSecret: arena-tls }
    ```
@@ -189,10 +199,10 @@ release as `felix-arena-<version>.tgz`; from a clone, use the directory instead.
    helm install felix-arena ./deploy/helm/felix-arena -f arena-values.yaml
    ```
 
-3. Turn the brokers on with the token the seed stored:
+4. Turn the brokers on with the token the seed stored:
 
    ```bash
-   helm upgrade felix <felix chart> --reuse-values --set broker.enabled=true \
+   helm upgrade felix <felix chart> -f felix-values.yaml --set broker.enabled=true \
      --set broker.credential.existingSecret=felix-arena-broker-credential
    ```
 
@@ -221,9 +231,9 @@ The sign-in page lets in anyone who picks a name. It is the only identity
 provider the chart sets up, so keep it off the internet or limit it with your own network policy.
 
 To change the arenas or the players, run `helm upgrade`: the seed runs again.
-The tokens last as long as the control plane's `FELIX_EXCHANGE_TOKEN_TTL_SECONDS`
-(30 days in `felix-values.yaml`). To renew them, run `helm upgrade` and then
-restart what reads them: `kubectl rollout restart statefulset/felix-broker deployment/felix-arena-sim`.
+The tokens last as long as the control plane's `FELIX_EXCHANGE_TOKEN_TTL_SECONDS`. To renew them,
+run `helm upgrade` and then restart what reads them:
+`kubectl rollout restart statefulset/felix-broker deployment/felix-arena-sim`.
 The chart's `values.yaml` lists every setting.
 
 ## Check the images
