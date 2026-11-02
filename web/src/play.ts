@@ -32,6 +32,7 @@ import { KillCam, type KillCamTimes, Markers } from './killcam';
 import { KillRig, VIEWS } from './killcam-rig';
 import { killsOf, type KillRef, type Page, type Reader } from './replay';
 import { Folded, joinFromKeyframe, type JoinTimes } from './join';
+import { joinMembers, sessionKey } from './members';
 import { GapFeed, type GapStats } from './gaps';
 import { Behind } from './behind';
 import { Resync } from './resync';
@@ -157,6 +158,8 @@ export interface ArenaDebug {
   throttle: (bitsPerSecond: number | null) => void;
   /** The state each recent tick folded to, by `epoch/tick`: the tick's hash and the match's digest. */
   states: Record<string, string>;
+  /** This session's key in the arena's member list. */
+  member: string | null;
 }
 
 declare global {
@@ -211,6 +214,7 @@ async function main(): Promise<void> {
     replayAt: null,
     kills: [],
     holdReplay: () => {},
+    member: null,
   };
   window.arena = debug;
 
@@ -606,6 +610,9 @@ async function main(): Promise<void> {
         id_token: string;
       }
     ).id_token;
+  /** This page's place in the arena's member list, kept across sessions so a rejoin does not list it twice. */
+  const memberKey = sessionKey();
+  let members: ReturnType<typeof joinMembers> | null = null;
   /** The slow link this page is on, in bits a second, kept across sessions. */
   let slow: number | null = THROTTLE !== null && THROTTLE !== '' ? SLOW_KBIT * 1000 : null;
   const showSlow = () => {
@@ -716,6 +723,13 @@ async function main(): Promise<void> {
       throw err;
     }
     joined = true;
+    // The lobby cache is the one resource every sign-in reaches; the arena's own are optional.
+    if (!link.missing.includes('members')) {
+      members?.stop();
+      const role = link.missing.includes('input') ? 'watch' : 'play';
+      members = joinMembers(link, GATEWAY, ARENA, token, role, USER, memberKey);
+      debug.member = memberKey;
+    }
     // A switch flipped while the join was in flight reached the session before it was the page's current one.
     if (slow !== null) link.throttle(slow);
     return link;

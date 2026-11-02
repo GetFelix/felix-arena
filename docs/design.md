@@ -324,8 +324,9 @@ player whose inputs stop is held on the last one for 100 ms, then coasts. When
 a record arrives after one was lost, the buttons of every input it covers that
 the sim has not applied are merged into the newest, so a press is not lost
 with its record. A player's first input joins it to the arena, on the smaller
-team, and ten seconds without one removes it. The `join` input and the member
-keys arrive in M3.
+team, and ten seconds without one removes it. A player still joins with its
+first input rather than a `join` input; the member list, below, says who is
+connected.
 
 ### Ticks are commits
 
@@ -410,7 +411,8 @@ before reading history (`crates/server/felix-broker/src/broker/subscribe.rs`,
 the comment on `subscribe_from`), which is exactly the ordering felix-canvas
 does by hand.
 
-A player who joins also writes its member key and sends a `join` input. The
+Every page that joins, player or spectator, writes its member key. A player
+joins the match with its first input, and the
 sim assigns a team and slot and announces it in the next tick's events. No two
 clients ever race for a slot, because only the sim writes the roster.
 
@@ -868,7 +870,7 @@ There are two roles per arena, both ordinary Felix RBAC roles:
 | Role | Grants on the arena's resources |
 |---|---|
 | `role:arena-<arena>-play` | Publish on the input stream; subscribe on the tick stream (which includes `state_get`); read and write the member cache; read the lobby cache |
-| `role:arena-<arena>-watch` | Subscribe on the tick stream; read the member cache and the lobby cache |
+| `role:arena-<arena>-watch` | Subscribe on the tick stream; read and write the member cache; read the lobby cache |
 
 `commit` needs `stream.publish` and `state_get` needs `stream.subscribe` on the
 tick stream (`services/felix-broker-service/src/serving/quic/streams/control/commit.rs`).
@@ -882,9 +884,40 @@ Token exchange narrows by a cross product of actions and resources
 grant exactly the actions above and no more: a role that also granted publish
 on the tick stream would put it in every narrowed token.
 
-Membership uses felix-canvas's TTL member list, including its workaround for
-cache entries that expire without telling a watch
-([felix#960](https://github.com/GetFelix/felix/issues/960)).
+Spectators write member keys too, so the lobby can count them; that is why
+the watch role writes the member cache. Felix grants a cache as a whole, not
+per key, so any session in an arena can write or delete any member key and
+inflate or shrink the counts. The counts are a display; nothing decides on
+them, and players are counted from the sim's own roster.
+
+**The member list.** Every open page, playing or watching, writes a key in
+`arena.members.<arena>` under a random session key, holding `play:<name>` or
+`watch:<name>`, and writes it again every 10 seconds. The cache's TTL is 30
+seconds, so a tab that dies without a word drops out within 30 seconds. A tab
+that closes normally deletes its key at once: on `pagehide` it sends
+felix-gateway's leave beacon (`POST /members/leave`), which the browser
+delivers after the page is gone. Felix now tells a watch when an entry expires
+(felix-gateway's protocol, `cache_change`; the gap
+[felix#960](https://github.com/GetFelix/felix/issues/960) described is closed),
+and a reader can drop an entry as soon as its `expires_in_ms` passes.
+
+**The lobby.** Each arena's sim watches its member cache and every 3 seconds
+writes the arena's status to `arena.lobby` under the arena's name, with a 10
+second TTL: match number, phase, seconds left, scores, players from its own
+roster, capacity, and the spectators it counts in the member list. A sim that
+stops drops its arena from the lobby within 10 seconds. The lobby page
+(`web/lobby.html`) joins felix-gateway's scope `lobby`, watches that cache and
+lists one card per arena with a join button. The scope file marks the lobby
+cache `shared` (felix-gateway 0.5.0), because one cache lists every arena, and
+marks every per-arena resource optional, so a lobby session reaches only the
+lobby cache.
+
+CI's `lobby` job runs two bots in each arena and checks that the lobby lists
+both. It opens a spectator tab, then closes it normally and checks that its
+key leaves the member list. It opens a second spectator tab, blocks its
+beacon, kills the tab, and checks that its key lapses within the TTL and that
+the lobby stops counting it. The screenshots are in the job's `lobby-shots`
+artifact.
 
 ## Failure modes
 

@@ -28,6 +28,12 @@ export const palette = {
   muted: '#8a96a6',
   panel: 'rgba(13, 19, 27, 0.72)',
   line: 'rgba(255, 255, 255, 0.08)',
+  // The lobby: the live arena behind it, dimmed toward the edges, wells inside its panels, and the join button.
+  shadeMid: 'rgba(10, 15, 21, 0.5)',
+  shadeEdge: 'rgba(10, 15, 21, 0.94)',
+  well: 'rgba(6, 10, 15, 0.45)',
+  accentWash: 'hsla(192, 90%, 42%, 0.16)',
+  accentHaze: 'hsla(190, 95%, 58%, 0.45)',
   // The HUD's team text sits a little lighter than the crafts so it stays legible on a dark panel.
   coralText: 'hsl(12, 90%, 62%)',
   violetText: 'hsl(262, 78%, 70%)',

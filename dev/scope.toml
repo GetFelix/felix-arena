@@ -1,5 +1,7 @@
-# What the gateway lets a browser session reach in one arena. dev/seed.mjs
-# creates these streams for arenas `alpha` and `bravo`.
+# What the gateway lets a browser session reach. A session joins one arena,
+# or `lobby` for the lobby page, which reaches only the lobby cache: every
+# per-arena resource is optional, so `hello` lists what a sign-in lacks.
+# dev/seed.mjs creates these for arenas `alpha` and `bravo`.
 
 # Lets a page slow its own connection, for the slow-link switch on the play page
 # and CI's throttle lane. Leave it off on a public gateway.
@@ -12,6 +14,7 @@ field = "arena"
 alias = "ticks"
 name = "arena.ticks.{scope}"
 actions = ["subscribe"]
+optional = true
 
 [[scope.streams]]
 alias = "input"
@@ -21,3 +24,19 @@ actions = ["publish"]
 stamp_sender = true
 # A spectator has no publish right here and still joins.
 optional = true
+
+# One key per open session, `play:<name>` or `watch:<name>`, written every
+# 10 s; a closed tab's key lapses within 30 s.
+[[scope.caches]]
+alias = "members"
+name = "arena.members.{scope}"
+actions = ["read", "write", "watch"]
+ttl_s = 30
+optional = true
+
+# Each arena's status, written by its sim with a 10 s TTL.
+[[scope.caches]]
+alias = "lobby"
+name = "arena.lobby"
+actions = ["read", "watch"]
+shared = true
