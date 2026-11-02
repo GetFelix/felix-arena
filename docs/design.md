@@ -775,7 +775,14 @@ and one tick in twenty lost (some two in a row), and draws it at 60 frames a
 second: no frame moves a craft more than 4 cm beyond the furthest it moved in a
 tick around that moment, none stalls, and no craft is drawn more than 40 cm
 from where the ticks put it. The dev stack's smoke run does the same with ticks
-that crossed the gateway, at the times they really arrived.
+that crossed the gateway, at the times they really arrived. A shared CI runner
+sometimes holds the sim or the socket up for a few hundred milliseconds, and no
+interpolator can draw through that. The smoke run finds such a hold-up in the
+arrivals (a tick that comes more than two ticks later than its turn) and sets
+aside the frames around it. A tick that is only missing is not set aside; the
+interpolator has to bridge it. The run fails if more than half the frames were
+set aside, and the rest are judged against the same bounds as the unit test,
+except that up to 5% of them may be starved.
 
 **No lag compensation.** Rewinding hitboxes to what the shooter saw matters for
 hitscan weapons with small targets. Blaster bolts travel and are judged by the

@@ -11,7 +11,7 @@ export const MAX_DELAY_MS = 100;
 /** Arrivals that must all sit this far above the window's earliest before the sim is taken to have stalled. */
 const STALL_MS = 2 * TICK_MS;
 /** How many arrivals in a row that takes: a quarter of a second, longer than a delay spike on a bad link lasts. */
-const STALL_RUN = 8;
+export const STALL_RUN = 8;
 /** Ticks kept: a second. */
 const KEEP = 30;
 /** Arrivals the clock and the jitter are judged over: two seconds. */
