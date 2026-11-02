@@ -1,0 +1,109 @@
+{{- $fullname := include "arena.fullname" . -}}
+{{- $name := printf "%s-seed" $fullname -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "arena.labels" . | nindent 4 }}
+---
+# Creating a Secret cannot be limited to a name; reading and replacing can.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "arena.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [create]
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames:
+      - {{ include "arena.brokerSecret" . }}
+      - {{ include "arena.simSecret" . }}
+    verbs: [get, update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "arena.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+---
+# A new Job per revision, because a Job's template cannot change, and the seed
+# runs again at every upgrade to pick up new arenas and players.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $name }}-{{ .Release.Revision }}
+  labels:
+    {{- include "arena.labels" . | nindent 4 }}
+    app.kubernetes.io/component: seed
+spec:
+  backoffLimit: 6
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        {{- include "arena.selector" (list . "seed") | nindent 8 }}
+    spec:
+      serviceAccountName: {{ $name }}
+      restartPolicy: OnFailure
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: seed
+          image: {{ include "arena.image" (list . .Values.seed.image) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- include "arena.securityContext" . | nindent 12 }}
+          env:
+            - name: ARENA_FELIX_CONTROL_PLANE
+              value: {{ required "felix.controlPlaneUrl is required" .Values.felix.controlPlaneUrl | quote }}
+            - name: ARENA_FELIX_BOOTSTRAP
+              value: {{ required "seed.bootstrapUrl is required" .Values.seed.bootstrapUrl | quote }}
+            - name: ARENA_FELIX_BOOTSTRAP_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "seed.bootstrapSecret.name is required" .Values.seed.bootstrapSecret.name }}
+                  key: {{ .Values.seed.bootstrapSecret.key }}
+            # The cluster-internal address; the issuer it reports is the public one.
+            - name: ARENA_IDP
+              value: http://{{ $fullname }}-idp:9400
+            - name: ARENA_STATE_DIR
+              value: /state
+            - name: ARENA_TENANT
+              value: {{ .Values.felix.tenant | quote }}
+            - name: ARENA_NAMESPACE
+              value: {{ .Values.felix.namespace | quote }}
+            - name: ARENA_ARENAS
+              value: {{ join " " .Values.arenas | quote }}
+            - name: ARENA_PLAYERS
+              value: {{ join "," .Values.players | quote }}
+            - name: ARENA_WATCHERS
+              value: {{ join "," .Values.watchers | quote }}
+            - name: ARENA_REPLICAS
+              value: {{ .Values.felix.replicas | quote }}
+            - name: ARENA_BROKER_SECRET
+              value: {{ include "arena.brokerSecret" . }}
+            - name: ARENA_SIM_SECRET
+              value: {{ include "arena.simSecret" . }}
+            - name: NODE_EXTRA_CA_CERTS
+              value: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+          volumeMounts:
+            - name: state
+              mountPath: /state
+      volumes:
+        - name: state
+          emptyDir: {}

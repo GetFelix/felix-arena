@@ -1,7 +1,7 @@
 # Self-hosting Felix Arena
 
 This guide runs the whole game on one machine: Felix, the simulation and the
-page you play in. You need Docker or Podman and a few minutes. At the end you
+page you play in. [On Kubernetes](#on-kubernetes) covers a cluster. You need Docker or Podman and a few minutes. At the end you
 and a friend are flying in the same arena.
 
 It uses the released container images and one file, [`deploy/compose.yml`](../deploy/compose.yml).
@@ -153,6 +153,78 @@ docker compose up --detach --force-recreate broker gateway sim
 ```
 
 If the broker or the sim logs refused tokens, this is the fix too.
+
+## On Kubernetes
+
+The Helm chart in [`deploy/helm/felix-arena`](../deploy/helm/felix-arena) runs the game next to a
+Felix install on a cluster. It deploys the gateway (two copies by default, and
+the game's page is served from them), the sim (always one), the sign-in page and
+a seed Job. It does not install Felix: use [Felix's own chart](https://docs.getfelix.dev) for the control plane and the brokers.
+
+You need a cluster, `kubectl` and Helm 3. The chart is attached to every
+release as `felix-arena-<version>.tgz`; from a clone, use the directory instead.
+
+1. Install Felix's chart with its bootstrap listener on, and with the brokers off until the next step.
+   They cannot start before the seed has made their token. `deploy/helm/felix-arena/ci/felix-values.yaml`
+   is a working set of values, and `ci/kind-install.sh` runs these steps on a kind cluster.
+2. Install this chart. Point it at Felix and give it the sign-in page's public address:
+
+   ```yaml
+   # arena-values.yaml
+   felix:
+     controlPlaneUrl: http://felix-controlplane:8443
+     brokers: [felix-broker:5000]
+     serverName: felix-broker
+     caSecret: { name: felix-broker-tls, key: tls.crt }   # the certificate the brokers present
+   seed:
+     bootstrapUrl: http://felix-controlplane-bootstrap:9095
+     bootstrapSecret: { name: felix-bootstrap }
+   idp:
+     issuer: https://signin.example.com
+   gateway:
+     ingress: { enabled: true, host: arena.example.com, tlsSecret: arena-tls }
+   ```
+
+   ```bash
+   helm install felix-arena ./deploy/helm/felix-arena -f arena-values.yaml
+   ```
+
+3. Turn the brokers on with the token the seed stored:
+
+   ```bash
+   helm upgrade felix <felix chart> --reuse-values --set broker.enabled=true \
+     --set broker.credential.existingSecret=felix-arena-broker-credential
+   ```
+
+The seed creates the tenant, the arenas and who may play (`arenas`, `players`
+and `watchers` in the values), then stores the broker's token and the sim's in
+Secrets. The sim pod starts when its Secret exists. Check on it:
+
+```bash
+kubectl get pods
+kubectl logs deploy/felix-arena-sim
+```
+
+Open the game at the gateway's host, with the sign-in page's address in the
+URL, as in [Playing with other people](#playing-with-other-people):
+`https://arena.example.com/play.html?arena=alpha&as=ana&idp=https://signin.example.com&gateway=wss://arena.example.com/ws`.
+To try it without an ingress, set `idp.issuer: http://127.0.0.1:9400`, forward the two services and open the plain address:
+
+```bash
+kubectl port-forward svc/felix-arena-gateway 8787:80 &
+kubectl port-forward svc/felix-arena-idp 9400:9400 &
+```
+
+The game is then at <http://127.0.0.1:8787/play.html?arena=alpha&as=ana>.
+
+The sign-in page lets in anyone who picks a name. It is the only identity
+provider the chart sets up, so keep it off the internet or limit it with your own network policy.
+
+To change the arenas or the players, run `helm upgrade`: the seed runs again.
+The tokens last as long as the control plane's `FELIX_EXCHANGE_TOKEN_TTL_SECONDS`
+(30 days in `felix-values.yaml`). To renew them, run `helm upgrade` and then
+restart what reads them: `kubectl rollout restart statefulset/felix-broker deployment/felix-arena-sim`.
+The chart's `values.yaml` lists every setting.
 
 ## Check the images
 

@@ -1,0 +1,68 @@
+{{- $name := printf "%s-sim" (include "arena.fullname" .) -}}
+{{- $s := .Values.sim -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "arena.labels" . | nindent 4 }}
+    app.kubernetes.io/component: sim
+spec:
+  replicas: 1
+  # Never two at once, not even during a rollout: they would both write ticks.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "arena.selector" (list . "sim") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "arena.selector" (list . "sim") | nindent 8 }}
+    spec:
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      automountServiceAccountToken: false
+      containers:
+        - name: sim
+          image: {{ include "arena.image" (list . $s.image) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- include "arena.securityContext" . | nindent 12 }}
+          env:
+            {{- include "arena.felixEnv" (list . "SIM") | nindent 12 }}
+            - name: SIM_FELIX_TOKEN_FILE
+              value: /etc/felix-arena/sim/token
+            - name: SIM_ARENAS
+              value: {{ join " " .Values.arenas | quote }}
+            - name: SIM_WARMUP_SECONDS
+              value: {{ $s.warmupSeconds | quote }}
+            - name: SIM_MATCH_SECONDS
+              value: {{ $s.matchSeconds | quote }}
+            - name: SIM_RESULTS_SECONDS
+              value: {{ $s.resultsSeconds | quote }}
+            - name: SIM_KILL_LIMIT
+              value: {{ $s.killLimit | quote }}
+            - name: SIM_RAIL_SECONDS
+              value: {{ $s.railSeconds | quote }}
+            - name: RUST_LOG
+              value: info
+            {{- with $s.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          resources:
+            {{- toYaml $s.resources | nindent 12 }}
+          volumeMounts:
+            {{- include "arena.caMount" . | nindent 12 }}
+            - name: token
+              mountPath: /etc/felix-arena/sim
+              readOnly: true
+      volumes:
+        {{- include "arena.caVolume" . | nindent 8 }}
+        # The seed Job creates this Secret, so the pod waits for it on a first install.
+        - name: token
+          secret:
+            secretName: {{ include "arena.simSecret" . }}
+      {{- include "arena.scheduling" $s | nindent 6 }}

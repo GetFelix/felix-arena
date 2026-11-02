@@ -1,0 +1,128 @@
+{{- $name := printf "%s-gateway" (include "arena.fullname" .) -}}
+{{- $g := .Values.gateway -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "arena.labels" . | nindent 4 }}
+    app.kubernetes.io/component: gateway
+spec:
+  replicas: {{ $g.replicas }}
+  selector:
+    matchLabels:
+      {{- include "arena.selector" (list . "gateway") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "arena.selector" (list . "gateway") | nindent 8 }}
+    spec:
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      automountServiceAccountToken: false
+      containers:
+        - name: gateway
+          image: {{ include "arena.image" (list . $g.image) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- include "arena.securityContext" . | nindent 12 }}
+          env:
+            {{- include "arena.felixEnv" (list . "GATEWAY") | nindent 12 }}
+            - name: GATEWAY_FELIX_CONTROL_PLANE
+              value: {{ required "felix.controlPlaneUrl is required" .Values.felix.controlPlaneUrl | quote }}
+            - name: GATEWAY_OIDC_ISSUER
+              value: {{ required "idp.issuer is required" .Values.idp.issuer | quote }}
+            - name: GATEWAY_OIDC_CLIENT_ID
+              value: felix-arena
+            {{- with $g.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: 8787
+          readinessProbe:
+            httpGet:
+              path: /oidc
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /oidc
+              port: http
+            periodSeconds: 10
+          resources:
+            {{- toYaml $g.resources | nindent 12 }}
+          volumeMounts:
+            {{- include "arena.caMount" . | nindent 12 }}
+      volumes:
+        {{- include "arena.caVolume" . | nindent 8 }}
+      {{- include "arena.scheduling" $g | nindent 6 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "arena.labels" . | nindent 4 }}
+    app.kubernetes.io/component: gateway
+  {{- with $g.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ $g.service.type }}
+  ports:
+    - name: http
+      port: {{ $g.service.port }}
+      targetPort: http
+  selector:
+    {{- include "arena.selector" (list . "gateway") | nindent 4 }}
+{{- if $g.podDisruptionBudget.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "arena.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ $g.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "arena.selector" (list . "gateway") | nindent 6 }}
+{{- end }}
+{{- if $g.ingress.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "arena.labels" . | nindent 4 }}
+  {{- with $g.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with $g.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- if $g.ingress.tlsSecret }}
+  tls:
+    - hosts: [{{ $g.ingress.host | quote }}]
+      secretName: {{ $g.ingress.tlsSecret }}
+  {{- end }}
+  rules:
+    - host: {{ required "gateway.ingress.host is required" $g.ingress.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $name }}
+                port:
+                  name: http
+{{- end }}

@@ -1,0 +1,15 @@
+apiVersion: v2
+name: felix-arena
+description: >-
+  Felix Arena on Kubernetes, next to a Felix release: the gateway (serving the
+  game) scaled horizontally, one sim, the stand-in sign-in page, and the seed
+  that creates the tenant, the arenas and the service tokens.
+type: application
+version: 0.0.0
+# The release the image tags default to. The release workflow sets it to the
+# tag it publishes; `latest` follows the newest release.
+appVersion: "latest"
+kubeVersion: ">=1.25.0-0"
+home: https://github.com/GetFelix/felix-arena
+sources:
+  - https://github.com/GetFelix/felix-arena

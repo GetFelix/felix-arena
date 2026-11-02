@@ -2,7 +2,7 @@ name: Release
 
 # A v* tag releases that version: the built web client and the images
 # ghcr.io/getfelix/felix-arena-{sim,gateway,seed,idp} (amd64 and arm64,
-# signed with cosign), in one GitHub release.
+# signed with cosign) and the Helm chart, in one GitHub release.
 #
 # A pull request that changes the images, and a manual run, build everything
 # and publish nothing.
@@ -236,6 +236,16 @@ jobs:
       contents: write
       packages: read
     steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+
+      - name: Package the Helm chart
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          helm lint deploy/helm/felix-arena -f deploy/helm/felix-arena/ci/kind-values.yaml
+          helm package deploy/helm/felix-arena --version "$version" --app-version "$version"
+
       - uses: actions/download-artifact@v4
         with:
           name: web-package
@@ -294,7 +304,7 @@ jobs:
           prerelease=()
           case "$GITHUB_REF_NAME" in *-*) prerelease=(--prerelease) ;; esac
           gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" \
-            "${prerelease[@]}" --notes-file notes.md felix-arena-web-*.tar.gz*
+            "${prerelease[@]}" --notes-file notes.md felix-arena-web-*.tar.gz* felix-arena-*.tgz
 
   site:
     needs: release
