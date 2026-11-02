@@ -56,7 +56,8 @@ const cleo = await open('cleo', `&lose=${LOSE}`);
 
 const compared = new Set<string>();
 const differing: string[] = [];
-const kills = new Map<string, boolean>();
+/** Each kill either page listed after cleo joined, and which pages listed it. */
+const kills = new Map<string, 'both' | 'ana only' | 'cleo only'>();
 let first: { match: number; tick: number } | null = null;
 const key = (k: { match: number; tick: number }) => `${k.match}:${k.tick}`;
 /** Whether `k` happened after cleo joined, in this match or a later one. */
@@ -74,8 +75,8 @@ async function sample(): Promise<Seen> {
   }
   const theirs = new Set(watcher.kills.map(key));
   const ours = new Set(player.kills.map(key));
-  for (const k of player.kills) if (after(k)) kills.set(key(k), theirs.has(key(k)));
-  for (const k of watcher.kills) if (!ours.has(key(k))) kills.set(key(k), false);
+  for (const k of player.kills) if (after(k)) kills.set(key(k), theirs.has(key(k)) ? 'both' : 'ana only');
+  for (const k of watcher.kills) if (!ours.has(key(k))) kills.set(key(k), 'cleo only');
   return watcher;
 }
 const started = Date.now();
@@ -89,7 +90,7 @@ const watcher = await sample();
 for (const stop of stopBots) stop();
 await browser.close();
 
-const missing = [...kills].filter(([, held]) => !held).map(([k]) => k);
+const missing = [...kills].filter(([, held]) => held !== 'both').map(([k, held]) => `${k} (${held})`);
 console.log(`cleo lost every ${LOSE}th live tick:`, watcher.gaps);
 console.log(
   `${compared.size} ticks compared, ${differing.length} differ; ${kills.size} kills, ${missing.length} not on both lists`,
