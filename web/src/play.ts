@@ -31,7 +31,7 @@ import { Hud, killKey } from './hud';
 import { KillCam, type KillCamTimes, Markers } from './killcam';
 import { KillRig, VIEWS } from './killcam-rig';
 import { killsOf, type KillRef, type Page, type Reader } from './replay';
-import { joinFromKeyframe, type JoinTimes } from './join';
+import { Folded, joinFromKeyframe, type JoinTimes } from './join';
 import { GapFeed, type GapStats } from './gaps';
 import { Behind } from './behind';
 import { Resync } from './resync';
@@ -570,8 +570,8 @@ async function main(): Promise<void> {
   /** The resync of the session now open, which {@link onFrame} tells how far behind the live ticks are. */
   let resyncing: Resync | null = null;
   Object.defineProperty(debug, 'behindTicks', { get: () => behind.ticks });
-  /** The newest log offset handed to {@link onFrame}, which a resync reads on from. */
-  let folded: number | null = null;
+  /** How far {@link onFrame} has folded the ticks without a hole, which a resync reads on from. */
+  const folded = new Folded();
   const onFrame = (frame: EventFrame, catchingUp = false) => {
     firstEventMs ??= performance.now();
     let tick: Tick;
@@ -589,7 +589,7 @@ async function main(): Promise<void> {
       }
       timing?.free();
     }
-    if (frame.offset !== null) folded = Math.max(folded ?? -1, frame.offset);
+    folded.see(frame.offset, frame.skippedBefore);
     if (catchingUp) foldTick(tick, frame.offset);
     else onTick(tick, performance.now(), frame.offset, frame.payload, !frame.filled);
     tick.free();
@@ -654,6 +654,7 @@ async function main(): Promise<void> {
     let generation = 0;
     const joinFrom = (resumeAfter: number | null = null) => {
       const mine = ++generation;
+      folded.rejoin();
       const feed = new GapFeed(
         () => link,
         (frame, catchUp) => {
@@ -683,7 +684,7 @@ async function main(): Promise<void> {
         debug.resyncs++;
         try {
           // From where this page got to, when that is close: a keyframe alone would skip the kills in between.
-          await joinFrom(folded);
+          await joinFrom(folded.offset);
         } catch (err) {
           // The old subscription is replaced as far as the page goes, so a failed join leaves it with no ticks at all.
           link.close();

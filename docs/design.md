@@ -742,17 +742,20 @@ joins again from the newest keyframe, the same way it joins a match in
 progress, on the same gateway session: subscribing to the `live` slot again
 replaces the old subscription, and ticks still arriving on the old one are
 dropped. A keyframe holds the tally but not the kills between it and where the
-page had got to. So when the page is at most 60 ticks short of the keyframe, it
-reads on from the tick after the last one it folded, and no kill is missed.
-Further behind than that it takes the keyframe, and its tally is right but the
-kills in between are not on its replay list. A page often resyncs once soon
-after it joins, because the first frames it draws take half a second, so the
-short case is the common one. The label at the top of the page says "Connection
-poor" until the live ticks are within 3 ticks of the sim. A link that stays too
-slow resyncs at most once every 5
-seconds, so it jumps forward repeatedly instead of rejoining without pause; a
-wide jump seen during that wait is acted on when it ends. If the join itself
-fails, the page opens a new session.
+page had got to. So when the page has folded every tick up to some offset and
+that is at most 30 ticks (one keyframe interval) behind the newest tick, it
+reads on from the tick after it, and the kills in between are counted. A tick
+that was skipped and not read back stops that offset where it is, so a later
+tick cannot hide the hole. A page further behind than 30 ticks is behind because
+its link is slow, and reading the backlog again over the same link would keep
+it there, so it takes the keyframe: its tally is right, but the kills in between
+are not on its replay list. A page often resyncs once soon after it joins,
+because the first frames it draws take half a second, so the short case is the
+common one. The label at the top of the page says "Connection poor" until the
+live ticks are within 3 ticks of the sim. A link that stays too slow resyncs at
+most once every 5 seconds, so it jumps forward repeatedly instead of rejoining
+without pause; a wide jump seen during that wait is acted on when it ends. If
+the join itself fails, the page opens a new session.
 `web/src/resync.ts` holds that rule, and `window.arena.resyncs` counts the
 resyncs. CI's `resync` job slows `cleo`'s link below the rate of the ticks,
 requires her page to rejoin and say so, then lifts the slowdown and checks that
