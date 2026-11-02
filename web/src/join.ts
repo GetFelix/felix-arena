@@ -1,6 +1,8 @@
 // Joining mid-match (docs/design.md, "Joining mid-match"): read the `keyframe` state key, whose version is the
 // newest keyframe's offset, subscribe from that offset, and fold the catch-up ticks without drawing them.
 import type { EventFrame, StateValue, Subscribed } from './gateway';
+import { readTicks } from './gaps';
+import type { Reader } from './replay';
 
 /** Ticks between keyframes, as `core/src/world.rs` has it. */
 const KEYFRAME_EVERY = 30;
@@ -14,6 +16,8 @@ export interface Joinable {
     from: number | 'live',
     onEvent: (frame: EventFrame) => void,
   ): Promise<Subscribed>;
+  /** Reads a range of the tick stream, for the ticks a join would otherwise skip. */
+  read?: Reader['read'];
 }
 
 /** When each step of a join finished, in milliseconds on the page's clock. */
@@ -38,10 +42,20 @@ export interface JoinTimes {
 export const RESUME_TICKS = KEYFRAME_EVERY;
 
 /**
+ * The most ticks a join that starts from the keyframe reads back from before it, one range read rather than a
+ * subscription, when the page had folded the match up to some offset. Twenty seconds of play.
+ */
+export const HOLE_TICKS = 600;
+/** How long that read may take before the join goes on from the keyframe without it. */
+export const HOLE_TIMEOUT_MS = 1000;
+
+/**
  * Subscribe to the tick stream from the newest keyframe. `onTick` gets every tick in order with `catchUp` true for
  * those already in the log when the subscription began, except the newest of them, which is the first to draw.
  * A page that has folded every tick up to `resumeAfter` starts at the tick after it instead when that is no more
- * than {@link RESUME_TICKS} before the newest tick, so the ticks the keyframe would skip still count.
+ * than {@link RESUME_TICKS} before the newest tick, so the ticks the keyframe would skip still count. Further back
+ * than that, the ticks between it and the keyframe (at most {@link HOLE_TICKS}) are read back in one range read
+ * first, and the join goes on without them if the read is late or fails.
  */
 export async function joinFromKeyframe(
   gateway: Joinable,
@@ -60,6 +74,9 @@ export async function joinFromKeyframe(
       : resumeAfter !== null && resumeAfter < keyframe && (state.asOf ?? keyframe) - resumeAfter <= RESUME_TICKS
         ? resumeAfter + 1
         : keyframe;
+  if (keyframe !== null && start === keyframe && resumeAfter !== null && resumeAfter < keyframe) {
+    for (const frame of await readHole(gateway, resumeAfter + 1, keyframe)) onTick(frame, true);
+  }
   // Frames can arrive before `subscribed` is handled; they wait for the tail it names.
   let tail: number | null | undefined;
   const early: EventFrame[] = [];
@@ -70,6 +87,28 @@ export async function joinFromKeyframe(
   tail = subscribed.liveOffset;
   for (const frame of early) onTick(frame, isCatchUp(frame.offset, tail));
   return { startMs, keyframeMs, subscribedMs: now(), keyframe };
+}
+
+/** The ticks from `from` up to `end`, or none when there are too many, the read fails or it is late. */
+async function readHole(gateway: Joinable, from: number, end: number): Promise<EventFrame[]> {
+  if (!gateway.read || end - from > HOLE_TICKS) return [];
+  const reader: Reader = { read: gateway.read.bind(gateway) };
+  let late = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<null>((resolve) => {
+    timer = setTimeout(() => {
+      late = true;
+      resolve(null);
+    }, HOLE_TIMEOUT_MS);
+  });
+  try {
+    const read = readTicks(reader, 'ticks', from, end, { sub: 0, receivedUs: 0 }, () => late).catch(() => null);
+    const frames = await Promise.race([read, timeout]);
+    // A partial or patchy hole would fold as a hole of its own, so only a read of every offset up to the keyframe is used.
+    return frames !== null && frames.length === end - from && frames.at(-1)?.offset === end - 1 ? frames : [];
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
