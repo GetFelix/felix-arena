@@ -33,12 +33,14 @@ try {
   await page.waitForFunction(() => window.arena?.own != null, null, { timeout: 60_000 });
 } catch (err) {
   // The page retries a join quietly, so say what it was doing when the wait ran out.
-  const state = await page.evaluate(() => ({
-    status: document.getElementById('loading')?.textContent,
-    where: document.getElementById('where')?.textContent,
-    ticks: window.arena?.ticks,
-    reconnects: window.arena?.reconnects,
-  }));
+  const state = await page
+    .evaluate(() => ({
+      status: document.getElementById('loading')?.textContent,
+      where: document.getElementById('where')?.textContent,
+      ticks: window.arena?.ticks,
+      reconnects: window.arena?.reconnects,
+    }))
+    .catch(() => null);
   console.error('the page never found its craft:', JSON.stringify(state), ...logs.slice(-20), ...errors);
   throw err;
 }

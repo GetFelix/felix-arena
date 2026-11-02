@@ -721,6 +721,7 @@ async function main(): Promise<void> {
         return await open(token ?? (await signIn()));
       } catch (err) {
         if (final(err)) throw err;
+        console.warn('join failed, trying again:', err);
       }
       token = null;
       await sleep(wait);
