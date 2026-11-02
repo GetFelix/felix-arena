@@ -140,6 +140,32 @@ play. With the
 development stack below running, `play.html?arena=alpha&as=ana` plays through
 Felix instead.
 
+## Release images
+
+Each release also publishes five container images to GitHub's registry, for
+`linux/amd64` and `linux/arm64`. Each is signed with cosign:
+
+| Image | What it is |
+| --- | --- |
+| `ghcr.io/getfelix/felix-arena-sim` | The simulation (`docker/sim.Dockerfile`). |
+| `ghcr.io/getfelix/felix-arena-gateway` | felix-gateway with the arena's scope built in (`dev/scope.toml`). |
+| `ghcr.io/getfelix/felix-arena-web` | The built web client behind nginx, on port 8080. |
+| `ghcr.io/getfelix/felix-arena-seed` | The job that creates the arenas and the tokens the broker and the sim use. |
+| `ghcr.io/getfelix/felix-arena-idp` | The stand-in identity provider, for trying the game. Never expose it. |
+
+Tags are the release version without its `v` (`0.1.7`) and `latest`. The release
+notes list each image's digest and the command that checks its signature:
+
+```bash
+cosign verify ghcr.io/getfelix/felix-arena-sim:0.1.7 \
+  --certificate-identity-regexp '^https://github.com/GetFelix/felix-arena/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+The release workflow builds all five without publishing on every pull request
+that touches `docker/` or the files they copy, so a broken image shows up
+before a tag does.
+
 ## Development stack
 
 `dev/up.sh` starts Felix 0.6.2 (a control plane and one broker), a stand-in identity
