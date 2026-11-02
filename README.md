@@ -165,6 +165,21 @@ The release workflow builds all four without publishing on every pull request
 that touches `docker/` or the files they copy, so a broken image shows up
 before a tag does.
 
+## Self-hosting
+
+[docs/self-hosting.md](docs/self-hosting.md) runs the whole game on one machine
+from the release images and one compose file, with no clone, Rust or Node:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/GetFelix/felix-arena/main/deploy/compose.yml
+docker compose up --detach
+# open http://127.0.0.1:8787/play.html?arena=alpha&as=ana
+```
+
+The guide also covers changing the arenas and players, playing with other
+people, updating, renewing the tokens, Podman and troubleshooting. The `self-host`
+CI job runs this file against freshly built images and plays in a browser.
+
 ## Development stack
 
 `dev/up.sh` starts Felix 0.6.2 (a control plane and one broker), a stand-in identity
@@ -261,6 +276,13 @@ at 500 ms p50, reports signing in and the first draw (on CI's software
 renderer; real-GPU frame times come from the benchmark page), and checks that
 its folded state matches the player's at every tick.
 
+CI's `sim restart` job kills the sim container once a kill has been scored and
+starts it again. The sim reads the tail of the tick log, picks the match up where
+it was, and writes its ticks in the next epoch; the job checks that play resumes
+within 5 seconds with the same match, scores and roster. To run it yourself, with
+the stack up from a short warmup (`SIM_WARMUP_SECONDS=5 SIM_KILL_LIMIT=99 dev/up.sh`):
+`cd web && npx vite-node scripts/restart.ts`.
+
 ## Frame time
 
 The target is 60 frames a second at 1080p on a laptop iGPU at High or Medium.
@@ -302,7 +324,7 @@ disagree about the rules.
 | Match start offsets | Stream state keys on the tick stream | `match/<n>` |
 | Player inputs | Ephemeral stream | `arena.input.<arena>` |
 | Who is connected | Cache keys with TTL | `arena.members.<arena>/<session>` |
-| Simulation epoch | Counter | `arena.epoch.<arena>/sim` |
+| Simulation epoch | A field in every tick | Header of the tick records |
 | Lobby: every arena's status | Cache keys with TTL | `arena.lobby/<arena>` |
 | Who may play, who may watch | Felix RBAC roles | `role:arena-<arena>-play`, `role:arena-<arena>-watch` |
 
@@ -336,6 +358,7 @@ issue per piece of work.
 ## Documentation
 
 - [docs/design.md](docs/design.md): the game, the architecture, the data model, the kill cam, failure modes, targets and the build order.
+- [docs/self-hosting.md](docs/self-hosting.md): run the game on your own machine.
 - [docs/art.md](docs/art.md): the art direction, from the palette and lighting to the rules that keep new content consistent.
 - [prototype/assets/CREDITS.md](prototype/assets/CREDITS.md): the sources and licences of the models and the HDRI.
 - [Arena](https://docs.getfelix.dev/built-on-felix/arena/) in the Felix docs: how the game uses Felix.
