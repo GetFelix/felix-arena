@@ -27,8 +27,8 @@ Violet, flying low-poly hover-craft in a walled arena seen from a top-down
 camera. It is playable: a match runs through Felix from warmup to results,
 with the simulation deciding every hit. When you are destroyed, the kill cam
 replays the last seconds from the match's log, from your view, your killer's,
-or a camera that orbits the fight. Still to come are the lobby and per-arena
-sign-in. It is meant for people who want a small multiplayer game they can
+or a camera that orbits the fight. A lobby lists the live arenas. Still to come
+is per-arena sign-in. It is meant for people who want a small multiplayer game they can
 host themselves, and for game developers evaluating Felix as the backend for
 live play, spectating and replays.
 
@@ -218,8 +218,11 @@ at 500 ms p50, reports signing in and the first draw (on CI's software
 renderer; real-GPU frame times come from the benchmark page), and checks that
 its folded state matches the player's at every tick.
 
-`lobby.html` lists the live arenas from the `arena.lobby` cache, with each
-match's phase, clock, score, players and spectators and a button to join.
+`lobby.html` is the lobby. With the development stack running, open
+`http://localhost:5173/lobby.html` (from `npm run dev`) to see each arena's
+match phase, clock and score, how many players and spectators are in it, and a
+Join button. Each open game page adds itself to its arena's member list and
+drops out within 30 seconds of closing; a stopped sim drops its arena within 10.
 `?as=` picks the user, as on the play page.
 
 ## Frame time
@@ -276,9 +279,8 @@ compares this with the usual way of building a session-based game.
 ## Status
 
 The look is locked, the game is playable through Felix, a match can be joined
-in progress, and the kill cam replays kills from the log (M0 to M2 and M4). M3
-is done apart from the lobby and member list. The frame-time row for M0's 60 fps target
-waits for a run on an Intel Iris Xe or Apple M1. Each milestone is a
+in progress, the lobby lists the live arenas, and the kill cam replays kills
+from the log (M0 to M4). The frame-time row for M0's 60 fps target waits for a run on an Intel Iris Xe or Apple M1. Each milestone is a
 [GitHub milestone](https://github.com/GetFelix/felix-arena/milestones) with an
 issue per piece of work.
 
@@ -287,7 +289,7 @@ issue per piece of work.
 | [0](https://github.com/GetFelix/felix-arena/milestone/1) | The look, locked | Done |
 | [1](https://github.com/GetFelix/felix-arena/milestone/2) | A browser reaches Felix | Done |
 | [2](https://github.com/GetFelix/felix-arena/milestone/3) | One authority | Done |
-| [3](https://github.com/GetFelix/felix-arena/milestone/4) | Join mid-match | In progress |
+| [3](https://github.com/GetFelix/felix-arena/milestone/4) | Join mid-match | Done |
 | [4](https://github.com/GetFelix/felix-arena/milestone/5) | The kill cam | Done |
 | [5](https://github.com/GetFelix/felix-arena/milestone/6) | Isolation and gaps | Planned |
 | [6](https://github.com/GetFelix/felix-arena/milestone/7) | Per-arena sign-in | Planned |
