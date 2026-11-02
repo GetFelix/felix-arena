@@ -61,10 +61,12 @@ pub(crate) async fn load(
     Ok(rebuild(rules, ticks))
 }
 
-/// The world after `ticks`, which are in log order, and the epoch after theirs.
-/// Only the newest epoch's ticks count, and a tick number seen twice (a commit
-/// that landed twice) counts once. A tail with no keyframe in it gives a new
-/// epoch and no world, so the new match is not mistaken for the old sim's.
+/// The world after `ticks`, which are in log order, and the epoch after the
+/// newest. A tick of a newer epoch replaces the ticks from its number on, as a
+/// restarted sim resumes from an earlier tick than a stale one reached, and a
+/// tick of an older epoch than the last kept is stale and ignored. The keyframe
+/// can belong to an older epoch than the tail: a sim restarted twice before
+/// its first keyframe leaves a tail with none.
 fn rebuild(rules: Rules, ticks: Vec<Tick>) -> Recovered {
     let Some(newest) = ticks.iter().map(|tick| tick.epoch).max() else {
         return Recovered {
@@ -73,10 +75,14 @@ fn rebuild(rules: Rules, ticks: Vec<Tick>) -> Recovered {
         };
     };
     let mut kept: Vec<Tick> = Vec::new();
-    for tick in ticks.into_iter().filter(|tick| tick.epoch == newest) {
-        if kept.last().is_none_or(|last| tick.tick > last.tick) {
-            kept.push(tick);
+    for tick in ticks {
+        if kept.last().is_some_and(|last| tick.epoch < last.epoch) {
+            continue;
         }
+        while kept.last().is_some_and(|last| last.tick >= tick.tick) {
+            kept.pop();
+        }
+        kept.push(tick);
     }
     let world = kept
         .iter()

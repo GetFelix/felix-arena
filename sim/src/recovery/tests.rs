@@ -43,6 +43,17 @@ fn ticks_of_an_older_epoch_and_repeats_are_ignored() {
 }
 
 #[test]
+fn a_sim_restarted_before_its_first_keyframe_leaves_the_match_recoverable() {
+    // Epoch 1 ran to tick 75 and crashed; epoch 2 resumed at 70 (a keyframe
+    // at 60 is the last one in the log) and crashed again at 80.
+    let mut ticks = written(1, 1, 75);
+    ticks.extend(written(2, 70, 80));
+    let recovered = rebuild(Rules::default(), ticks);
+    assert_eq!(recovered.epoch, 3);
+    assert_eq!(recovered.world.unwrap().tick(), 80);
+}
+
+#[test]
 fn a_tail_with_no_keyframe_still_moves_the_epoch_on() {
     let recovered = rebuild(Rules::default(), written(5, 1, 20));
     assert_eq!(recovered.epoch, 6);

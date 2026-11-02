@@ -72,8 +72,9 @@ try {
     180_000,
   );
   const scored = newest().tick;
-  await waitFor('a keyframe after the kill', () => newest().roster !== null && newest().tick > scored, 10_000);
-  const before = newest();
+  const keyed = () => ticks.find((t) => t.roster !== null && t.tick > scored);
+  await waitFor('a keyframe after the kill', () => keyed() !== undefined, 10_000);
+  const before = keyed()!;
   console.log(`killing the sim at epoch ${before.epoch}, tick ${before.tick}, scores ${before.scores}`);
   const old = ticks.length;
   compose('kill', 'sim');
