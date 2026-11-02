@@ -181,14 +181,16 @@ export class Interpolator {
     return this.ticks.at(-1);
   }
 
-  /** Take a tick that arrived at `arrivedMs` on the page's clock. A tick from an older epoch, or a repeat, is ignored. */
-  push(tick: Snapshot, arrivedMs: number): void {
+  /** Take a tick that arrived at `arrivedMs` on the page's clock, which sets the clock and the delay unless it is not `timed`. A tick from an older epoch, or a repeat, is ignored. */
+  push(tick: Snapshot, arrivedMs: number, timed = true): void {
     const newest = this.newest;
     if (newest && tick.epoch < newest.epoch) return;
     if (newest && tick.epoch === newest.epoch && tick.tick <= newest.tick) return;
     if (newest && tick.epoch > newest.epoch) this.reset();
     this.ticks.push(tick);
     if (this.ticks.length > KEEP) this.ticks.shift();
+    // A tick read back from the log arrived late for reasons that say nothing about the link.
+    if (!timed) return;
     // The render clock follows its target slowly, so it jumps to a target that has moved by a stall.
     if (this.arrivals.add(tick.tick, arrivedMs)) this.renderMs = null;
     this.delay = Math.min(MAX_DELAY_MS, Math.max(MIN_DELAY_MS, TICK_MS + this.arrivals.lateness + MARGIN_MS));
@@ -207,7 +209,8 @@ export class Interpolator {
 
   /** The view at `nowMs` on the page's clock, or `null` before the first tick. Call once a frame, with rising times. */
   sample(nowMs: number): View | null {
-    if (this.ticks.length === 0) return null;
+    // Nothing to time the page's clock by until a live tick has arrived: a tick read back from the log carries no arrival.
+    if (this.ticks.length === 0 || this.arrivals.length === 0) return null;
     // The earliest arrival in the window is the one the network delayed least; the render time trails it.
     const target = nowMs - this.arrivals.earliest - this.delay;
     const dt = this.lastSampleMs === null ? 0 : Math.max(0, nowMs - this.lastSampleMs);

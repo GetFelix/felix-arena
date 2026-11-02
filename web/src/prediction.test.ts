@@ -267,3 +267,15 @@ describe('the pacer after the sim stalls', () => {
     expect(Math.max(...gaps)).toBeLessThan(2.5 * TICK_MS);
   });
 });
+
+describe('the pacer and ticks read back from the log', () => {
+  it('learns no clock from them, so one is not taken for a stall', () => {
+    const pacer = new Pacer();
+    for (let n = 1; n <= 30; n++) pacer.tick(n, n * TICK_MS + 20, null);
+    const now = 30 * TICK_MS + 21;
+    expect(pacer.due(now)).toBe(true);
+    // Seconds late, in a run long enough to read as a stall if they counted.
+    for (let n = 31; n <= 45; n++) pacer.tick(n, n * TICK_MS + 5000, null, false);
+    expect(pacer.due(now + 1)).toBe(false);
+  });
+});
