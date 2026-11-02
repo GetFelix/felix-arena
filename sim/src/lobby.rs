@@ -140,6 +140,10 @@ pub(crate) async fn publish(
     loop {
         timer.tick().await;
         let status = *lock(&status);
+        // The first tick has not run yet: there is nothing true to list.
+        if status.phase.is_none() {
+            continue;
+        }
         let spectators = lock(&members).spectators(unix_millis());
         let value = entry(&status, spectators).into_bytes();
         if let Err(err) = client

@@ -4,6 +4,8 @@
 import type { Gateway } from './gateway';
 
 const CACHE = 'members';
+/** Whether the page already restarts itself when it comes back from the back-forward cache. */
+let restarting = false;
 const DEFAULT_TTL_MS = 30_000;
 
 /** A random session key, which names nobody. */
@@ -47,9 +49,12 @@ export function joinMembers(
   };
   addEventListener('pagehide', leave, { once: true });
   // A page kept in the back-forward cache has lost its session and its key, so it starts again when it comes back.
-  addEventListener('pageshow', (event) => {
-    if (event.persisted) location.reload();
-  });
+  if (!restarting) {
+    restarting = true;
+    addEventListener('pageshow', (event) => {
+      if (event.persisted) location.reload();
+    });
+  }
   return {
     key,
     stop: () => {

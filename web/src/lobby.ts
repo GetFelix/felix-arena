@@ -126,8 +126,11 @@ class Lobby {
     for (const [name, { lapsesMs }] of this.entries) if (lapsesMs <= now) this.entries.delete(name);
     this.debug.arenas = Object.fromEntries([...this.entries].map(([name, { entry }]) => [name, entry]));
     const names = [...this.entries.keys()].sort();
-    this.count.textContent =
-      names.length === 0 ? 'No arenas running' : `${names.length} ${names.length === 1 ? 'arena' : 'arenas'} live`;
+    this.count.textContent = !this.debug.connected
+      ? 'Reconnecting'
+      : names.length === 0
+        ? 'No arenas running'
+        : `${names.length} ${names.length === 1 ? 'arena' : 'arenas'} live`;
     for (const name of this.cards.keys()) if (!this.entries.has(name)) this.cards.delete(name);
     if (names.length === 0) {
       this.list.innerHTML =
@@ -204,24 +207,40 @@ async function main(): Promise<void> {
 
   const answer = await fetch(`${IDP}/token?sub=${encodeURIComponent(USER)}&aud=felix-arena`);
   const token = ((await answer.json()) as { id_token: string }).id_token;
-  // The lobby is a scope of its own: of the scope file's resources it reaches only the shared lobby cache.
-  const gateway = await Gateway.connect(GATEWAY, 'lobby', token);
   const link = document.getElementById('link')!;
-  link.classList.add('on');
-  debug.connected = true;
-  gateway.onError = (err) => {
-    link.classList.remove('on');
-    debug.connected = false;
-    document.getElementById('count')!.textContent = err.message;
+  const count = document.getElementById('count')!;
+  // The lobby is a scope of its own: of the scope file's resources it reaches only the shared lobby cache.
+  // A closed session is opened again, so a restarted gateway does not leave the page empty for good.
+  const connect = async (): Promise<void> => {
+    for (let wait = 500; ; wait = Math.min(wait * 2, 8000)) {
+      try {
+        const answer = await fetch(`${IDP}/token?sub=${encodeURIComponent(USER)}&aud=felix-arena`);
+        const token = ((await answer.json()) as { id_token: string }).id_token;
+        const gateway = await Gateway.connect(GATEWAY, 'lobby', token);
+        link.classList.add('on');
+        debug.connected = true;
+        gateway.onError = (err) => {
+          link.classList.remove('on');
+          debug.connected = false;
+          if (err.code === 'closed') void connect();
+          else count.textContent = err.message;
+        };
+        gateway.cacheWatch('lobby', {
+          entries: (entries) => {
+            lobby.clear();
+            for (const entry of entries) lobby.set(entry);
+            lobby.render();
+          },
+          change: (entry) => lobby.set(entry),
+        });
+        return;
+      } catch {
+        count.textContent = 'Reconnecting';
+        await new Promise((resolve) => setTimeout(resolve, wait));
+      }
+    }
   };
-  gateway.cacheWatch('lobby', {
-    entries: (entries) => {
-      lobby.clear();
-      for (const entry of entries) lobby.set(entry);
-      lobby.render();
-    },
-    change: (entry) => lobby.set(entry),
-  });
+  await connect();
   setInterval(() => lobby.render(), 1000);
 }
 

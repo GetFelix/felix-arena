@@ -396,7 +396,8 @@ before reading history (`crates/server/felix-broker/src/broker/subscribe.rs`,
 the comment on `subscribe_from`), which is exactly the ordering felix-canvas
 does by hand.
 
-A player who joins also writes its member key and sends a `join` input. The
+Every page that joins, player or spectator, writes its member key. A player
+joins the match with its first input, and the
 sim assigns a team and slot and announces it in the next tick's events. No two
 clients ever race for a slot, because only the sim writes the roster.
 
