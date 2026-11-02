@@ -33,11 +33,12 @@ loadCore(readFileSync(new URL('../src/core/felix_arena_core_bg.wasm', import.met
 
 const compose = (...args: string[]) =>
   execFileSync(ENGINE, ['compose', '-f', '../dev/compose.yml', ...args], { stdio: 'inherit' });
-// `compose start sim` also starts what sim depends on, which runs the seed job again and adds seconds that a crashed
-// sim, restarted by its restart policy, would not wait for. Starting the container itself leaves them alone.
+// `compose start sim` would also run the seed job again, which a crashed sim restarted by its policy never waits for.
 const restart = (service: string) => {
-  const id = execFileSync(ENGINE, ['compose', '-f', '../dev/compose.yml', 'ps', '--all', '--quiet', service]);
-  execFileSync(ENGINE, ['start', id.toString().trim()], { stdio: 'inherit' });
+  const out = execFileSync(ENGINE, ['compose', '-f', '../dev/compose.yml', 'ps', '--all', '--quiet', service]);
+  const id = out.toString().split('\n')[0]!.trim();
+  if (!id) throw new Error(`no ${service} container to start`);
+  execFileSync(ENGINE, ['start', id], { stdio: 'inherit' });
 };
 
 const token = ((await (await fetch(`${IDP}/token?sub=cleo&aud=felix-arena`)).json()) as { id_token: string }).id_token;
