@@ -1,10 +1,12 @@
 import { readFileSync } from 'node:fs';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { decodeTick, loadCore, World } from './core';
 import type { EventFrame, StateValue, Subscribed } from './gateway';
-import { isCatchUp, joinFromKeyframe } from './join';
+import { GapFeed } from './gaps';
+import { Folded, isCatchUp, joinFromKeyframe, RESUME_TICKS } from './join';
 import { Match } from './match';
 import { drive } from './offline';
+import type { Reader } from './replay';
 
 beforeAll(() => loadCore(readFileSync(new URL('./core/felix_arena_core_bg.wasm', import.meta.url))));
 
@@ -86,6 +88,137 @@ describe('joining from a keyframe', () => {
     expect(seen).toEqual([[40, true]]);
     expect([44, 45, 46].map((offset) => isCatchUp(offset, 46))).toEqual([true, false, false]);
     expect(isCatchUp(10, null)).toBe(false);
+  });
+
+  it('reads on from where a page got to when it is close to the newest tick, and from the keyframe otherwise', async () => {
+    const from = async (keyframe: number | null, tail: number | null, resumeAfter: number | null) => {
+      let start: number | 'live' | undefined;
+      await joinFromKeyframe(
+        {
+          stateGet: async () => ({ payload: null, version: keyframe, asOf: tail }),
+          subscribe: async (_s, _slot, at) => {
+            start = at;
+            return { sub: 1, startOffset: 0, liveOffset: 0 };
+          },
+        },
+        () => {},
+        resumeAfter,
+      );
+      return start;
+    };
+    // The join-time catch-up: the page is a few ticks behind the newest tick.
+    expect(await from(600, 615, 590)).toBe(591);
+    expect(await from(600, 615, 615 - RESUME_TICKS)).toBe(615 - RESUME_TICKS + 1);
+    // A page on a slow link falls behind the newest tick, not just the keyframe, and jumps to the keyframe.
+    expect(await from(600, 615, 615 - RESUME_TICKS - 1)).toBe(600);
+    expect(await from(600, 629, 590)).toBe(600);
+    expect(await from(600, 600, 610)).toBe(600);
+    expect(await from(600, 615, null)).toBe(600);
+    // No tail in the answer: the keyframe stands in for it.
+    expect(await from(600, null, 590)).toBe(591);
+    expect(await from(null, null, 590)).toBe('live');
+  });
+
+  it('counts a page as folded up to the first tick that was skipped and not read back', () => {
+    const folded = new Folded();
+    expect(folded.offset).toBeNull();
+    folded.rejoin();
+    folded.see(100, 0);
+    folded.see(101, 0);
+    expect(folded.offset).toBe(101);
+    // Offsets 102 to 104 never arrived and were not read back: later ticks do not hide the hole.
+    folded.see(105, 0);
+    folded.see(106, 0);
+    expect(folded.offset).toBe(101);
+    // Ticks the broker says it skipped on purpose are not a hole.
+    const clear = new Folded();
+    clear.see(10, 0);
+    clear.see(14, 3);
+    expect(clear.offset).toBe(14);
+  });
+
+  it('reads on after a hole, and starts over when the join took the keyframe', () => {
+    const folded = new Folded();
+    folded.rejoin();
+    folded.see(100, 0);
+    folded.see(105, 0);
+    expect(folded.offset).toBe(100);
+    // A join that read on from 101 closes the hole.
+    folded.rejoin();
+    for (let offset = 101; offset <= 105; offset++) folded.see(offset, 0);
+    expect(folded.offset).toBe(105);
+    folded.see(106, 0);
+    expect(folded.offset).toBe(106);
+    // A join that took a keyframe past a hole starts over from it.
+    folded.see(110, 0);
+    folded.rejoin();
+    folded.see(120, 0);
+    expect(folded.offset).toBe(120);
+    folded.see(121, 0);
+    expect(folded.offset).toBe(121);
+  });
+
+  it('does not count the tick after an unread gap as folded', async () => {
+    const seen: number[] = [];
+    const folded = new Folded();
+    const reader = { read: async () => ({ records: [], nextOffset: 0 }) } as unknown as Reader;
+    const feed = new GapFeed(
+      () => reader,
+      (frame) => {
+        folded.see(frame.offset, frame.skippedBefore);
+        seen.push(frame.offset!);
+      },
+      { tooFar: () => {} },
+    );
+    const frame = (offset: number) =>
+      ({ offset, skippedBefore: 0, payload: new Uint8Array() }) as unknown as EventFrame;
+    feed.push(frame(100), false);
+    feed.push(frame(101), false);
+    feed.push(frame(140), false);
+    await vi.waitFor(() => expect(seen).toEqual([100, 101, 140]));
+    expect(folded.offset).toBe(101);
+  });
+
+  it('keeps the kills between where a page got to and the keyframe it would otherwise jump to', () => {
+    const log = records(1500);
+    const all = new Match();
+    const killOffsets = (m: Match) => m.replays().flatMap(([, kills]) => kills.map((k) => k.replay?.offset));
+    log.forEach((record, i) => {
+      const tick = decodeTick(record);
+      all.update(tick, 0, false, i, () => 0);
+      tick.free();
+    });
+    const tickKeyframe = (i: number) => {
+      const tick = decodeTick(log[i]!);
+      const keyframe = tick.keyframe;
+      tick.free();
+      return keyframe;
+    };
+    const kills = killOffsets(all);
+    expect(kills.length).toBeGreaterThan(3);
+    // A page that folded up to `stopped`, then joined again: from the keyframe after it, or reading on.
+    const fold = (stopped: number, restart: number) => {
+      const m = new Match();
+      for (let i = 0; i <= stopped; i++) {
+        const tick = decodeTick(log[i]!);
+        m.update(tick, 0, false, i, () => 0);
+        tick.free();
+      }
+      for (let i = restart; i < log.length; i++) {
+        const tick = decodeTick(log[i]!);
+        m.update(tick, 0, false, i, () => 0);
+        tick.free();
+      }
+      return killOffsets(m);
+    };
+    // The tick before the first kill that has a keyframe after it within the resume window.
+    const kill = kills.find((offset) => {
+      const key = log.findIndex((_, i) => i > offset! && tickKeyframe(i));
+      return offset! > 100 && key > offset! && key - offset! < RESUME_TICKS;
+    })!;
+    const next = log.findIndex((_, i) => i > kill! && tickKeyframe(i));
+    expect(fold(kill! - 1, next)).not.toContain(kill);
+    expect(fold(kill! - 1, kill!)).toEqual(kills);
   });
 
   it('starts live when the arena has no keyframe yet', async () => {
