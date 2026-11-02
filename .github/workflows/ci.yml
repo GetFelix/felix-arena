@@ -233,6 +233,35 @@ jobs:
       - if: failure()
         run: docker compose -f dev/compose.yml logs --no-color
 
+  restart:
+    name: sim restart
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - run: dev/up.sh
+        env:
+          SIM_WARMUP_SECONDS: '5'
+          SIM_KILL_LIMIT: '99'
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@0.2.129
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Killing the sim mid-match pauses play for under 5 s, and the match goes on in the next epoch with its scores
+        working-directory: web
+        run: |
+          npm ci
+          npm run core
+          npx vite-node scripts/restart.ts
+      - if: failure()
+        run: docker compose -f dev/compose.yml logs --no-color
+
   match:
     name: match
     runs-on: ubuntu-latest
