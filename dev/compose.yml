@@ -130,6 +130,8 @@ services:
       RUST_LOG: info
     volumes:
       - ./state:/state:ro
+    # A crashed sim picks its match up from the log, so it is worth starting again.
+    restart: on-failure
     depends_on:
       broker:
         condition: service_started

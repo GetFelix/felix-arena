@@ -218,6 +218,13 @@ at 500 ms p50, reports signing in and the first draw (on CI's software
 renderer; real-GPU frame times come from the benchmark page), and checks that
 its folded state matches the player's at every tick.
 
+CI's `sim restart` job kills the sim container once a kill has been scored and
+starts it again. The sim reads the tail of the tick log, picks the match up where
+it was, and writes its ticks in the next epoch; the job checks that play resumes
+within 5 seconds with the same match, scores and roster. To run it yourself, with
+the stack up from a short warmup (`SIM_WARMUP_SECONDS=5 SIM_KILL_LIMIT=99 dev/up.sh`):
+`cd web && npx vite-node scripts/restart.ts`.
+
 ## Frame time
 
 The target is 60 frames a second at 1080p on a laptop iGPU at High or Medium.
@@ -259,7 +266,7 @@ disagree about the rules.
 | Match start offsets | Stream state keys on the tick stream | `match/<n>` |
 | Player inputs | Ephemeral stream | `arena.input.<arena>` |
 | Who is connected | Cache keys with TTL | `arena.members.<arena>/<session>` |
-| Simulation epoch | Counter | `arena.epoch.<arena>/sim` |
+| Simulation epoch | A field in every tick | Header of the tick records |
 | Lobby: every arena's status | Cache keys with TTL | `arena.lobby/<arena>` |
 | Who may play, who may watch | Felix RBAC roles | `role:arena-<arena>-play`, `role:arena-<arena>-watch` |
 
