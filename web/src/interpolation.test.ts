@@ -150,6 +150,35 @@ describe('interpolation', () => {
     expect(run.maxJump).toBeLessThan(0.5);
   });
 
+  it('sets aside the frames around a hold-up in the arrivals when asked, and judges the rest', () => {
+    const steadily = deliver(truth, steady);
+    const until = steadily[300]!.arrivedMs + 250;
+    const held = steadily.map((a, i) => ({ ...a, arrivedMs: i >= 300 ? Math.max(a.arrivedMs, until) : a.arrivedMs }));
+    const lose = oneInTwenty(truth.length);
+    const counted = measure(held, lose, truth);
+    expect(counted.starved).toBeGreaterThan(0);
+    expect(counted.heldUp).toBe(0);
+
+    const run = measure(held, lose, truth, { setAsideHoldUps: true });
+    expect(run.heldUp).toBeGreaterThan(counted.starved);
+    expect(run.heldUp).toBeLessThan(run.frames / 4);
+    expect(run.starved + run.recovering).toBe(0);
+    expect(run.stalls).toBe(0);
+    expect(run.maxJump).toBeLessThan(4);
+  });
+
+  it('sets aside the sim stalling for good: its ticks run late from then on', () => {
+    // The sim stalls for 110 ms and does not make the ticks up, so every tick after it comes 110 ms after its turn.
+    const steadily = deliver(truth, steady);
+    const stalled = steadily.map((a, i) => ({ ...a, arrivedMs: a.arrivedMs + (i >= 300 ? 110 : 0) }));
+    const run = measure(stalled, () => false, truth, { setAsideHoldUps: true });
+    expect(run.heldUp).toBeGreaterThan(0);
+    expect(run.heldUp).toBeLessThan(run.frames / 20);
+    expect(run.starved + run.recovering).toBe(0);
+    expect(run.stalls).toBe(0);
+    expect(run.maxJump).toBeLessThan(4);
+  });
+
   it('slides across one missing tick inside the two-tick delay', () => {
     const ticks = cruise(140);
     let frames = 0;
