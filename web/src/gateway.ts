@@ -203,6 +203,14 @@ export class Gateway {
     await this.request({ type: 'publish', stream, payload: base64(payload), ack: true });
   }
 
+  /**
+   * Have the gateway read this session's subscriptions no faster than a link of `bitsPerSecond` would carry them, or
+   * with `null` at full speed. A gateway not set up to allow it answers `unsupported` at {@link onError}.
+   */
+  throttle(bitsPerSecond: number | null): void {
+    this.socket.send(JSON.stringify({ type: 'throttle', bits_per_second: bitsPerSecond }));
+  }
+
   /** Read `key` of `stream`'s state: the value a commit wrote with its event, and that commit's offset. */
   async stateGet(stream: string, key: string): Promise<StateValue> {
     const answer = await this.request({ type: 'state_get', stream, key });

@@ -32,6 +32,7 @@ import { KillRig, VIEWS } from './killcam-rig';
 import { killsOf, type KillRef, type Page, type Reader } from './replay';
 import { joinFromKeyframe, type JoinTimes } from './join';
 import { GapFeed, type GapStats } from './gaps';
+import { Behind } from './behind';
 import { Interpolator, snapshot } from './interpolation';
 import { addLights, loadEnvironment } from './lighting';
 import { callsign, Match } from './match';
@@ -61,6 +62,9 @@ const BOT_LEVEL = botLevel(params.get('bots'));
 const BOT_COUNT = botCount(params.get('botcount'));
 /** For tests: lose every this-many-th live tick on arrival, as a subscriber with a full queue would. */
 const LOSE = Number(params.get('lose') ?? 0);
+/** `&throttle` shows the slow-link switch; `&throttle=64` also starts slowed, to that many kilobits a second. */
+const THROTTLE = params.get('throttle');
+const SLOW_KBIT = Number(THROTTLE) > 0 ? Number(THROTTLE) : 16;
 /** How long a try at joining may take before it is given up and made again. */
 const JOIN_TIMEOUT_MS = 10_000;
 
@@ -143,6 +147,10 @@ export interface ArenaDebug {
   holdReplay: (held: boolean, ticksFromKill?: number) => void;
   /** Ticks the live subscription skipped over, and how many were read back; counted from the page's first join. */
   gaps: GapStats;
+  /** How many ticks later than the best of the last minute the newest live tick arrived. */
+  behindTicks: number;
+  /** Slow this session's subscriptions to a link of this many bits a second, or `null` for full speed. */
+  throttle: (bitsPerSecond: number | null) => void;
   /** The state each recent tick folded to, by `epoch/tick`: the tick's hash and the match's digest. */
   states: Record<string, string>;
 }
@@ -189,6 +197,8 @@ async function main(): Promise<void> {
     absorbing: null,
     join: null,
     gaps: { gaps: 0, missed: 0, filled: 0, unfilled: 0 },
+    behindTicks: 0,
+    throttle: () => {},
     states: {},
     newestTick: null,
     killcams: [],
@@ -551,6 +561,8 @@ async function main(): Promise<void> {
   let joiningSince: number | null = null;
   /** A join whose ticks never come still lets the page draw after this long. */
   const JOIN_HOLD_MS = 2000;
+  const behind = new Behind();
+  Object.defineProperty(debug, 'behindTicks', { get: () => behind.ticks });
   const onFrame = (frame: EventFrame, catchingUp = false) => {
     firstEventMs ??= performance.now();
     let tick: Tick;
@@ -558,6 +570,12 @@ async function main(): Promise<void> {
       tick = decodeTick(frame.payload);
     } catch {
       return;
+    }
+    // A tick read back from the log arrives late by construction, which says nothing of the link.
+    if (!catchingUp && !frame.filled) {
+      const timing = tick.timing;
+      if (timing) behind.add(frame.receivedUs - timing.commitStartUs);
+      timing?.free();
     }
     if (catchingUp) foldTick(tick, frame.offset);
     else onTick(tick, performance.now(), frame.offset, frame.payload, !frame.filled);
@@ -575,6 +593,29 @@ async function main(): Promise<void> {
         id_token: string;
       }
     ).id_token;
+  /** The slow link this page is on, in bits a second, kept across sessions. */
+  let slow: number | null = THROTTLE !== null && THROTTLE !== '' ? SLOW_KBIT * 1000 : null;
+  const showSlow = () => {
+    const button = document.getElementById('slow');
+    if (!button) return;
+    button.setAttribute('aria-checked', String(slow !== null));
+    button.textContent = slow === null ? 'Slow link: off' : `Slow link: ${Math.round(slow / 1000)} kbit/s`;
+  };
+  const throttle = (bitsPerSecond: number | null) => {
+    slow = bitsPerSecond;
+    if (gateway && 'throttle' in gateway) (gateway as Gateway).throttle(slow);
+    showSlow();
+  };
+  debug.throttle = throttle;
+  if (THROTTLE !== null && !OFFLINE) {
+    const button = document.getElementById('slow')!;
+    button.hidden = false;
+    button.addEventListener('click', () => {
+      throttle(slow === null ? SLOW_KBIT * 1000 : null);
+      button.blur();
+    });
+    showSlow();
+  }
   /** Open a gateway session and subscribe to the ticks. A session that closes once joined is opened again. */
   let received = 0;
   const open = async (token: string): Promise<Gateway> => {
@@ -583,6 +624,7 @@ async function main(): Promise<void> {
     // A session that opens after its try was given up on would hold a place at the gateway for nothing.
     connecting.then((link) => late && link.close()).catch(() => {});
     const link = await within(connecting, () => (late = true));
+    if (slow !== null) link.throttle(slow);
     let joined = false;
     const lost = new Promise<never>((_, reject) => {
       link.onError = (err) => {
@@ -618,6 +660,8 @@ async function main(): Promise<void> {
       throw err;
     }
     joined = true;
+    // A switch flipped while the join was in flight reached the session before it was the page's current one.
+    if (slow !== null) link.throttle(slow);
     return link;
   };
   /**
