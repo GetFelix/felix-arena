@@ -307,10 +307,11 @@ and the lockfiles, and merges it once CI passes. Prereleases are skipped.
 Every night a workflow
 ([`felix-nightly.yml`](.github/workflows/felix-nightly.yml)) points the Felix
 crates listed in `.felix-version` at the commit behind Felix's `nightly` tag and
-runs [`.github/felix-nightly.sh`](.github/felix-nightly.sh): it starts the dev
-stack from the `:nightly` Felix images and runs the dev-stack checks: the sim
-holds 30 Hz in both arenas, and ticks reach a WebSocket client through the
-gateway and decode to the sim's state hashes. The browser checks stay in CI.
+runs [`.github/felix-nightly.sh`](.github/felix-nightly.sh). It starts the dev
+stack from the `:nightly` Felix images (the gateway stays at its release) and
+runs the dev-stack checks. The sim must hold 30 Hz in both arenas, and ticks
+must reach a WebSocket client through the gateway and decode to the sim's state
+hashes. The browser checks stay in CI.
 When a run on `main` fails it opens an issue labelled `felix-nightly`, and a
 green run closes it, so a Felix change that breaks this repo shows up before the
 next release. See the latest run with `gh run list -R GetFelix/felix-arena

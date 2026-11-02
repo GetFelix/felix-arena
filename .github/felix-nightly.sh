@@ -51,7 +51,9 @@ fi
 # state hashes. The decoder is the Rust core built to WebAssembly.
 rustup target add wasm32-unknown-unknown
 command -v wasm-bindgen >/dev/null || cargo install wasm-bindgen-cli --version 0.2.129 --locked
-cd web
-npm ci
-npm run core
-npm run smoke
+(
+  cd web
+  npm ci
+  npm run core
+  npm run smoke
+)
