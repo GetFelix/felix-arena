@@ -3,6 +3,10 @@
 # per-arena resource is optional, so `hello` lists what a sign-in lacks.
 # dev/seed.mjs creates these for arenas `alpha` and `bravo`.
 
+# Lets a page slow its own connection, for the slow-link switch on the play page
+# and CI's throttle lane. Leave it off on a public gateway.
+allow_throttle = true
+
 [scope]
 field = "arena"
 

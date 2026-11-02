@@ -125,6 +125,20 @@
         background: var(--accent);
         box-shadow: 0 0 10px var(--accent);
       }
+      .slow {
+        margin-left: 12px;
+        padding: 3px 8px;
+        font: inherit;
+        color: var(--ink);
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        pointer-events: auto;
+        cursor: pointer;
+      }
+      .slow[aria-checked='true'] {
+        border-color: var(--accent);
+      }
       .quality {
         margin-left: 12px;
         pointer-events: auto;
@@ -813,6 +827,7 @@
       <div class="tag">
         <i></i><span id="where">felix-arena</span>
         <button class="open-replays" id="open-replays">Replays</button>
+        <button class="slow" id="slow" role="switch" aria-checked="false" hidden></button>
         <label class="quality"
           >Quality
           <select id="quality">

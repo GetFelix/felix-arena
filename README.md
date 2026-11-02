@@ -199,6 +199,13 @@ arena; `&botcount=1..3` (3 by default) sets how many. They steer through the
 same input path as a player.
 `&length=`, `&warmup=` and `&results=` shorten the match, in seconds.
 
+The play page has a slow-link switch for trying a bad connection: add `&throttle`
+to its URL (`&throttle=64` starts slowed to 64 kbit/s, and the default is 16).
+The development stack's gateway allows it; a public one should not.
+`window.arena.behindTicks` says how far behind the sim the page is, and CI's
+`throttle` job checks that a slowed spectator falls behind while two others'
+trip time stays within 10% of what it was.
+
 `npm run smoke` checks the same path from Node: ticks arrive at 30 Hz, the
 WebAssembly build decodes keyframes to the state hashes the sim logged, a
 range read returns the same records while the live subscription keeps going,
@@ -309,6 +316,19 @@ The Felix release this repo builds on is in [`.felix-version`](.felix-version).
 When Felix publishes a release, a bot opens a "chore: use Felix <version>" PR
 that moves every pin listed in [`.github/felix-bump.sh`](.github/felix-bump.sh)
 and the lockfiles, and merges it once CI passes. Prereleases are skipped.
+
+Every night a workflow
+([`felix-nightly.yml`](.github/workflows/felix-nightly.yml)) points the Felix
+crates listed in `.felix-version` at the commit behind Felix's `nightly` tag and
+runs [`.github/felix-nightly.sh`](.github/felix-nightly.sh). It starts the dev
+stack from the `:nightly` Felix images (the gateway stays at its release) and
+runs the dev-stack checks. The sim must hold 30 Hz in both arenas, and ticks
+must reach a WebSocket client through the gateway and decode to the sim's state
+hashes. The browser checks stay in CI.
+When a run on `main` fails it opens an issue labelled `felix-nightly`, and a
+green run closes it, so a Felix change that breaks this repo shows up before the
+next release. See the latest run with `gh run list -R GetFelix/felix-arena
+--workflow "Felix nightly" --limit 1`, or start one from the Actions tab.
 
 ## Contributing
 
