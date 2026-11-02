@@ -139,6 +139,33 @@
       .slow[aria-checked='true'] {
         border-color: var(--accent);
       }
+      .sound[hidden] {
+        display: none;
+      }
+      .sound {
+        margin-left: 12px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        pointer-events: auto;
+      }
+      .sound button {
+        padding: 3px 8px;
+        font: inherit;
+        color: var(--ink);
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        cursor: pointer;
+      }
+      .sound button[aria-checked='true'] {
+        border-color: var(--accent);
+      }
+      .sound input {
+        width: 70px;
+        vertical-align: middle;
+        accent-color: var(--accent);
+      }
       .quality {
         margin-left: 12px;
         pointer-events: auto;
@@ -848,6 +875,11 @@
         <i></i><span id="where">felix-arena</span>
         <button class="open-replays" id="open-replays">Replays</button>
         <button class="slow" id="slow" role="switch" aria-checked="false" hidden></button>
+        <span class="sound" id="sound" hidden>
+          <button id="sound-mute" role="switch" aria-checked="true">Sound: on</button>
+          <label>Music <input id="sound-music" type="range" min="0" max="1" step="0.05" /></label>
+          <label>Effects <input id="sound-effects" type="range" min="0" max="1" step="0.05" /></label>
+        </span>
         <label class="quality"
           >Quality
           <select id="quality">

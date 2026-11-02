@@ -27,6 +27,7 @@ import { type CraftView, Fleet, GUN_HEIGHT } from './fleet';
 import { type EventFrame, Gateway, GatewayError } from './gateway';
 import { botCount, botLevel, botTag } from './bots';
 import { type Link, Offline, OFFLINE_PRINCIPAL } from './offline';
+import { OwnWatcher, type Play, PhaseWatcher, playsFor, replayCue } from './cues';
 import { Hud, killKey } from './hud';
 import { KillCam, type KillCamTimes, Markers } from './killcam';
 import { KillRig, VIEWS } from './killcam-rig';
@@ -47,6 +48,9 @@ import { seeded } from './random';
 import { requestedTier, TierChooser, urlTier } from './quality';
 import { createRenderer, Pipeline } from './renderer';
 import { qualitySetting } from './settings';
+import { soundFiles } from './sound-assets';
+import { startSound } from './sound-browser';
+import type { Listener } from './spatial';
 import { blobTexture, flareTexture, glowTexture } from './textures';
 
 const params = new URLSearchParams(location.search);
@@ -218,6 +222,11 @@ async function main(): Promise<void> {
   };
   window.arena = debug;
 
+  const sound = startSound(
+    soundFiles,
+    BENCH ? new URLSearchParams('sound=off') : params,
+    document.getElementById('sound')!,
+  );
   const renderer = createRenderer();
   document.body.prepend(renderer.domElement);
   const scene = new Scene();
@@ -235,6 +244,16 @@ async function main(): Promise<void> {
     loadCore(),
   ]);
   const arena = buildArena(scene, arenaLayout(), models, renderer.capabilities.getMaxAnisotropy());
+  /** Where sounds are heard from: your craft, or the middle of the arena for a spectator, looking along the camera. */
+  const listener: Listener = { x: 0, z: 0, yaw: 0 };
+  /** Sounds fade with distance over the arena's length. */
+  const hearingReach = arenaLayout().halfX * 2 * 100;
+  const hear = (plays: Play[]) => {
+    for (const p of plays) sound.play(p, listener, hearingReach);
+  };
+  const phases = new PhaseWatcher();
+  const ownSounds = new OwnWatcher();
+  let wasReplay = false;
   const glow = glowTexture();
   const fleet = new Fleet(scene, fx, models, { glow, blob: blobTexture() });
   const effects = new Effects(scene, fx, { glow, flare: flareTexture() }, seeded(1));
@@ -840,6 +859,28 @@ async function main(): Promise<void> {
       protected: shielded ?? false,
     }));
 
+    listener.x = ownNow?.x ?? 0;
+    listener.z = ownNow?.z ?? 0;
+    listener.yaw = view.resting.yaw;
+    const replayEdge = replayCue(wasReplay, replay !== null);
+    wasReplay = replay !== null;
+    if (replayEdge) sound.ui(replayEdge);
+    sound.duck(replay !== null);
+    if (frame) {
+      for (const cue of phases.update({
+        phase: match.phase,
+        number: match.number,
+        seconds: match.seconds,
+        waiting: match.waiting,
+      }))
+        sound.ui(cue);
+    }
+    const hull =
+      ownNow && !replay
+        ? { alive: ownNow.alive, boostCooling: ownNow.boostCooldown / boostTicks(), overheated: ownNow.overheated }
+        : null;
+    for (const cue of ownSounds.update(hull)) sound.ui(cue);
+
     const claimed = (!replay && own?.claimed) || new Set<number>();
     const byId = new Map<number, { x: number; z: number }>();
     const violet = new Map(crafts.map((c) => [c.slot, c.violet]));
@@ -855,12 +896,16 @@ async function main(): Promise<void> {
       for (const shot of own.drawShots(now, (id) => byId.has(id), hits)) {
         effects.bolt(mine, shot.x, shot.z, shot.heading, shot.opacity);
       }
-      for (const fired of own.firedSince(shown ?? now)) effects.fired(mine, fired.x, fired.z, fxT);
+      for (const fired of own.firedSince(shown ?? now)) {
+        effects.fired(mine, fired.x, fired.z, fxT);
+        hear(playsFor({ kind: 'fired', slot: own.slot, by: own.slot, damage: 0 }, fired, own.slot));
+      }
     }
 
     const happened = (e: { kind: string; slot: number; by: number; x: number; z: number; damage: number }) => {
       const at = crafts.find((c) => c.slot === e.slot);
       if (!at) return;
+      hear(playsFor(e, at, own?.slot ?? null));
       const angle = (at.heading / 65536) * 2 * Math.PI;
       const nose = [at.x + Math.cos(angle) * 130, at.z + Math.sin(angle) * 130] as const;
       if (e.kind === 'fired') {

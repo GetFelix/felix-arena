@@ -81,6 +81,9 @@ match can continue after its broker
   bots, with no servers.
 - **Quality tiers.** High, Medium and Low, chosen from the first seconds of
   frame times or picked in the HUD.
+- **Sound.** Effects for shots, hits, kills, the rail, boost and the round
+  clock, and five calm background tracks, all CC0 and bundled with the game.
+  Mute and volume are on the HUD. See [Sound](#sound).
 - **Every hop timed.** `ticks.html` shows the p50 and p99 of each leg from the
   simulation's commit to the page.
 - **Releases.** Each release carries the built web client, so it can be played
@@ -330,6 +333,46 @@ and run `npx vite-node scripts/failover.ts -- http://127.0.0.1:4173/play.html`.
 stopping a broker earlier can leave a stream without a majority. `dev/down.sh`
 stops either stack.
 
+## Sound
+
+The game plays sound effects for what happens in the arena and quiet music
+underneath. Nothing plays until you click or press a key on the page, because
+browsers do not allow a page to start sound before that.
+
+What you hear:
+
+- **Your craft.** Your blaster, a hit on you, a shot your spawn shield stops,
+  your boost, the blaster locking up when it overheats, the rail pickup and the
+  rail shot, your craft coming back, and a heavy blow when you are destroyed.
+- **The rest of the arena.** Other crafts' shots, hits, explosions, rail shots
+  and spawns, quieter, louder the closer they are to your craft, and panned to the
+  side of the screen they are on. A spectator hears the same from the middle of
+  the arena.
+- **The match.** A tick for each of the last three seconds of warmup, a start
+  sound, and an end sound when the results come up. The music ducks while a
+  kill cam replay plays.
+- **The interface.** A click for the HUD buttons.
+- **Music.** Five ambient and low-key electronic tracks in a shuffled order,
+  each fading into the next, never the same one twice in a row.
+
+At the bottom left of the page, **Sound** switches everything on or off (the
+**M** key does too), and **Music** and **Effects** set the two volumes. The
+settings are saved in this browser. Music starts at a low level, so the effects
+carry the game.
+
+Page options: `?sound=off` plays nothing and `?sound=on` plays even in an
+automated browser, which is silent by default so a test run does not decode
+music on a busy machine. The benchmark (`&bench`) is always silent.
+
+The files are Ogg Opus, 4.3 MB in all, bundled with the page; the game fetches
+nothing from other sites to play them. Browsers that cannot play Ogg Opus (Safari
+before 18.4) get no sound and run the game as before. Every file's author,
+source, licence and the changes made to it are in
+[prototype/assets/audio/CREDITS.md](prototype/assets/audio/CREDITS.md). To add or
+swap a sound, put the `.ogg` under `prototype/assets/audio/`, name it in
+`CUES` in `web/src/cues.ts`, and list it in the credits; a test fails if a file is
+unlisted or unused.
+
 ## Frame time
 
 The target is 60 frames a second at 1080p on a laptop iGPU at High or Medium.
@@ -407,6 +450,7 @@ issue per piece of work.
 - [docs/self-hosting.md](docs/self-hosting.md): run the game on your own machine.
 - [docs/art.md](docs/art.md): the art direction, from the palette and lighting to the rules that keep new content consistent.
 - [prototype/assets/CREDITS.md](prototype/assets/CREDITS.md): the sources and licences of the models and the HDRI.
+- [prototype/assets/audio/CREDITS.md](prototype/assets/audio/CREDITS.md): the sources, licences and edits of every sound and music file.
 - [Arena](https://docs.getfelix.dev/built-on-felix/arena/) in the Felix docs: how the game uses Felix.
 
 ## Felix version
