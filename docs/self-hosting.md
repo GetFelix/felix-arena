@@ -1,8 +1,10 @@
 # Self-hosting Felix Arena
 
 This guide runs the whole game on one machine: Felix, the simulation and the
-page you play in. You need Docker or Podman and a few minutes. To run it on a cluster instead, see [On Kubernetes](#on-kubernetes). At the end you
+page you play in. You need Docker or Podman and a few minutes. At the end you
 and a friend are flying in the same arena.
+
+To run it on a cluster instead, see [On Kubernetes](#on-kubernetes).
 
 It uses the released container images and one file, [`deploy/compose.yml`](../deploy/compose.yml).
 You do not need to clone this repository, install Rust or Node, or build anything.
