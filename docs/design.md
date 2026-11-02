@@ -748,12 +748,17 @@ page had got to. So when the page has folded every tick up to some offset and
 that is at most 30 ticks (one keyframe interval) behind the newest tick, it
 reads on from the tick after it, and the kills in between are counted. A tick
 that was skipped and not read back stops that offset where it is, so a later
-tick cannot hide the hole. A page further behind than 30 ticks is behind because
-its link is slow, and reading the backlog again over the same link would keep
-it there, so it takes the keyframe: its tally is right, but the kills in between
-are not on its replay list. A page often resyncs once soon after it joins,
-because the first frames it draws take half a second, so the short case is the
-common one. The label at the top of the page says "Connection poor" until the
+tick cannot hide the hole. A page further behind than 30 ticks takes the
+keyframe, since reading that many ticks through the subscription would overflow
+its queue. It still reads the ticks between its position and the keyframe, up to
+600 of them, in one range read before it subscribes, so their kills are counted.
+The read gets 1.5 seconds. If it is late, fails or the gap is wider, the page
+takes the keyframe alone: its tally is right, but the kills in between are not
+on its replay list, which keeps a link that is too slow from reading the same
+backlog again and again. A page often resyncs once soon after it joins, because
+the first frames it draws take a while (half a second on a fast machine, more on
+a loaded one), so the short case is the common one but the long one happens.
+The label at the top of the page says "Connection poor" until the
 live ticks are within 3 ticks of the sim. A link that stays too slow resyncs at
 most once every 5 seconds, so it jumps forward repeatedly instead of rejoining
 without pause; a wide jump seen during that wait is acted on when it ends. If

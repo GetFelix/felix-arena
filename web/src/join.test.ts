@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { decodeTick, loadCore, World } from './core';
 import type { EventFrame, StateValue, Subscribed } from './gateway';
 import { GapFeed } from './gaps';
-import { Folded, isCatchUp, joinFromKeyframe, RESUME_TICKS } from './join';
+import { Folded, HOLE_TICKS, HOLE_TIMEOUT_MS, isCatchUp, joinFromKeyframe, RESUME_TICKS, type Joinable } from './join';
 import { Match } from './match';
 import { drive } from './offline';
 import type { Reader } from './replay';
@@ -117,6 +117,56 @@ describe('joining from a keyframe', () => {
     // No tail in the answer: the keyframe stands in for it.
     expect(await from(600, null, 590)).toBe(591);
     expect(await from(null, null, 590)).toBe('live');
+  });
+
+  it('reads the ticks between a far-behind page and the keyframe before it subscribes', async () => {
+    const run = async (read: Joinable['read'], resumeAfter: number, keyframe = 600) => {
+      const seen: [number | null, boolean][] = [];
+      let subscribedAfter = -1;
+      await joinFromKeyframe(
+        {
+          stateGet: async () => ({ payload: null, version: keyframe, asOf: keyframe + 5 }),
+          subscribe: async () => {
+            subscribedAfter = seen.length;
+            return { sub: 1, startOffset: keyframe, liveOffset: keyframe };
+          },
+          read,
+        },
+        (f, catchUp) => seen.push([f.offset, catchUp]),
+        resumeAfter,
+      );
+      return { seen, subscribedAfter };
+    };
+    const page: Joinable['read'] = async (_s, from, end) => ({
+      records: Array.from({ length: Math.min(40, end! - from) }, (_, i) => ({
+        offset: from + i,
+        payload: new Uint8Array(),
+      })),
+      nextOffset: from + Math.min(40, end! - from),
+    });
+    // 100 ticks behind: further than a subscription reads, so the range is read, in pages, ahead of the subscription.
+    const far = await run(page, 499);
+    expect(far.seen.map(([offset]) => offset)).toEqual(Array.from({ length: 100 }, (_, i) => 500 + i));
+    expect(far.seen.every(([, catchUp]) => catchUp)).toBe(true);
+    expect(far.subscribedAfter).toBe(100);
+    // Too many ticks to read, no reader, a failed read and a late one all join from the keyframe alone.
+    expect((await run(page, 600 - HOLE_TICKS - 2)).seen).toEqual([]);
+    expect((await run(undefined, 499)).seen).toEqual([]);
+    expect((await run(async () => Promise.reject(new Error('refused')), 499)).seen).toEqual([]);
+    vi.useFakeTimers();
+    try {
+      const late = run(() => new Promise(() => {}), 499);
+      await vi.advanceTimersByTimeAsync(HOLE_TIMEOUT_MS);
+      expect((await late).seen).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+    // A read that stops short of the keyframe would leave a hole of its own.
+    const short: Joinable['read'] = async (_s, from) => ({
+      records: [{ offset: from, payload: new Uint8Array() }],
+      nextOffset: from,
+    });
+    expect((await run(short, 499)).seen).toEqual([]);
   });
 
   it('counts a page as folded up to the first tick that was skipped and not read back', () => {
