@@ -10,8 +10,14 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 tag=${FELIX_IMAGE_TAG:-nightly}
-TAG=$tag perl -pi -e 's{(ghcr\.io/getfelix/felix-(?:broker|controlplane|felixctl)):[^\s"\x27]+}{$1:$ENV{TAG}}' \
-  dev/compose.yml
+images=(dev/compose.yml)
+TAG=$tag perl -pi -e 's{(ghcr\.io/getfelix/felix-(?:broker|controlplane)):[^\s"\x27]+}{$1:$ENV{TAG}}' "${images[@]}"
+# A pattern that stopped matching would leave the pinned release running.
+if ! grep -hq "ghcr\.io/getfelix/felix-broker:$tag" "${images[@]}" ||
+  grep -h 'ghcr\.io/getfelix/felix-\(broker\|controlplane\)' "${images[@]}" | grep -qv ":${tag}[[:space:]]*\$"; then
+  echo "the compose files do not all use the $tag images" >&2
+  exit 1
+fi
 
 logs() { [ $? -eq 0 ] || docker compose -f dev/compose.yml logs --no-color; }
 trap logs EXIT
