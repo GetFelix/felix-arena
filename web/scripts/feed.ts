@@ -107,7 +107,8 @@ try {
   if (found.length === 0) throw new Error(`a fresh page did not find match ${first} in the log`);
   console.log(`a fresh page found ${found.length} of match ${first}'s kills in the log`);
   const loaded = await replay(fresh, found.at(-1)!.key);
-  if (loaded.failed || loaded.last !== found.at(-1)!.tick + 30) failures.push('a loaded kill did not replay');
+  if (loaded.failed || loaded.last !== found.at(-1)!.tick + 30)
+    failures.push(`a loaded kill did not replay: ${JSON.stringify(loaded)}`);
   await fresh.close();
 
   // The match's first kill, once retention has passed its replay's start.
