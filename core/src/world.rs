@@ -6,6 +6,8 @@ use crate::fixed::{self, div_round, length};
 use crate::input::{BOOST, FIRE, Input};
 use crate::tick::{Bolt, Craft, Event, Keyframe, MatchState, Player, Tick};
 
+mod recover;
+
 /// Steps a second.
 pub const HZ: i32 = 30;
 /// Every this many ticks is a keyframe.
@@ -181,6 +183,11 @@ impl World {
     /// The tick number of the current state.
     pub fn tick(&self) -> u32 {
         self.tick
+    }
+
+    /// Who is playing, by slot.
+    pub fn players(&self) -> &[Player] {
+        &self.players
     }
 
     pub fn crafts(&self) -> &[Craft] {

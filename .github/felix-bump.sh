@@ -25,4 +25,5 @@ pin() {
 pin sim/Cargo.toml 'felix-client = "={V}"'
 pin dev/compose.yml 'ghcr.io/getfelix/felix-controlplane:{V}'
 pin dev/compose.yml 'ghcr.io/getfelix/felix-broker:{V}'
+pin deploy/compose.yml 'FELIX_VERSION:-{V}'
 pin README.md '`dev/up.sh` starts Felix {V} (a control plane'

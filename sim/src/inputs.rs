@@ -126,9 +126,25 @@ struct Seat {
 #[derive(Default)]
 pub(crate) struct Players {
     seats: HashMap<String, Seat>,
+    /// Players a recovered world already holds, by player key, until their
+    /// first input says which principal they are. One that stays silent for
+    /// [`LEAVE_AFTER`] leaves, as a seat would.
+    unclaimed: HashMap<u64, (u8, Instant)>,
 }
 
 impl Players {
+    /// The players of a world picked up after a crash, heard from at `now`.
+    pub(crate) fn recovered(world: &World, now: Instant) -> Self {
+        Self {
+            seats: HashMap::new(),
+            unclaimed: world
+                .players()
+                .iter()
+                .map(|player| (player.key, (player.slot, now)))
+                .collect(),
+        }
+    }
+
     /// Take in the inputs received since the last tick, joining new players
     /// and removing silent ones, and answer the input for each slot at `now`.
     pub(crate) fn update(
@@ -146,9 +162,11 @@ impl Players {
             let seat = match self.seats.get_mut(&principal) {
                 Some(seat) => seat,
                 None => {
-                    let Some(slot) = world.join(player_key(&principal)) else {
+                    let key = player_key(&principal);
+                    let Some(slot) = world.join(key) else {
                         continue;
                     };
+                    self.unclaimed.remove(&key);
                     self.seats.entry(principal).or_insert(Seat {
                         slot,
                         applied: None,
@@ -177,6 +195,13 @@ impl Players {
             let stays = now.duration_since(seat.heard) < LEAVE_AFTER;
             if !stays {
                 world.leave(seat.slot);
+            }
+            stays
+        });
+        self.unclaimed.retain(|_, (slot, heard)| {
+            let stays = now.duration_since(*heard) < LEAVE_AFTER;
+            if !stays {
+                world.leave(*slot);
             }
             stays
         });
@@ -284,6 +309,29 @@ mod tests {
         world.step(|_| None);
         assert!(world.crafts().is_empty());
         assert_eq!(player_key("ana"), player_key("ana"));
+    }
+
+    #[test]
+    fn a_recovered_player_keeps_its_slot_and_a_silent_one_leaves() {
+        let mut before = World::new(0);
+        before.join(player_key("ana"));
+        before.join(player_key("ben"));
+        let now = Instant::now();
+        let heard = now + Duration::from_secs(5);
+        let mut players = Players::recovered(&before, now);
+        // Ana's first input claims her seat; the world does not grow.
+        let received = vec![Received {
+            principal: "ana".into(),
+            record: record(1, 127),
+            at: heard,
+        }];
+        let controls = players.update(&mut before, received, heard);
+        assert_eq!(controls[0].map(|i| i.seq), Some(1));
+        assert_eq!(before.crafts().len(), 2);
+        // Ben never speaks, so he leaves as a silent seat would.
+        players.update(&mut before, vec![], now + LEAVE_AFTER);
+        before.step(|_| None);
+        assert_eq!(before.crafts().len(), 1);
     }
 
     #[test]
