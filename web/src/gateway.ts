@@ -124,6 +124,17 @@ export class GatewayError extends Error {
   }
 }
 
+/** Join answers that trying again cannot change: the person may not open the arena, or the sign-in is bad. */
+const REFUSED_FOR_GOOD = new Set(['forbidden', 'signed_out', 'unsupported', 'bad_request']);
+
+/**
+ * Whether a failed join should end the page's tries. Any other answer, such as `unavailable` while the stack is
+ * still starting, is worth another try.
+ */
+export function refusedForGood(err: unknown): boolean {
+  return err instanceof GatewayError && REFUSED_FOR_GOOD.has(err.code);
+}
+
 type Json = Record<string, unknown>;
 
 interface Pending {

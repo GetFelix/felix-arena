@@ -24,14 +24,14 @@ import {
 } from './core';
 import { Effects } from './effects';
 import { type CraftView, Fleet, GUN_HEIGHT } from './fleet';
-import { type EventFrame, Gateway, GatewayError } from './gateway';
+import { type EventFrame, Gateway, refusedForGood } from './gateway';
 import { botCount, botLevel, botTag } from './bots';
 import { type Link, Offline, OFFLINE_PRINCIPAL } from './offline';
 import { Hud, killKey } from './hud';
 import { KillCam, type KillCamTimes, Markers } from './killcam';
 import { KillRig, VIEWS } from './killcam-rig';
 import { killsOf, type KillRef, type Page, type Reader } from './replay';
-import { joinFromKeyframe, type JoinTimes } from './join';
+import { Folded, joinFromKeyframe, type JoinTimes } from './join';
 import { joinMembers, sessionKey } from './members';
 import { GapFeed, type GapStats } from './gaps';
 import { Behind } from './behind';
@@ -574,6 +574,8 @@ async function main(): Promise<void> {
   /** The resync of the session now open, which {@link onFrame} tells how far behind the live ticks are. */
   let resyncing: Resync | null = null;
   Object.defineProperty(debug, 'behindTicks', { get: () => behind.ticks });
+  /** How far {@link onFrame} has folded the ticks without a hole, which a resync reads on from. */
+  const folded = new Folded();
   const onFrame = (frame: EventFrame, catchingUp = false) => {
     firstEventMs ??= performance.now();
     let tick: Tick;
@@ -591,6 +593,7 @@ async function main(): Promise<void> {
       }
       timing?.free();
     }
+    folded.see(frame.offset, frame.skippedBefore);
     if (catchingUp) foldTick(tick, frame.offset);
     else onTick(tick, performance.now(), frame.offset, frame.payload, !frame.filled);
     tick.free();
@@ -656,8 +659,9 @@ async function main(): Promise<void> {
     });
     // Each join replaces the live subscription, and ticks still arriving on the one it replaced are dropped.
     let generation = 0;
-    const joinFrom = () => {
+    const joinFrom = (resumeAfter: number | null = null) => {
       const mine = ++generation;
+      folded.rejoin();
       const feed = new GapFeed(
         () => link,
         (frame, catchUp) => {
@@ -670,19 +674,24 @@ async function main(): Promise<void> {
           },
         },
       );
-      return joinFromKeyframe(link, (frame, catchUp) => {
-        if (mine !== generation) return;
-        // A test hook: lose every LOSE-th live tick, as a subscriber with a full queue would.
-        if (LOSE && !catchUp && frame.offset !== null && ++received % LOSE === 0) return;
-        feed.push(frame, catchUp);
-      });
+      return joinFromKeyframe(
+        link,
+        (frame, catchUp) => {
+          if (mine !== generation) return;
+          // A test hook: lose every LOSE-th live tick, as a subscriber with a full queue would.
+          if (LOSE && !catchUp && frame.offset !== null && ++received % LOSE === 0) return;
+          feed.push(frame, catchUp);
+        },
+        resumeAfter,
+      );
     };
     const resync = new Resync(
       async () => {
         joiningSince = performance.now();
         debug.resyncs++;
         try {
-          await joinFrom();
+          // From where this page got to, when that is close: a keyframe alone would skip the kills in between.
+          await joinFrom(folded.offset);
         } catch (err) {
           // The old subscription is replaced as far as the page goes, so a failed join leaves it with no ticks at all.
           link.close();
@@ -735,6 +744,7 @@ async function main(): Promise<void> {
         return await open(token ?? (await signIn()));
       } catch (err) {
         if (final(err)) throw err;
+        console.warn('join failed, trying again:', err);
       }
       token = null;
       await sleep(wait);
@@ -767,7 +777,7 @@ async function main(): Promise<void> {
   } else {
     const token = await signIn();
     key = playerKey(await principal(token));
-    gateway = await persist(token, (err) => err instanceof GatewayError && err.code !== 'closed');
+    gateway = await persist(token, refusedForGood);
   }
 
   // Inputs go once a sim tick, on the sim's clock as the ticks show it; a short timer keeps the send close to it.

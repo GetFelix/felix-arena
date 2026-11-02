@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseFrame } from './gateway';
+import { GatewayError, parseFrame, refusedForGood } from './gateway';
 
 describe('parseFrame', () => {
   const frame = (headerLen: number, offset: bigint) => {
@@ -38,5 +38,20 @@ describe('parseFrame', () => {
     const other = new Uint8Array(frame(40, 1n));
     other[0] = 2;
     expect(parseFrame(other.buffer)).toBeNull();
+  });
+});
+
+describe('refusedForGood', () => {
+  it('ends the tries for a sign-in or scope that retrying cannot fix', () => {
+    for (const code of ['forbidden', 'signed_out', 'unsupported', 'bad_request']) {
+      expect(refusedForGood(new GatewayError(code, 'no'))).toBe(true);
+    }
+  });
+
+  it('keeps trying while the stack is still starting or the gateway is full', () => {
+    for (const code of ['unavailable', 'rate_limited', 'read_failed', 'subscribe_failed', 'closed']) {
+      expect(refusedForGood(new GatewayError(code, 'later'))).toBe(false);
+    }
+    expect(refusedForGood(new Error('cannot reach ws://gateway'))).toBe(false);
   });
 });

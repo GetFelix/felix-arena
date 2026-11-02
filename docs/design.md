@@ -117,7 +117,7 @@ The project succeeds if five demonstrations work in front of a skeptic.
 | 2 | Join mid-match | A spectator opening a match in progress draws a correct frame in under 500 ms p50, and its state hash at a given tick matches a player's |
 | 3 | Slow client isolation | One player throttled below the rate of a match's ticks falls behind alone and says so; the others' tick latency stays within 10% of the run without them, and the throttled one recovers from a keyframe |
 | 4 | Survive broker loss | Kill the broker owning the arena's tick stream mid-match. Play resumes on the new owner with no acknowledged tick lost, and a kill cam whose window spans the failover still plays |
-| 5 | Spectator fanout | 100 spectators on one match. Players' tick latency p50 and the simulation's commit p50 stay within twice the run with none plus 0.5 ms, with the readers on cpus of their own (measured on a 4-cpu runner: 1.4 to 2.2 ms and 1.7 to 3.2 ms for the trip, 0.9 to 1.4 ms and 1.0 to 1.2 ms for the commit) |
+| 5 | Spectator fanout | 100 spectators on one match. Players' tick latency p50 and the simulation's commit p50 stay within twice the run with none plus 0.5 ms, with the readers on cpus of their own (measured on a 4-cpu runner: 1.4 to 2.2 ms and 1.7 to 3.2 ms for the trip, 0.9 to 1.4 ms and 1.0 to 1.2 ms for the commit; one run took the commit from 0.91 to 2.31 ms, over the bound, which is felix#1771). The CI job is informational until a Felix release that fixes it is pinned |
 
 Two criteria are deliberately absent. Player count is not a goal: an arena
 holds 8, and a hundred-player battle royale would be a different design. Nor is
@@ -743,11 +743,21 @@ jump wider than 15 ticks, cannot catch up by reading back what it missed. It
 joins again from the newest keyframe, the same way it joins a match in
 progress, on the same gateway session: subscribing to the `live` slot again
 replaces the old subscription, and ticks still arriving on the old one are
-dropped. The label at the top of the page says "Connection poor" until the live ticks are within 3
-ticks of the sim. A link that stays too slow resyncs at most once every 5
-seconds, so it jumps forward repeatedly instead of rejoining without pause; a
-wide jump seen during that wait is acted on when it ends. If the join itself
-fails, the page opens a new session.
+dropped. A keyframe holds the tally but not the kills between it and where the
+page had got to. So when the page has folded every tick up to some offset and
+that is at most 30 ticks (one keyframe interval) behind the newest tick, it
+reads on from the tick after it, and the kills in between are counted. A tick
+that was skipped and not read back stops that offset where it is, so a later
+tick cannot hide the hole. A page further behind than 30 ticks is behind because
+its link is slow, and reading the backlog again over the same link would keep
+it there, so it takes the keyframe: its tally is right, but the kills in between
+are not on its replay list. A page often resyncs once soon after it joins,
+because the first frames it draws take half a second, so the short case is the
+common one. The label at the top of the page says "Connection poor" until the
+live ticks are within 3 ticks of the sim. A link that stays too slow resyncs at
+most once every 5 seconds, so it jumps forward repeatedly instead of rejoining
+without pause; a wide jump seen during that wait is acted on when it ends. If
+the join itself fails, the page opens a new session.
 `web/src/resync.ts` holds that rule, and `window.arena.resyncs` counts the
 resyncs. CI's `resync` job slows `cleo`'s link below the rate of the ticks,
 requires her page to rejoin and say so, then lifts the slowdown and checks that
@@ -946,7 +956,7 @@ and saying so is honest, and it is what demonstration 4 shows.
 | Spectator join | Under 500 ms p50 to a correct frame | Cold client, mid-match |
 | Frame time | 16.7 ms p95 at 1080p, High or Medium tier, laptop iGPU | Frame timing over a scripted 2-minute match |
 | Sim step | Under 2 ms for 8 players and 64 bolts | Sim timings |
-| Spectator fanout, 0 to 100 | Players' tick latency p50 and the sim's commit p50 within twice the quiet phases plus 0.5 ms | Spectators as Felix subscriptions on a physical core of their own, with four bot players measuring through the gateway |
+| Spectator fanout, 0 to 100 | Players' tick latency p50 and the sim's commit p50 within twice the quiet phases plus 0.5 ms | Spectators as Felix subscriptions on a physical core of their own, with four bot players measuring through the gateway. Informational in CI until a Felix release that fixes felix#1771 is pinned |
 | Failover pause | Under 10 s on the dev cluster, whose control plane declares a broker lost after 3 s | CI's `broker failover` job: the sim's commit time of the last tick before the kill against the first after it |
 
 As in felix-canvas, the 100 spectators are made as Felix subscriptions from a
