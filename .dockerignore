@@ -1,6 +1,11 @@
 target
-web
 prototype
 docs
-dev
 .git
+# Only what an image copies.
+dev/*
+!dev/idp.mjs
+!dev/seed.mjs
+!dev/scope.toml
+web/*
+!web/dist
