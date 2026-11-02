@@ -142,14 +142,13 @@ Felix instead.
 
 ## Release images
 
-Each release also publishes five container images to GitHub's registry, for
+Each release also publishes four container images to GitHub's registry, for
 `linux/amd64` and `linux/arm64`. Each is signed with cosign:
 
 | Image | What it is |
 | --- | --- |
 | `ghcr.io/getfelix/felix-arena-sim` | The simulation (`docker/sim.Dockerfile`). |
-| `ghcr.io/getfelix/felix-arena-gateway` | felix-gateway with the arena's scope built in (`dev/scope.toml`). |
-| `ghcr.io/getfelix/felix-arena-web` | The built web client behind nginx, on port 8080. |
+| `ghcr.io/getfelix/felix-arena-gateway` | felix-gateway with the arena's scope (`dev/scope.toml`) and the built web client, served from the gateway's port. |
 | `ghcr.io/getfelix/felix-arena-seed` | The job that creates the arenas and the tokens the broker and the sim use. |
 | `ghcr.io/getfelix/felix-arena-idp` | The stand-in identity provider, for trying the game. Never expose it. |
 
