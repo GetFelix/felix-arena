@@ -33,6 +33,12 @@ loadCore(readFileSync(new URL('../src/core/felix_arena_core_bg.wasm', import.met
 
 const compose = (...args: string[]) =>
   execFileSync(ENGINE, ['compose', '-f', '../dev/compose.yml', ...args], { stdio: 'inherit' });
+// `compose start sim` also starts what sim depends on, which runs the seed job again and adds seconds that a crashed
+// sim, restarted by its restart policy, would not wait for. Starting the container itself leaves them alone.
+const restart = (service: string) => {
+  const id = execFileSync(ENGINE, ['compose', '-f', '../dev/compose.yml', 'ps', '--all', '--quiet', service]);
+  execFileSync(ENGINE, ['start', id.toString().trim()], { stdio: 'inherit' });
+};
 
 const token = ((await (await fetch(`${IDP}/token?sub=cleo&aud=felix-arena`)).json()) as { id_token: string }).id_token;
 const spectator = await Gateway.connect(GATEWAY, ARENA, token);
@@ -78,7 +84,7 @@ try {
   console.log(`killing the sim at epoch ${before.epoch}, tick ${before.tick}, scores ${before.scores}`);
   const old = ticks.length;
   compose('kill', 'sim');
-  compose('start', 'sim');
+  restart('sim');
   await waitFor('ticks of the next epoch', () => ticks.slice(old).some((t) => t.epoch > before.epoch), 60_000);
   const first = ticks.findIndex((t, i) => i >= old && t.epoch > before.epoch);
   const last = ticks[first - 1]!;
