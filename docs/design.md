@@ -752,7 +752,8 @@ tick cannot hide the hole. A page further behind than 30 ticks takes the
 keyframe, since reading that many ticks through the subscription would overflow
 its queue. It still reads the ticks between its position and the keyframe, up to
 600 of them, in one range read before it subscribes, so their kills are counted.
-The read gets one second, which keeps the join inside the two seconds the page holds its last picture. If it is late, fails or the gap is wider, the page
+The read gets one second, which keeps the join inside the two seconds the page
+holds its last picture. If it is late, fails or the gap is wider, the page
 takes the keyframe alone: its tally is right, but the kills in between are not
 on its replay list, which keeps a link that is too slow from reading the same
 backlog again and again. A page often resyncs once soon after it joins, because
