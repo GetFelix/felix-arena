@@ -1,7 +1,7 @@
 // The spectator fanout check (docs/design.md, demonstration 5), through the dev stack: four bots play a match and each
 // measures the trip of every tick from the sim's commit to its arrival. It does that alone, then with a Rust example
 // holding spectators as Felix clients (`sim/examples/spectators.rs`), then alone again. A player's median trip, and the
-// sim's commit time, which every tick carries for the one before, may grow by 10% plus half a millisecond over the
+// sim's commit time, which every tick carries for the one before, may grow by 10% plus a millisecond over the
 // slower of the two quiet phases, so a machine that warms up during the run cannot hide a cost.
 // Usage: npx vite-node scripts/fanout.ts -- <spectators binary> [spectators, default 100] [seconds a phase, default 20]
 import { spawn } from 'node:child_process';
@@ -21,9 +21,12 @@ const CONTROL_PLANE = process.env.ARENA_CONTROL_PLANE ?? 'http://127.0.0.1:8443'
 const BROKER = process.env.ARENA_BROKER ?? '127.0.0.1:5000';
 const BROKER_CA = process.env.ARENA_BROKER_CA ?? new URL('../../dev/state/broker-cert.pem', import.meta.url).pathname;
 const PHASE_MS = Number(seconds) * 1000;
-/** What a median may grow by: 10%, and half a millisecond for the resolution of a median this small. */
+/**
+ * What a median may grow by: 10%, and a millisecond. The 100 readers share the runner's two cores with the broker, so
+ * their own CPU shows up as about 0.5 to 0.7 ms on a median of about 1 ms.
+ */
 const GROWTH = 1.1;
-const SLACK_US = 500;
+const SLACK_US = 1000;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 loadCore(readFileSync(new URL('../src/core/felix_arena_core_bg.wasm', import.meta.url)));
