@@ -184,6 +184,11 @@ The guide also covers changing the arenas and players, playing with other
 people, updating, renewing the tokens, Podman and troubleshooting. The `self-host`
 CI job runs this file against freshly built images and plays in a browser.
 
+On a cluster, the Helm chart in `deploy/helm/felix-arena` runs the gateway, the
+sim, the sign-in page and a seed Job next to Felix's own chart; the guide's
+"On Kubernetes" section walks through it, and every release attaches the packaged
+chart. The `helm chart` CI job installs both on kind and plays in a browser.
+
 ## Development stack
 
 `dev/up.sh` starts Felix 0.6.2 (a control plane and one broker), a stand-in identity

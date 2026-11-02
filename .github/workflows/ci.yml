@@ -588,6 +588,69 @@ jobs:
       - if: failure()
         run: docker compose -f dev/compose.yml logs --no-color
 
+  chart:
+    name: helm chart
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      # The Felix release whose chart this one is installed next to.
+      - id: felix
+        run: echo "ref=v$(sed -n 's/^version=//p' .felix-version)" >> "$GITHUB_OUTPUT"
+      - name: The Felix chart
+        uses: actions/checkout@v4
+        with:
+          repository: GetFelix/felix
+          ref: ${{ steps.felix.outputs.ref }}
+          path: felix
+          sparse-checkout: deploy/helm/felix
+      - uses: azure/setup-helm@v4
+      - run: |
+          helm lint deploy/helm/felix-arena -f deploy/helm/felix-arena/ci/kind-values.yaml
+          helm package deploy/helm/felix-arena --destination "$RUNNER_TEMP"
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@0.2.129
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Build the web client and the four images
+        run: |
+          (cd web && npm ci && npm run core && npm run build)
+          for image in sim gateway seed idp; do
+            docker build -f "docker/$image.Dockerfile" -t "ghcr.io/getfelix/felix-arena-$image:ci" .
+          done
+      - uses: helm/kind-action@v1
+        with:
+          cluster_name: kind
+      - name: Install Felix and the chart
+        env:
+          FELIX_CHART: ${{ github.workspace }}/felix/deploy/helm/felix
+        run: |
+          for image in sim gateway seed idp; do kind load docker-image "ghcr.io/getfelix/felix-arena-$image:ci"; done
+          deploy/helm/felix-arena/ci/kind-install.sh
+      - name: A browser signs in through the gateway and plays
+        working-directory: web
+        run: |
+          kubectl port-forward svc/felix-arena-gateway 8787:80 &
+          kubectl port-forward svc/felix-arena-idp 9400:9400 &
+          for _ in $(seq 1 30); do curl -sf http://127.0.0.1:8787/play.html >/dev/null && break; sleep 2; done
+          curl -sf http://127.0.0.1:9400/jwks.json >/dev/null
+          npm ci
+          npx playwright install --with-deps chromium
+          node scripts/input-to-pixel.mjs 'http://127.0.0.1:8787/play.html?arena=alpha&as=ana&quality=low'
+      - if: failure()
+        run: |
+          kubectl get pods -o wide
+          kubectl describe pods | grep -E '^(Name:|Events:)|Warning|Error' | tail -80
+          kubectl logs -l app.kubernetes.io/instance=felix-arena --all-containers --tail 100
+          kubectl logs felix-broker-0 --tail 100
+          kubectl logs felix-controlplane-0 --tail 100
+
   resync:
     name: resync
     runs-on: ubuntu-latest

@@ -1,0 +1,17 @@
+Felix Arena is starting. The seed Job writes the broker credential to the
+Secret {{ include "arena.brokerSecret" . }}; on a first install, enable the
+Felix brokers with it:
+
+  helm upgrade <felix release> <felix chart> --reuse-values \
+    --set broker.enabled=true \
+    --set broker.credential.existingSecret={{ include "arena.brokerSecret" . }}
+
+The sim's token is in the Secret {{ include "arena.simSecret" . }}; the sim pod
+starts once the seed has written it. Tokens last as long as the control plane's
+FELIX_EXCHANGE_TOKEN_TTL_SECONDS. To renew them, install again with
+`helm upgrade`, then restart the broker and the sim.
+
+The game is the Service {{ include "arena.fullname" . }}-gateway. The sign-in page is the Service
+{{ include "arena.fullname" . }}-idp, and browsers must reach it at {{ .Values.idp.issuer }}, e.g. with
+  kubectl port-forward svc/{{ include "arena.fullname" . }}-idp 9400:9400
+It signs in anyone who picks a name. Do not expose it to people you do not trust.

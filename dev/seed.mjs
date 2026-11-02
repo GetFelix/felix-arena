@@ -3,7 +3,7 @@
 // watch role, and write the broker's and the sim's tokens to the state
 // directory. Safe to run again: existing objects are kept.
 import { createHash } from "node:crypto";
-import { chmod, mkdir, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 
 const env = (name, fallback) => process.env[name] || fallback;
 
@@ -171,6 +171,26 @@ for (const arena of ARENAS) {
 const sim = await exchange("arena-sim", { requested: ["stream.publish", "stream.subscribe"] });
 await writeFile(`${STATE}/sim.token`, sim, { mode: 0o644 });
 console.log(`wrote sim.token to ${STATE}`);
+
+// On Kubernetes the tokens also go to Secrets, which the broker and the sim
+// mount. Needs NODE_EXTRA_CA_CERTS set to the cluster's CA.
+async function storeSecret(name, token) {
+  const account = "/var/run/secrets/kubernetes.io/serviceaccount";
+  const namespace = (await readFile(`${account}/namespace`, "utf8")).trim();
+  const auth = { token: (await readFile(`${account}/token`, "utf8")).trim() };
+  const secrets = `https://kubernetes.default.svc/api/v1/namespaces/${namespace}/secrets`;
+  const body = { apiVersion: "v1", kind: "Secret", metadata: { name }, stringData: { token } };
+  if ((await request("POST", secrets, { ...auth, body })) === null) {
+    await request("PUT", `${secrets}/${name}`, { ...auth, body });
+  }
+  console.log(`stored a token in Secret ${name}`);
+}
+for (const [variable, token] of [
+  ["ARENA_BROKER_SECRET", broker],
+  ["ARENA_SIM_SECRET", sim],
+]) {
+  if (process.env[variable]) await storeSecret(process.env[variable], token);
+}
 
 // up.sh waits for this before it calls the stack ready.
 await writeFile(`${STATE}/seeded`, "");
