@@ -75,16 +75,20 @@ during which the craft keeps moving and aiming; then a beam goes from its nose
 along its aim to the first enemy craft whose edge is within 0.6 m of it, or the
 first wall or cover. Dying loses the rail.
 
-**Blaster heat.** Each bolt adds 8 heat. Heat is shed, 3 a tick, only on ticks
-the craft is not holding fire, so holding fire fills the 120 cap in 15 shots,
-about 2.4 seconds, and the blaster locks. It fires again once its heat has
-fallen to 40, which takes about a second with the trigger released. Short
-bursts with pauses never reach the cap. The rail adds no heat and still
-charges while the blaster is locked. The tick carries each craft's heat and
-whether it is locked, so every client draws the same bar and the kill cam
-replays the same overheats. The HUD shows your heat beside the boost, and a
-locked craft glows orange above its hull. Bots let up at a different heat each
-burst, so now and then one still overheats.
+**Blaster heat.** Each bolt adds 8 heat, up to a cap of 120. The blaster sheds
+3 heat on every tick it is ready to fire and does not, so firing as fast as
+it can never cools it, however the trigger is tapped. Fifteen shots in a row,
+about 2.3 seconds, reach the cap and lock the blaster. A locked blaster cools
+even with the trigger held, and fires again once its heat has fallen to 40,
+about a second later; a player who never lets go gets a cycle of a long burst,
+a short lock, then a shorter burst. A pause of a few ticks between shots
+cools it a little, so short bursts with gaps never lock it. The rail adds no
+heat, and a craft holding one cools its blaster while it fires the rail. The
+tick carries each craft's heat and whether it is locked, so every client draws
+the same bar and the kill cam replays the same overheats. The HUD shows your
+heat beside the boost, turning amber near the cap and orange when locked, and a
+locked craft glows orange above its hull. Bots ease off before the cap, each
+burst at a different heat.
 
 **Controls.** WASD or the left stick moves; the craft strafes, so it always
 faces where you aim. The keys move the craft up, left, down and right on the
@@ -100,7 +104,7 @@ the victim, killer and orbit views, and Space skips to the respawn.
 
 | Weapon | Behaviour | Why it is here |
 |---|---|---|
-| Blaster | Default. A bolt at 30 m/s, 12 damage, 6 shots a second, locked for a moment by 2.4 seconds of held fire | A projectile with travel time is visible in replays and forgiving of latency |
+| Blaster | Default. A bolt at 30 m/s, 12 damage, 6 shots a second, locked for about a second by 2.3 seconds of fire | A projectile with travel time is visible in replays and forgiving of latency |
 | Rail | Picked up from the centre crystal, which spawns one every 30 seconds. Charges for 0.5 s, then a hitscan beam for 70 damage; 3 shots | One high-stakes moment per half minute, which is what makes a kill cam worth watching |
 
 ## Success criteria
@@ -353,7 +357,7 @@ clock, scores and rail timer are in every tick, so any one tick can draw the
 HUD; kills and deaths are on the keyframe's roster, and the page counts the
 `killed` events since it.
 
-A busy tick with 8 crafts and 30 bolts is about 450 bytes; a typical one is
+A busy tick with 8 crafts and 30 bolts is about 460 bytes; a typical one is
 under 300. A 5-minute match is about 3 MB of log.
 
 **Events are in the tick that caused them.** A kill is not a separate record:

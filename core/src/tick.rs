@@ -51,7 +51,7 @@ pub struct MatchState {
     pub rail_in: u16,
 }
 
-/// One craft, 17 bytes on the wire.
+/// One craft, 18 bytes on the wire.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Craft {
     pub slot: u8,

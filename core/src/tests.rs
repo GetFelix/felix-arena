@@ -279,7 +279,7 @@ fn hold(world: &mut World, buttons: u8, ticks: u32) -> usize {
 fn holding_fire_overheats_the_blaster_until_it_cools() {
     let mut world = free_play(0);
     world.join(1);
-    // Fifteen bolts fill the blaster, and it stays locked while the trigger is held.
+    // Fifteen bolts fill the blaster and lock it.
     assert_eq!(
         hold(&mut world, FIRE, 75),
         usize::from(HEAT_MAX / HEAT_PER_SHOT)
@@ -307,16 +307,52 @@ fn bursts_with_pauses_never_overheat() {
 }
 
 #[test]
-fn the_rail_adds_no_heat_and_ignores_an_overheated_blaster() {
+fn tapping_the_trigger_does_not_cool_the_blaster() {
+    let mut world = free_play(0);
+    world.join(1);
+    // One tick of fire in every five is the fastest the blaster shoots, the same as holding it.
+    let mut shots = 0;
+    for _ in 0..15 {
+        shots += hold(&mut world, FIRE, 1);
+        hold(&mut world, 0, 4);
+    }
+    assert_eq!(shots, 15);
+    assert!(world.crafts()[0].overheated);
+}
+
+#[test]
+fn a_locked_blaster_cools_with_the_trigger_held() {
     let mut world = free_play(0);
     world.join(1);
     hold(&mut world, FIRE, 75);
-    let heat = world.crafts()[0].heat;
+    assert!(world.crafts()[0].overheated);
+    // It fires again once cool, without the trigger being released.
+    assert!(hold(&mut world, FIRE, 40) > 0);
+}
+
+#[test]
+fn the_rail_adds_no_heat() {
+    let mut world = free_play(0);
+    world.join(1);
+    world.crafts_mut()[0].rail = 1;
+    hold(&mut world, FIRE, 1);
+    assert!(world.crafts()[0].charge > 0);
+    // The rail fires when its charge runs out, before the blaster is used again.
+    hold(&mut world, FIRE, 15);
+    assert_eq!(world.crafts()[0].rail, 0);
+    assert_eq!(world.crafts()[0].heat, 0);
+}
+
+#[test]
+fn a_rail_still_charges_on_a_locked_blaster() {
+    let mut world = free_play(0);
+    world.join(1);
+    hold(&mut world, FIRE, 75);
+    assert!(world.crafts()[0].overheated);
     world.crafts_mut()[0].rail = 1;
     world.crafts_mut()[0].fire_cooldown = 0;
     hold(&mut world, FIRE, 1);
     assert!(world.crafts()[0].charge > 0);
-    assert!(world.crafts()[0].heat <= heat);
 }
 
 #[test]

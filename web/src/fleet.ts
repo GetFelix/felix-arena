@@ -26,7 +26,7 @@ export interface CraftView {
   heading: number;
   /** How far a rail has charged, 0 to 1, or 0 when none is charging. */
   charge?: number;
-  /** The blaster is locked until it cools, which the craft shows as a glow at its nose. */
+  /** The blaster is locked until it cools, which the craft shows as a glow above its hull. */
   overheated?: boolean;
   /** Under spawn protection, which the effects draw as a shield. */
   protected?: boolean;

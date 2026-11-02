@@ -65,6 +65,7 @@ export class Hud {
       this.style('boost', `${Math.round((1 - me.boostCooling) * 100)}%`);
       this.style('heat', `${Math.round(me.heat * 100)}%`);
       this.toggle('heat-meter', 'hot', me.overheated);
+      this.toggle('heat-meter', 'warm', !me.overheated && me.heat >= 0.75);
       this.html('rail', [0, 1, 2].map((i) => `<i${i < me.rail ? ' class="on"' : ''}></i>`).join(''));
     }
 
