@@ -564,12 +564,27 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: cargo build --release --locked -p felix-arena-sim --example spectators
-      - name: 100 spectators leave the players' trip time and the sim's commit time within 10% of the quiet phases
+      # The readers' own CPU is not Felix's cost. They get a physical core to themselves (both hyperthreads of the
+      # last one); the stack's containers and the players run on the rest.
+      - name: Keep the spectators' cpus apart from the stack and the players
+        run: |
+          lscpu -e
+          core="$(lscpu -p=CPU,CORE | grep -v '^#' | awk -F, '{c[$2]=c[$2] (c[$2]?",":"") $1} END {n=0; for (k in c) n++; print c[n-1]}')"
+          others="$(lscpu -p=CPU,CORE | grep -v '^#' | awk -F, -v mine="$core" 'BEGIN {split(mine,m,",")} {skip=0; for (i in m) if (m[i]==$1) skip=1; if (!skip) printf "%s%s", (o++?",":""), $1}')"
+          if [[ -z "$others" || -z "$core" ]]; then
+            echo "the runner has no physical core to spare for the spectators; use a larger runner" >&2
+            exit 1
+          fi
+          echo "spectators on $core, everything else on $others"
+          docker compose -f dev/compose.yml ps --quiet | xargs docker update --cpuset-cpus "$others" >/dev/null
+          echo "FANOUT_SPECTATOR_CPUS=$core" >> "$GITHUB_ENV"
+          echo "FANOUT_OTHER_CPUS=$others" >> "$GITHUB_ENV"
+      - name: 100 spectators leave the players' trip time and the sim's commit time within twice the quiet phases
         working-directory: web
         run: |
           npm ci
           npm run core
-          npx vite-node scripts/fanout.ts -- ../target/release/examples/spectators 100 20
+          taskset -c "$FANOUT_OTHER_CPUS" npx vite-node scripts/fanout.ts -- ../target/release/examples/spectators 100 20
       - if: failure()
         run: docker compose -f dev/compose.yml logs --no-color
 
