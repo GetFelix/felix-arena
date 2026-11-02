@@ -83,6 +83,13 @@ describe('PhaseWatcher', () => {
     expect(watcher.update(clock('playing', 119))).toEqual([]);
   });
 
+  it('does not tick for the second it joined in', () => {
+    const watcher = new PhaseWatcher();
+    expect(watcher.update(clock('warmup', 2))).toEqual([]);
+    expect(watcher.update(clock('warmup', 2))).toEqual([]);
+    expect(watcher.update(clock('warmup', 1))).toEqual(['tick']);
+  });
+
   it('does not count down while the warmup waits for a second player', () => {
     const watcher = new PhaseWatcher();
     watcher.update(clock('warmup', 2, 1, true));
@@ -144,9 +151,14 @@ describe('the audio files', () => {
       for (const f of spec.files) expect(have, `${cue}: ${f}`).toContain(f);
   });
 
-  it('are each listed in the credits with their licence', () => {
-    for (const f of files('sfx/')) expect(credits, `sfx/${f}`).toContain(`sfx/${f}`);
-    for (const f of files('music/')) expect(credits, `music/${f}`).toContain(`music/${f}`);
+  it('are each a row of the credits, with a source and a licence', () => {
+    const rows = credits.split('\n').filter((line) => line.startsWith('| `'));
+    for (const [sub, f] of [...files('sfx/').map((f) => ['sfx', f]), ...files('music/').map((f) => ['music', f])]) {
+      const row = rows.find((r) => r.startsWith(`| \`${sub}/${f}\` |`));
+      expect(row, `${sub}/${f}`).toBeDefined();
+      expect(row, `${sub}/${f}`).toMatch(/Sounds|Calm|Claimed|Galactic|Outer|Space|Synthwave|Interface|Sci-Fi/);
+    }
+    expect(credits).toContain('CC0 1.0');
   });
 
   it('use no effect that no cue plays', () => {

@@ -37,7 +37,7 @@ Both packs are by Kenney (https://kenney.nl), CC0 1.0. The licence file each pac
 | `sfx/go.ogg` | Interface Sounds `confirmation_004` | the round starting |
 | `sfx/round-end.ogg` | Interface Sounds `select_006` | the round ending |
 | `sfx/click.ogg` | Interface Sounds `click_001` | HUD buttons |
-| `sfx/toggle.ogg` | Interface Sounds `toggle_001` | the sound switch |
+| `sfx/toggle.ogg` | Interface Sounds `toggle_001` | the sound switch turned on |
 | `sfx/replay-in.ogg` | Interface Sounds `minimize_004` | a replay starting |
 | `sfx/replay-out.ogg` | Interface Sounds `maximize_004` | a replay ending |
 
@@ -53,7 +53,7 @@ Five tracks, played in a shuffled order. Each was downloaded from the page named
 |---|---|---|---|
 | `music/void.ogg` | "Claimed by the Void" by vitalezzz | https://opengameart.org/content/claimed-by-the-void | `claimed_by_the_void_loop.mp3` |
 | `music/temple.ogg` | "Galactic Temple" by yd | https://opengameart.org/content/galactic-temple | `GalacticTemple.ogg` from `GalacticTemple.zip` |
-| `music/synthwave.ogg` | "Synthwave 4k" by cynicmusic (The Cynic Project) | https://opengameart.org/node/97098 | `001_Synthwave_4k_0.mp3` |
+| `music/synthwave.ogg` | "Calm Ambient 1 (Synthwave 4k)" by cynicmusic (The Cynic Project, cynicmusic.com, pixelsphere.org) | https://opengameart.org/content/calm-ambient-1-synthwave-4k | `001_Synthwave_4k_0.mp3` |
 | `music/outer.ogg` | "Outer Space Loop" by wipics | https://opengameart.org/content/outer-space-loop | `outer_space_2.mp3` |
 | `music/echo.ogg` | "Space Echo" by Centurion_of_war | https://opengameart.org/content/space-echo | `space_echo.ogg` |
 

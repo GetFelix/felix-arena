@@ -6,14 +6,17 @@ import { saveSound, savedSound, type SoundSettings } from './sound-settings';
 /** The events that count as the page being used, which is what lets a browser start audio. */
 const GESTURES = ['pointerdown', 'pointerup', 'keydown', 'touchend', 'click'] as const;
 
-/** Calls `fn` once, on the first gesture on `target`. Returns a function that cancels the wait. */
-export function onFirstGesture(target: EventTarget, fn: () => void): () => void {
+/**
+ * Calls `fn` on each gesture on `target` until it returns true. Not every gesture counts as one to the browser (a
+ * touch's pointerdown does not), so a first call that leaves the audio suspended must be tried again. Returns a function
+ * that cancels the wait.
+ */
+export function onGesture(target: EventTarget, fn: () => boolean): () => void {
   const stop = () => {
     for (const type of GESTURES) target.removeEventListener(type, run, { capture: true });
   };
   function run() {
-    stop();
-    fn();
+    if (fn()) stop();
   }
   for (const type of GESTURES) target.addEventListener(type, run, { capture: true });
   return stop;
@@ -47,10 +50,7 @@ const browserEnv = (): SoundEnv => ({
   save: (settings) => saveSound(settings),
   now: () => performance.now(),
   random: () => Math.random(),
-  every: (fn, ms) => {
-    const id = setInterval(fn, ms);
-    return () => clearInterval(id);
-  },
+  every: (fn, ms) => void setInterval(fn, ms),
 });
 
 /** Reads the controls into settings and shows `settings` in them. */
@@ -66,6 +66,7 @@ export function soundControls(sound: Sound, root: HTMLElement): void {
   };
   const toggle = () => {
     sound.setMuted(!sound.current.muted);
+    // Heard when sound comes back on; a mute is silent by definition.
     sound.ui('toggle');
     show(sound.current);
   };
@@ -79,8 +80,9 @@ export function soundControls(sound: Sound, root: HTMLElement): void {
   effects.addEventListener('change', () => sound.ui('click'));
   for (const slider of [music, effects]) {
     slider.addEventListener('change', () => slider.blur());
-    // Keys go to the game even while a slider has focus: the arrow keys would move it.
+    // Keys go to the game even while a slider has focus. Tab still moves on; the keys that would move the slider do not.
     slider.addEventListener('keydown', (event) => {
+      if (event.code === 'Tab') return;
       event.preventDefault();
       slider.blur();
     });
@@ -99,7 +101,10 @@ export function soundControls(sound: Sound, root: HTMLElement): void {
 export function startSound(files: SoundFiles, params: URLSearchParams, root: HTMLElement): Sound {
   if (!soundWanted(params, navigator.webdriver)) return new Sound(browserEnv(), { sfx: {}, music: {} });
   const sound = new Sound(browserEnv(), files, savedSound());
-  onFirstGesture(window, () => sound.unlock());
+  onGesture(window, () => {
+    sound.unlock();
+    return sound.running;
+  });
   document.addEventListener('visibilitychange', () => sound.hold(document.hidden));
   document.addEventListener('click', (event) => {
     const button = (event.target as HTMLElement | null)?.closest?.('button');

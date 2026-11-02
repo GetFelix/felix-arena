@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { CUES, type Play } from './cues';
-import { CROSSFADE_S, Sound, type SoundEnv, type SoundFiles } from './sound';
-import { onFirstGesture, soundWanted } from './sound-browser';
+import { CROSSFADE_S, PREFETCH_S, Sound, type SoundEnv, type SoundFiles } from './sound';
+import { onGesture, soundWanted } from './sound-browser';
 import { DEFAULT_SOUND, gainOf, type SoundSettings } from './sound-settings';
 
 const listener = { x: 0, z: 0, yaw: 0 };
@@ -46,9 +46,11 @@ class FakeContext {
   };
   createMediaElementSource = () => this.node();
   decodeAudioData = (data: ArrayBuffer) => Promise.resolve({ length: data.byteLength });
+  /** A browser that has not counted the gesture: resume succeeds only once this is cleared. */
+  refusing = false;
   resume = () => {
     this.resumed++;
-    this.state = 'running';
+    if (!this.refusing) this.state = 'running';
     return Promise.resolve();
   };
   suspend = () => {
@@ -63,12 +65,14 @@ class FakeTrack extends EventTarget {
   duration = 100;
   currentTime = 0;
   plays = 0;
+  refuse = false;
   constructor(readonly url: string) {
     super();
   }
   play() {
-    this.paused = false;
     this.plays++;
+    if (this.refuse) return Promise.reject(new Error('NotAllowedError'));
+    this.paused = false;
     return Promise.resolve();
   }
   pause() {
@@ -83,25 +87,25 @@ function setup(settings: SoundSettings = DEFAULT_SOUND, music = true) {
   const timers: (() => void)[] = [];
   let now = 0;
   let random = 0;
+  const flags = { refuseResume: false, refusePlay: false };
   const env: SoundEnv = {
     context: () => {
       const c = new FakeContext();
+      c.refusing = flags.refuseResume;
       contexts.push(c);
       return c as unknown as AudioContext;
     },
     load: (url) => Promise.resolve(new ArrayBuffer(url.length)),
     track: (url) => {
       const t = new FakeTrack(url);
+      t.refuse = flags.refusePlay;
       tracks.push(t);
       return t as unknown as HTMLAudioElement;
     },
     save: (s) => void saved.push({ ...s }),
     now: () => now,
     random: () => (random = (random + 0.37) % 1),
-    every: (fn) => {
-      timers.push(fn);
-      return () => void timers.splice(timers.indexOf(fn), 1);
-    },
+    every: (fn) => void timers.push(fn),
   };
   const files: SoundFiles = {
     sfx: {
@@ -124,6 +128,7 @@ function setup(settings: SoundSettings = DEFAULT_SOUND, music = true) {
     tracks,
     saved,
     timers,
+    flags,
     ready,
     advance: (ms: number) => (now += ms),
   };
@@ -290,19 +295,29 @@ describe('Sound settings', () => {
 });
 
 describe('Sound music', () => {
-  it('starts the next track as the current one comes within the crossfade of its end, once', async () => {
+  it('loads the next track early and starts it within the crossfade of the end, once', async () => {
     const t = setup();
     t.sound.unlock();
     await t.ready();
     const tick = t.timers[0]!;
-    t.tracks[0]!.currentTime = 100 - CROSSFADE_S - 1;
+    t.tracks[0]!.currentTime = 100 - PREFETCH_S - 1;
     tick();
     expect(t.tracks).toHaveLength(1);
-    t.tracks[0]!.currentTime = 100 - CROSSFADE_S + 0.5;
+    t.tracks[0]!.currentTime = 100 - PREFETCH_S + 1;
     tick();
     tick();
     expect(t.tracks).toHaveLength(2);
     expect(t.tracks[1]!.url).not.toBe(t.tracks[0]!.url);
+    expect(t.tracks[1]!.plays).toBe(0);
+    t.tracks[0]!.currentTime = 100 - CROSSFADE_S - 1;
+    tick();
+    expect(t.tracks[1]!.plays).toBe(0);
+    t.tracks[0]!.currentTime = 100 - CROSSFADE_S + 0.5;
+    tick();
+    tick();
+    expect(t.tracks).toHaveLength(2);
+    expect(t.tracks[1]!.plays).toBe(1);
+    expect(t.tracks[0]!.paused).toBe(false);
   });
 
   it('keeps going through every track and starts a new round without repeating the last', async () => {
@@ -358,36 +373,92 @@ describe('Sound music', () => {
     expect(t.contexts[0]!.sources).toHaveLength(1);
   });
 
-  it('stops the music and the timer on close', async () => {
+  it('counts a refused play() as a failed file and does not go silent in a loop', async () => {
+    const t = setup();
+    t.flags.refusePlay = true;
+    t.sound.unlock();
+    await t.ready();
+    await t.ready();
+    expect(t.tracks.length).toBeGreaterThan(1);
+    expect(t.tracks.length).toBeLessThanOrEqual(3);
+    t.sound.play(shot, listener, 6000);
+    expect(t.contexts[0]!.sources).toHaveLength(1);
+  });
+
+  it('tries another track when the next one is refused, up to the failure cap', async () => {
     const t = setup();
     t.sound.unlock();
     await t.ready();
-    t.sound.close();
-    expect(t.tracks[0]!.paused).toBe(true);
-    expect(t.timers).toHaveLength(0);
+    const tick = t.timers[0]!;
+    t.flags.refusePlay = true;
+    t.tracks[0]!.currentTime = 99;
+    tick();
+    await t.ready();
+    t.tracks[0]!.paused = true;
+    t.tracks[0]!.dispatchEvent(new Event('ended'));
+    expect(t.tracks.some((x) => !x.paused)).toBe(false);
+    expect(t.tracks.length).toBeGreaterThan(2);
+    expect(t.tracks.length).toBeLessThanOrEqual(5);
   });
 });
 
-describe('onFirstGesture', () => {
-  it('runs on the first click, key press or touch, once, and not before', () => {
-    for (const type of ['pointerdown', 'keydown', 'touchend', 'click']) {
+describe('Sound when the browser does not count the gesture', () => {
+  it('stays suspended and silent, then resumes on a later call', async () => {
+    const t = setup();
+    t.flags.refuseResume = true;
+    t.sound.unlock();
+    await t.ready();
+    expect(t.sound.running).toBe(false);
+    t.sound.play(shot, listener, 6000);
+    expect(t.contexts[0]!.sources).toHaveLength(0);
+    t.contexts[0]!.refusing = false;
+    t.sound.unlock();
+    await t.ready();
+    expect(t.contexts).toHaveLength(1);
+    expect(t.contexts[0]!.resumed).toBe(2);
+    expect(t.sound.running).toBe(true);
+    t.sound.play(shot, listener, 6000);
+    expect(t.contexts[0]!.sources).toHaveLength(1);
+  });
+});
+
+describe('Sound effect spacing', () => {
+  it('keeps own and other sounds of one cue apart, so a bot cannot drop your shot', async () => {
+    const t = setup();
+    t.sound.unlock();
+    await t.ready();
+    t.sound.play({ cue: 'fire', at: { x: 100, z: 0 }, gain: 0.6 }, listener, 6000);
+    t.advance(5);
+    t.sound.play(shot, listener, 6000);
+    expect(t.contexts[0]!.sources).toHaveLength(2);
+  });
+});
+
+describe('onGesture', () => {
+  it('runs on a click, key press or touch and not on other events', () => {
+    for (const type of ['pointerdown', 'pointerup', 'keydown', 'touchend', 'click']) {
       const target = new EventTarget();
       let runs = 0;
-      onFirstGesture(target, () => runs++);
-      expect(runs).toBe(0);
+      onGesture(target, () => ++runs > 0);
       target.dispatchEvent(new Event('mousemove'));
       expect(runs).toBe(0);
       target.dispatchEvent(new Event(type));
-      target.dispatchEvent(new Event('keydown'));
-      target.dispatchEvent(new Event('pointerdown'));
       expect(runs).toBe(1);
     }
+  });
+
+  it('stops listening once the callback is done, and not before', () => {
+    const target = new EventTarget();
+    let runs = 0;
+    onGesture(target, () => ++runs === 2);
+    for (let i = 0; i < 5; i++) target.dispatchEvent(new Event('keydown'));
+    expect(runs).toBe(2);
   });
 
   it('can be cancelled', () => {
     const target = new EventTarget();
     let runs = 0;
-    const cancel = onFirstGesture(target, () => runs++);
+    const cancel = onGesture(target, () => ++runs < 0);
     cancel();
     target.dispatchEvent(new Event('keydown'));
     expect(runs).toBe(0);

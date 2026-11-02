@@ -15,8 +15,8 @@ export interface SoundEnv {
   save(settings: SoundSettings): void;
   now(): number;
   random(): number;
-  /** Calls `fn` every `ms` until the returned function is called. */
-  every(fn: () => void, ms: number): () => void;
+  /** Calls `fn` every `ms` for as long as the page lives. */
+  every(fn: () => void, ms: number): void;
 }
 
 export interface SoundFiles {
@@ -28,6 +28,8 @@ export interface SoundFiles {
 
 /** Seconds before a track's end that the next one starts. The files fade out and in over this long, so they cross. */
 export const CROSSFADE_S = 3;
+/** Seconds before a track's end that the next one starts loading, so a slow link has time to fetch it. */
+export const PREFETCH_S = 25;
 /** Effects playing at once, so a busy fight cannot pile up voices. */
 const MAX_VOICES = 24;
 /** The music under the effects, and while a replay plays. */
@@ -54,15 +56,15 @@ export class Sound {
   private readonly bytes = new Map<string, ArrayBuffer>();
   private readonly buffers = new Map<string, AudioBuffer>();
   private readonly loading: Promise<unknown>;
-  private readonly lastPlayed = new Map<CueName, number>();
+  private readonly lastPlayed = new Map<string, number>();
   private readonly lastFile = new Map<CueName, string>();
   private voices = 0;
   private readonly playlist: Playlist | null;
   private tracks: Playing[] = [];
-  private stopTimer: (() => void) | null = null;
+  /** The next track, loading but not playing. */
+  private queued: { name: string; el: HTMLAudioElement } | null = null;
   private failures = 0;
   private ducked = false;
-  private closed = false;
 
   constructor(
     private readonly env: SoundEnv,
@@ -92,9 +94,20 @@ export class Sound {
     return this.settings;
   }
 
-  /** Starts the audio. Call it from a click or key press handler; later calls do nothing. */
+  /** True once the browser lets the page make sound. */
+  get running(): boolean {
+    return this.ctx?.state === 'running';
+  }
+
+  /**
+   * Starts the audio. Call it from a click or key press handler. A gesture the browser does not count, such as a
+   * touch's pointerdown, leaves the context suspended, so a later call asks it to resume again.
+   */
   unlock(): void {
-    if (this.ctx) return;
+    if (this.ctx) {
+      if (this.ctx.state !== 'running') void this.ctx.resume().catch(() => {});
+      return;
+    }
     const ctx = this.env.context();
     this.ctx = ctx;
     this.master = ctx.createGain();
@@ -107,7 +120,7 @@ export class Sound {
     void ctx.resume().catch(() => {});
     void this.decode(ctx);
     this.syncMusic();
-    this.stopTimer = this.env.every(() => this.follow(), 500);
+    this.env.every(() => this.follow(), 500);
   }
 
   /** Plays `play` as heard from `listener`, in an arena `reach` centimetres across. */
@@ -116,13 +129,15 @@ export class Sound {
     if (!ctx || ctx.state !== 'running' || this.settings.muted || this.settings.effects === 0) return;
     const spec = CUES[play.cue];
     const now = this.env.now();
-    const before = this.lastPlayed.get(play.cue);
+    // Your own sounds and everyone else's are spaced apart separately, so a bot's shot cannot silence yours.
+    const slot = play.at === null ? play.cue : `${play.cue}:other`;
+    const before = this.lastPlayed.get(slot);
     if (before !== undefined && now - before < spec.minGapMs) return;
     if (this.voices >= MAX_VOICES) return;
     const file = this.pick(play.cue);
     const buffer = this.buffers.get(file);
     if (!buffer) return;
-    this.lastPlayed.set(play.cue, now);
+    this.lastPlayed.set(slot, now);
     const where = place(listener, play.at, reach);
     const source = ctx.createBufferSource();
     source.buffer = buffer;
@@ -203,7 +218,7 @@ export class Sound {
     await this.loading;
     await Promise.all(
       [...this.bytes].map(([name, data]) =>
-        // decodeAudioData takes ownership of the bytes, and an old Safari wants the callback form.
+        // decodeAudioData takes ownership of the bytes.
         ctx.decodeAudioData(data.slice(0)).then(
           (buffer) => void this.buffers.set(name, buffer),
           () => {},
@@ -225,14 +240,15 @@ export class Sound {
   }
 
   private wanted(): boolean {
-    return !this.closed && !this.settings.muted && this.settings.music > 0;
+    return !this.settings.muted && this.settings.music > 0;
   }
 
   private startTrack(): void {
     const ctx = this.ctx;
     if (!ctx || !this.playlist || this.failures >= MAX_FAILURES) return;
-    const name = this.playlist.next();
-    const el = this.env.track(this.files.music[name]!);
+    this.queue();
+    const { el } = this.queued!;
+    this.queued = null;
     const source = ctx.createMediaElementSource(el);
     source.connect(this.musicBus!);
     const track: Playing = { el, source, handedOver: false };
@@ -243,7 +259,18 @@ export class Sound {
       this.failures++;
       this.finish(track);
     });
-    void el.play().catch(() => {});
+    // A play() that is refused raises no error event, so it counts as a failed file here.
+    void el.play().catch(() => {
+      this.failures++;
+      this.finish(track);
+    });
+  }
+
+  /** Picks the next track and starts loading it. */
+  private queue(): void {
+    if (this.queued || !this.playlist) return;
+    const name = this.playlist.next();
+    this.queued = { name, el: this.env.track(this.files.music[name]!) };
   }
 
   private finish(track: Playing): void {
@@ -255,25 +282,17 @@ export class Sound {
     if (this.tracks.length === 0) this.syncMusic();
   }
 
-  /** Starts the next track once the newest one is within the crossfade of its end. */
+  /** Loads the next track as the newest one nears its end, and starts it within the crossfade. */
   private follow(): void {
     if (!this.wanted()) return;
     for (const t of [...this.tracks]) {
       const left = t.el.duration - t.el.currentTime;
-      if (!t.handedOver && Number.isFinite(left) && left <= CROSSFADE_S) {
+      if (t.handedOver || !Number.isFinite(left)) continue;
+      if (left <= PREFETCH_S) this.queue();
+      if (left <= CROSSFADE_S) {
         t.handedOver = true;
         this.startTrack();
       }
-    }
-  }
-
-  /** Stops the music and the timer. */
-  close(): void {
-    this.closed = true;
-    this.stopTimer?.();
-    for (const t of [...this.tracks]) {
-      t.el.pause();
-      this.finish(t);
     }
   }
 }

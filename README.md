@@ -351,7 +351,8 @@ What you hear:
 - **The match.** A tick for each of the last three seconds of warmup, a start
   sound, and an end sound when the results come up. The music ducks while a
   kill cam replay plays.
-- **The interface.** A click for the HUD buttons.
+- **The interface.** A click for the HUD buttons, a sound when you switch sound
+  on, and a short sweep as a kill cam replay starts and ends.
 - **Music.** Five ambient and low-key electronic tracks in a shuffled order,
   each fading into the next, never the same one twice in a row.
 
@@ -364,14 +365,15 @@ Page options: `?sound=off` plays nothing and `?sound=on` plays even in an
 automated browser, which is silent by default so a test run does not decode
 music on a busy machine. The benchmark (`&bench`) is always silent.
 
-The files are Ogg Opus, 4.3 MB in all, bundled with the page; the game fetches
-nothing from other sites to play them. Browsers that cannot play Ogg Opus (Safari
-before 18.4) get no sound and run the game as before. Every file's author,
+The files are Ogg Opus, 4.4 MB in all, bundled with the page; the game fetches
+nothing from other sites to play them. A browser that cannot play Ogg Opus (an
+older Safari) gets no sound and runs the game as before. On a slow connection
+the next music track may not arrive in time, which leaves a gap between tracks. Every file's author,
 source, licence and the changes made to it are in
 [prototype/assets/audio/CREDITS.md](prototype/assets/audio/CREDITS.md). To add or
 swap a sound, put the `.ogg` under `prototype/assets/audio/`, name it in
 `CUES` in `web/src/cues.ts`, and list it in the credits; a test fails if a file is
-unlisted or unused.
+missing from the credits or an effect is played by no cue.
 
 ## Frame time
 

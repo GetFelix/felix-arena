@@ -118,11 +118,15 @@ export class PhaseWatcher {
   update(now: MatchClock): CueName[] {
     const last = this.last;
     this.last = { ...now };
-    if (last === null) return [];
+    const counting = now.phase === 'warmup' && !now.waiting && now.seconds >= 1 && now.seconds <= 3;
+    if (last === null) {
+      // Joining with 2 seconds of warmup left must not tick for that second.
+      this.counted = counting ? now.seconds : null;
+      return [];
+    }
     const cues: CueName[] = [];
     if (now.phase === 'playing' && (last.phase !== 'playing' || last.number !== now.number)) cues.push('go');
     if (now.phase === 'results' && last.phase === 'playing') cues.push('round-end');
-    const counting = now.phase === 'warmup' && !now.waiting && now.seconds >= 1 && now.seconds <= 3;
     if (!counting) this.counted = null;
     else if (this.counted !== now.seconds) {
       this.counted = now.seconds;
