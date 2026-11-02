@@ -208,6 +208,14 @@ short names `felix-controlplane`, `felix-controlplane-bootstrap` and `felix-brok
      --set broker.credential.existingSecret=felix-arena-broker-credential
    ```
 
+5. Turn on Felix's fleet features. The seed made the streams before any broker had registered, so Felix
+   does not count this as a new cluster and leaves them off, and the sim's commits are refused until
+   they are on. The broker's token may do it; `ci/kind-install.sh` has the loop. For each name in
+   `generation_start majority_ack lease_free_reads fenced_caches jump_hash_routing atomic_commit
+   stream_incarnations group_cursor_dependencies cache_incarnations head_trim`, in that order, send
+   `POST /v1/fleet/features/<name>/finalize` to the control plane with the token
+   (`kubectl get secret felix-arena-broker-credential -o jsonpath='{.data.token}' | base64 -d`).
+
 The seed creates the tenant, the arenas and who may play (`arenas`, `players`
 and `watchers` in the values), then stores the broker's token and the sim's in
 Secrets. The sim pod starts when its Secret exists. Check on it:
