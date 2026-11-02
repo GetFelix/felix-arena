@@ -23,6 +23,8 @@ const RETENTION_SECONDS = 7 * 24 * 60 * 60;
 // Felix only promotes a replica it knows holds every acknowledged record when
 // the commit waited for a majority, so ticks are `Quorum` once replicated.
 const REPLICAS = Number(env("ARENA_REPLICAS", "1"));
+// With more than one broker, nothing is created until this many are live.
+const WAIT_FOR_BROKERS = Number(env("ARENA_WAIT_FOR_BROKERS", "0"));
 
 async function request(method, url, { token, headers = {}, body } = {}) {
   const response = await fetch(url, {
@@ -82,6 +84,28 @@ await request("POST", `${BOOTSTRAP}/internal/bootstrap/tenants/${TENANT}/initial
     ],
   },
 });
+
+// The broker runs as uid 65532 and writes its certificate here too.
+await mkdir(STATE, { recursive: true });
+await chmod(STATE, 0o777).catch(() => {});
+const broker = await exchange("arena-broker", { audience: "felix-controlplane" });
+await writeFile(`${STATE}/node.token`, broker, { mode: 0o644 });
+console.log(`wrote node.token to ${STATE}`);
+
+// Placement puts a shard on whichever brokers are live when it is created, and
+// one placed on fewer than its replication factor waits for copies that may
+// never come. So the brokers start on the token above, and nothing is created
+// until they are all live.
+if (WAIT_FOR_BROKERS > 0) {
+  console.log(`waiting for ${WAIT_FOR_BROKERS} brokers`);
+  for (let tries = 0; ; tries++) {
+    const { items } = await request("GET", `${CONTROL_PLANE}/v1/nodes`, { token: broker });
+    const live = items.filter((item) => item.node.status.lifecycle === "live").length;
+    if (live >= WAIT_FOR_BROKERS) break;
+    if (tries === 180) throw new Error(`only ${live} of ${WAIT_FOR_BROKERS} brokers are live`);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+}
 
 const admin = await exchange("arena-admin", { audience: "felix-controlplane" });
 console.log(`namespace ${NAMESPACE}`);
@@ -166,16 +190,11 @@ for (const arena of ARENAS) {
   }
 }
 
-// The broker runs as uid 65532 and writes its certificate here too.
-await mkdir(STATE, { recursive: true });
-await chmod(STATE, 0o777).catch(() => {});
-const broker = await exchange("arena-broker", { audience: "felix-controlplane" });
-await writeFile(`${STATE}/node.token`, broker, { mode: 0o644 });
 const sim = await exchange("arena-sim", {
   requested: ["stream.publish", "stream.subscribe", "cache.read", "cache.write"],
 });
 await writeFile(`${STATE}/sim.token`, sim, { mode: 0o644 });
-console.log(`wrote node.token and sim.token to ${STATE}`);
+console.log(`wrote sim.token to ${STATE}`);
 
 // up.sh waits for this before it calls the stack ready.
 await writeFile(`${STATE}/seeded`, "");

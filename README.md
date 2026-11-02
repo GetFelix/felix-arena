@@ -45,7 +45,7 @@ presence and the lobby are
 a TTL, and who may play or watch is a Felix RBAC role, enforced through tokens
 the control plane
 [narrows](https://github.com/GetFelix/felix/blob/main/docs/auth.md#control-plane-token-exchange-flow)
-to one arena. Tick streams are to be replicated across three brokers, so a
+to one arena. Tick streams are replicated across three brokers, so a
 match can continue after its broker
 [fails](https://github.com/GetFelix/felix/blob/main/docs/semantics.md#failover).
 
@@ -293,6 +293,24 @@ it was, and writes its ticks in the next epoch; the job checks that play resumes
 within 5 seconds with the same match, scores and roster. To run it yourself, with
 the stack up from a short warmup (`SIM_WARMUP_SECONDS=5 SIM_KILL_LIMIT=99 dev/up.sh`):
 `cd web && npx vite-node scripts/restart.ts`.
+
+CI's `broker failover` job runs the same game on three brokers and kills the
+one that owns an arena's tick stream during a match. The stream is replicated
+to all three brokers, so a majority still holds every tick that was handed out.
+The job checks that:
+
+- play resumes on another broker within 10 seconds, in the same match and sim epoch;
+- every tick a spectator received before the kill is still in the log, byte for byte;
+- a kill cam whose replay window spans the failover reads back whole;
+- a page watching the arena draws live ticks again by itself.
+
+To run it yourself, start the cluster stack from a short warmup with
+`SIM_WARMUP_SECONDS=5 SIM_KILL_LIMIT=99 dev/up.sh --cluster`, build and serve the
+page (`cd web && npm run core && npm run build && npx vite preview --port 4173`)
+and run `npx vite-node scripts/failover.ts -- http://127.0.0.1:4173/play.html`.
+`dev/up.sh --cluster` waits until every stream has all three copies, because
+stopping a broker earlier can leave a stream without a majority. `dev/down.sh`
+stops either stack.
 
 ## Frame time
 
