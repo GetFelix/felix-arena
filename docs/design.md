@@ -717,6 +717,25 @@ crafts carry on at the pace they last moved, and that guess is
 blended into the real ticks over 100 ms. A death, a respawn or a move of more
 than 3 m is shown at the tick it happened, not slid into.
 
+**Ticks that never arrive.** A subscriber whose queue is full loses ticks, and
+what a lost tick carried (a kill, a join, a score) is gone with it, because only
+keyframes hold the tally. The page notices as a jump in log offsets: an event
+frame names the offsets just below it that hold no event (`skipped_before`,
+the generation-start records of a failover), and any jump beyond those is
+ticks that were never delivered. `web/src/gaps.ts` counts them and, for up to
+15 missing ticks, reads them back with the same range read the kill cam uses
+and hands them on in order, ahead of the tick that showed the jump. Holding
+that one tick for the read costs a round trip, which the two-tick render delay
+absorbs on a good link; the ticks read back also give the interpolator real
+positions where it would have guessed. A read that fails or takes longer than
+1.5 seconds is given up on, and the ticks go on without them. A jump wider than
+15 ticks is counted and not read back. The page counts them in
+`window.arena.gaps`, and `play.html?lose=7` discards every seventh live tick on
+arrival so the path can be tested: CI's `gap fill` job has a spectator do that
+while a player plays, then checks that every tick both folded came out the same
+and every kill the player saw after the spectator joined is on the spectator's
+list.
+
 The tests hold this to numbers. `web/src/interpolation.test.ts` records thirty
 seconds of a four-player fight from core's own world, delivers it with jitter
 and one tick in twenty lost (some two in a row), and draws it at 60 frames a
@@ -846,13 +865,13 @@ cache entries that expire without telling a watch
 
 | Failure | What Felix does | What the client or sim does | What the player sees |
 |---|---|---|---|
-| Slow spectator or player | Fills that subscriber's bounded queue and drops new ticks; others untouched | Sees a gap in offsets. Up to 2 missing ticks are interpolated across, and the events in them are fetched with a fill read. Further behind than 15 ticks, it resyncs from the keyframe | "Connection poor" while behind, then normal |
+| Slow spectator or player | Fills that subscriber's bounded queue and drops new ticks; others untouched | Sees a gap in offsets. Up to 15 missing ticks are fetched with a fill read and handed on in order. Further behind than that, it resyncs from the keyframe | "Connection poor" while behind, then normal |
 | A lost input | Nothing; the stream is at most once | The next input repeats it | Nothing |
 | A player's uplink stalls | Nothing | The sim holds the last input for 100 ms, then coasts the craft | Your craft snaps back when you return |
 | Gateway restarts | Nothing | The browser reconnects and joins from the keyframe | "Reconnecting" for a second or two |
 | Sim crashes | Keeps the log | Ticks stop. Clients show "Server reconnecting" after 500 ms without a tick. The replacement sim reads the `keyframe` state key, reads ticks from it to the tail, rebuilds the match from them (craft, bolt and clock state from the newest tick; scores and the roster's tallies from the keyframe and the events since), and resumes at the next tick in an epoch one past the newest it read. If the newest epoch's ticks hold no keyframe yet (it was restarted twice within two seconds), the keyframe and tail of the epoch before are used. Players take their craft back with their first input; one that stays silent for 10 seconds leaves | The match pauses for the restart, about 3 seconds, and the clock pauses with it. A craft's health regeneration starts over, a dead craft waits out its respawn again and a spawn shield is full |
 | Two sims for one arena briefly | Accepts both writers | Every tick carries the sim's epoch. Clients and replays ignore ticks from an epoch lower than the highest seen | A stutter |
-| Owning broker lost | Promotes a replica holding every acknowledged tick | The sim's commit fails or times out. It pauses game time and retries through `ClusterClient`. Subscriptions follow the shard to its new owner or end, and clients resubscribe from their last offset plus one | A pause of about the failover window, then play continues |
+| Owning broker lost | Promotes a replica holding every acknowledged tick | The sim's commit fails or times out. It retries through `ClusterClient`, which finds the new owner. The gateway ends the subscriptions on the lost shard with `subscription_ended`, and a client joins again from the keyframe | A pause of about the failover window, then play continues |
 | A commit unanswered at failover | May or may not have landed | The sim writes the next tick; the unanswered one may have landed. A commit is not idempotent, so a tick may land twice; readers drop a repeated `(epoch, tick)` | Nothing |
 | Kill cam window trimmed | Refuses with `CursorTooOld` | Skips the replay | "Replay no longer available" |
 | Newest ticks dropped with nothing after them | No signal ([felix#965](https://github.com/GetFelix/felix/issues/965)) | Rarely matters: a tick follows every 33 ms, so a drop shows as a gap at once. During the results screen the sim keeps committing the final keyframe once a second, so the match's last record is never the one lost | Nothing |
@@ -880,7 +899,7 @@ and saying so is honest, and it is what demonstration 4 shows.
 | Frame time | 16.7 ms p95 at 1080p, High or Medium tier, laptop iGPU | Frame timing over a scripted 2-minute match |
 | Sim step | Under 2 ms for 8 players and 64 bolts | Sim timings |
 | Spectator fanout, 0 to 100 | Players' tick latency p50 and the sim's commit p50 within 10% plus 1 ms of the quiet phases | Spectators as Felix subscriptions, with four bot players measuring through the gateway |
-| Failover pause | Under the control plane's failover window plus 1 s | The failover end-to-end test |
+| Failover pause | Under 10 s on the dev cluster, whose control plane declares a broker lost after 3 s | CI's `broker failover` job: the sim's commit time of the last tick before the kill against the first after it |
 
 As in felix-canvas, the 100 spectators are made as Felix subscriptions from a
 small Rust example, because 100 browser tabs are not a measurable population.

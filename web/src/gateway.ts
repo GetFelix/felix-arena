@@ -19,6 +19,8 @@ export interface EventFrame {
   /** When this page received the frame, on its own clock. */
   receivedUs: number;
   payload: Uint8Array;
+  /** Read back from the log after the subscription missed it, not delivered live. It carries no timings. */
+  filled?: boolean;
 }
 
 const EVENT_KIND = 1;
