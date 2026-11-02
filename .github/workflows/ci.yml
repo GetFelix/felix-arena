@@ -385,7 +385,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # Short matches, and a broker that keeps about a minute of each log, so a kill of the last match can be seen
+      # Short matches, and a broker that keeps about three minutes of each log, so a kill of the last match can be seen
       # replayed and then refused once retention has passed it.
       - run: dev/up.sh
         env:
