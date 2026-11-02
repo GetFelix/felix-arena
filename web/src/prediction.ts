@@ -24,6 +24,9 @@ export interface OwnCraft {
   heading: number;
   health: number;
   boostCooldown: number;
+  /** The blaster's heat, up to core's `heatMax()`, and whether it is locked until it cools. */
+  heat: number;
+  overheated: boolean;
   /** Under spawn protection, which firing gives up at once. */
   protected: boolean;
 }
@@ -288,6 +291,8 @@ export class Own {
       heading: base.alive ? aim : base.heading,
       health: base.health,
       boostCooldown: base.boostCooldown,
+      heat: base.heat,
+      overheated: base.overheated,
       protected: base.protected,
     };
     base.free();

@@ -8,6 +8,7 @@ export {
   boostTicks,
   decodeInput,
   decodeTick,
+  heatMax,
   Inputs,
   playerKey,
   Prediction,

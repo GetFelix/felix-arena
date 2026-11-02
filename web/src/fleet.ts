@@ -26,6 +26,8 @@ export interface CraftView {
   heading: number;
   /** How far a rail has charged, 0 to 1, or 0 when none is charging. */
   charge?: number;
+  /** The blaster is locked until it cools, which the craft shows as a glow above its hull. */
+  overheated?: boolean;
   /** Under spawn protection, which the effects draw as a shield. */
   protected?: boolean;
 }
@@ -40,6 +42,8 @@ interface Flown {
   violet: boolean;
   /** The glow at the nose while a rail charges. */
   charge: Sprite;
+  /** The glow above the craft while its blaster is locked by heat. */
+  vent: Sprite;
 }
 
 /** Every craft in the match. */
@@ -72,6 +76,7 @@ export class Fleet {
       for (const part of parts) part.visible = view.alive;
       const charge = view.alive ? (view.charge ?? 0) : 0;
       f.charge.visible = charge > 0;
+      f.vent.visible = view.alive && (view.overheated ?? false);
       if (!view.alive) continue;
       const [x, z] = [view.x / 100, view.z / 100];
       p.aim = yaw(view.heading);
@@ -81,6 +86,10 @@ export class Fleet {
       p.blob.position.set(x, 0.015, z);
       p.engine.position.set(x - Math.sin(p.aim) * 1.1, p.g.position.y + 0.35, z - Math.cos(p.aim) * 1.1);
       p.engine.material.opacity = 0.75 + Math.sin(t * 30 + p.phase) * 0.1;
+      if (f.vent.visible) {
+        f.vent.position.set(x, p.g.position.y + 0.5, z);
+        f.vent.scale.setScalar(1.6 + Math.sin(t * 24 + p.phase) * 0.25);
+      }
       if (charge > 0) {
         f.charge.position.set(x + Math.sin(p.aim) * 1.2, p.g.position.y + 0.15, z + Math.cos(p.aim) * 1.2);
         f.charge.scale.setScalar(0.6 + charge * 2.2);
@@ -89,7 +98,8 @@ export class Fleet {
     }
     for (const [slot, f] of this.flown) {
       if (seen.has(slot)) continue;
-      for (const part of [f.craft.g, f.craft.pool, f.craft.blob, f.craft.engine, f.charge]) part.visible = false;
+      for (const part of [f.craft.g, f.craft.pool, f.craft.blob, f.craft.engine, f.charge, f.vent])
+        part.visible = false;
     }
   }
 
@@ -98,7 +108,7 @@ export class Fleet {
     if (had && had.violet === view.violet) return had;
     // A slot changes team only between matches; build it again in the new colours.
     if (had)
-      for (const part of [had.craft.g, had.craft.pool, had.craft.blob, had.craft.engine, had.charge])
+      for (const part of [had.craft.g, had.craft.pool, had.craft.blob, had.craft.engine, had.charge, had.vent])
         part.removeFromParent();
     const [model, scale] = MODELS[view.slot % MODELS.length]!;
     const body = this.models.spawn(model, { scale, accent: view.violet ? this.violet : this.coral });
@@ -109,7 +119,17 @@ export class Fleet {
     );
     charge.visible = false;
     this.fx.add(charge);
-    const flown = { craft: made, violet: view.violet, charge };
+    const vent = new Sprite(
+      new SpriteMaterial({
+        map: this.tex.glow,
+        color: hdr('#ff6a3d', 3),
+        blending: AdditiveBlending,
+        depthWrite: false,
+      }),
+    );
+    vent.visible = false;
+    this.fx.add(vent);
+    const flown = { craft: made, violet: view.violet, charge, vent };
     this.flown.set(view.slot, flown);
     return flown;
   }

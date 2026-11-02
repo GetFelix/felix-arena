@@ -13,6 +13,7 @@ import {
   boltReach,
   boostTicks,
   decodeTick,
+  heatMax,
   Inputs,
   loadCore,
   playerKey,
@@ -855,6 +856,8 @@ async function main(): Promise<void> {
             alive: ownNow.alive,
             health: ownNow.health,
             boostCooling: ownNow.boostCooldown / boostTicks(),
+            heat: ownNow.heat / heatMax(),
+            overheated: ownNow.overheated,
             rail: newestOwn.rail,
             respawnIn: respawnAt === null ? null : (respawnAt - now) / 1000,
           }

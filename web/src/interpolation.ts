@@ -42,6 +42,9 @@ export interface CraftState {
   /** Rail shots left, and ticks until a charging rail fires. */
   rail: number;
   charge: number;
+  /** How hot the blaster is, up to core's `heatMax()`, and whether it is locked until it cools. */
+  heat: number;
+  overheated: boolean;
   /** Under spawn protection: just respawned, and not hurt until it fires or the protection runs out. */
   protected: boolean;
 }
@@ -83,6 +86,8 @@ export function snapshot(tick: Tick): Snapshot {
       lastInput: c.lastInput,
       rail: c.rail,
       charge: c.charge,
+      heat: c.heat,
+      overheated: c.overheated,
       protected: c.protected,
     })),
     bolts: bolts.map((b) => ({ id: b.id, owner: b.owner, x: b.x, z: b.z, heading: b.heading })),
