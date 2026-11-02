@@ -22,6 +22,7 @@ interface Seen {
   match: number;
   phase: string;
   scores: [number, number];
+  /** When the sim began committing the tick, on its clock, in milliseconds. */
   atMs: number;
   roster: { key: string; kills: number; deaths: number }[] | null;
   inputs: number[];
@@ -39,16 +40,18 @@ const ticks: Seen[] = [];
 await spectator.subscribe('ticks', 'live', 'live', (frame) => {
   const tick = decodeTick(frame.payload);
   const players = tick.keyframe ? tick.players : [];
+  const timing = tick.timing;
   ticks.push({
     epoch: tick.epoch,
     tick: tick.tick,
     match: tick.matchNumber,
     phase: tick.phase,
     scores: [tick.coralScore, tick.violetScore],
-    atMs: performance.now(),
+    atMs: Number(timing?.commitStartUs ?? 0) / 1000,
     roster: tick.keyframe ? players.map((p) => ({ key: p.key, kills: p.kills, deaths: p.deaths })) : null,
     inputs: tick.crafts.map((c) => c.lastInput),
   });
+  timing?.free();
   for (const p of players) p.free();
   tick.free();
 });
@@ -72,9 +75,9 @@ try {
   await waitFor('a keyframe after the kill', () => newest().roster !== null && newest().tick > scored, 10_000);
   const before = newest();
   console.log(`killing the sim at epoch ${before.epoch}, tick ${before.tick}, scores ${before.scores}`);
+  const old = ticks.length;
   compose('kill', 'sim');
   compose('start', 'sim');
-  const old = ticks.length;
   await waitFor('ticks of the next epoch', () => ticks.slice(old).some((t) => t.epoch > before.epoch), 60_000);
   const first = ticks.findIndex((t, i) => i >= old && t.epoch > before.epoch);
   const last = ticks[first - 1]!;
