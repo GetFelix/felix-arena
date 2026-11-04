@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use felix_arena_core::Phase;
 use felix_arena_core::world::MAX_CRAFTS;
-use felix_client::{CacheWatchFilter, CacheWatchItem, ClusterClient};
+use felix_client::{CacheWatchFilter, CacheWatchItem, Client};
 use tracing::warn;
 
 /// The lobby cache: one entry per arena, which lapses when its sim stops.
@@ -89,7 +89,7 @@ pub(crate) fn entry(status: &Status, spectators: usize) -> String {
 /// Keep `members` in step with the arena's member cache, watching it again
 /// whenever the watch ends.
 pub(crate) async fn watch_members(
-    client: Arc<ClusterClient>,
+    client: Arc<Client>,
     tenant: String,
     namespace: String,
     cache: String,
@@ -128,7 +128,7 @@ pub(crate) async fn watch_members(
 /// Write `arena`'s lobby entry every few seconds, with a TTL, so the lobby
 /// lists exactly the arenas whose sims are running.
 pub(crate) async fn publish(
-    client: Arc<ClusterClient>,
+    client: Arc<Client>,
     tenant: String,
     namespace: String,
     arena: String,

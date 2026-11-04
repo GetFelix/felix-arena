@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use felix_arena_core::{Input, InputRecord, World, player_key};
-use felix_client::ClusterClient;
+use felix_client::Client;
 use tokio::time::Instant;
 use tracing::warn;
 
@@ -70,7 +70,7 @@ const INBOX_LIMIT: usize = 4096;
 /// subscription is opened again from the live tail: inputs are at most once,
 /// and a missed one is superseded by the next.
 pub(crate) async fn follow(
-    client: Arc<ClusterClient>,
+    client: Arc<Client>,
     tenant: String,
     namespace: String,
     stream: String,
