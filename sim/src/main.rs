@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use felix_client::{ClientConfig, Client, CommitOp};
+use felix_client::{Client, ClientConfig, CommitOp};
 use tokio::task::JoinSet;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;

@@ -22,7 +22,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use felix_arena_core::Tick;
-use felix_client::{ClientConfig, Client, ClusterSubscription};
+use felix_client::{Client, ClientConfig, ClusterSubscription};
 use tokio::task::JoinSet;
 use tokio::time::Instant;
 
