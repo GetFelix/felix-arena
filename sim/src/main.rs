@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use felix_client::{ClientConfig, ClusterClient, CommitOp};
+use felix_client::{ClientConfig, Client, CommitOp};
 use tokio::task::JoinSet;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
@@ -109,7 +109,7 @@ async fn main() -> Result<()> {
 
 /// Where `arena` left off, asked again until the log answers: starting over
 /// on a failed read would write a low epoch that readers ignore.
-async fn recover(client: &ClusterClient, config: &Config, arena: &str) -> Recovered {
+async fn recover(client: &Client, config: &Config, arena: &str) -> Recovered {
     loop {
         match recovery::load(
             client,
@@ -132,7 +132,7 @@ async fn recover(client: &ClusterClient, config: &Config, arena: &str) -> Recove
 /// Connect to Felix, retrying until a broker answers: in a fresh deployment
 /// the sim can start before the brokers do, or before the broker has written
 /// the certificate it is checked against.
-async fn connect(config: &Config) -> Result<ClusterClient> {
+async fn connect(config: &Config) -> Result<Client> {
     let mut attempt = 0u32;
     loop {
         match try_connect(config).await {
@@ -146,7 +146,7 @@ async fn connect(config: &Config) -> Result<ClusterClient> {
     }
 }
 
-async fn try_connect(config: &Config) -> Result<ClusterClient> {
+async fn try_connect(config: &Config) -> Result<Client> {
     let token = std::fs::read_to_string(&config.token_file)
         .with_context(|| format!("read {}", config.token_file.display()))?;
     let roots = config
@@ -162,7 +162,7 @@ async fn try_connect(config: &Config) -> Result<ClusterClient> {
     // Who published each input, which must match the gateway's stamp.
     client_config.publishers = true;
     let seeds = resolve(&config.brokers).await?;
-    ClusterClient::connect(&seeds, &config.server_name, client_config).await
+    Client::connect(&seeds, &config.server_name, client_config).await
 }
 
 async fn resolve(brokers: &[String]) -> Result<Vec<SocketAddr>> {
