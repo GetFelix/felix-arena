@@ -195,7 +195,7 @@ chart. The `helm chart` CI job installs both on kind and plays in a browser.
 
 ## Development stack
 
-`dev/up.sh` starts Felix 0.6.2 (a control plane and one broker), a stand-in identity
+`dev/up.sh` starts Felix 0.7.0 (a control plane and one broker), a stand-in identity
 provider, felix-gateway on `ws://127.0.0.1:8787` and the sim, with two arenas,
 `alpha` and `bravo`, from Docker or Podman (`CONTAINER_ENGINE` picks one). The
 broker batches deliveries with a short delay and keeps the default `drop_new`
