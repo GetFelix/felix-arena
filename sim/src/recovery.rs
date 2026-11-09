@@ -3,7 +3,7 @@
 
 use anyhow::{Context, Result};
 use felix_arena_core::{Rules, Tick, World};
-use felix_client::ClusterClient;
+use felix_client::Client;
 
 use crate::arena::KEYFRAME_KEY;
 
@@ -20,7 +20,7 @@ pub(crate) struct Recovered {
 /// Read `arena`'s log from its newest keyframe to the tail and rebuild the
 /// match. An arena with nothing in its log starts fresh in epoch 0.
 pub(crate) async fn load(
-    client: &ClusterClient,
+    client: &Client,
     tenant: &str,
     namespace: &str,
     arena: &str,
