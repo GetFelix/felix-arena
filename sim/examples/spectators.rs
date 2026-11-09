@@ -22,7 +22,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use felix_arena_core::Tick;
-use felix_client::{ClientConfig, ClusterClient, ClusterSubscription};
+use felix_client::{Client, ClientConfig, ClusterSubscription};
 use tokio::task::JoinSet;
 use tokio::time::Instant;
 
@@ -105,7 +105,7 @@ struct Seen {
 
 /// A spectator subscribed to the tail, and the client that keeps it open.
 struct Spectator {
-    _client: Arc<ClusterClient>,
+    _client: Arc<Client>,
     subscription: ClusterSubscription,
 }
 
@@ -121,7 +121,7 @@ async fn join(settings: &Settings) -> Result<Spectator> {
     config.auth_tenant_id = Some(settings.tenant.clone());
     config.auth_token = Some(settings.token.clone());
     let client = Arc::new(
-        ClusterClient::connect(&settings.brokers, &settings.server_name, config)
+        Client::connect(&settings.brokers, &settings.server_name, config)
             .await
             .context("connect")?,
     );
