@@ -160,11 +160,12 @@ Each release also publishes four container images to GitHub's registry, for
 | `ghcr.io/getfelix/felix-arena-seed` | The job that creates the arenas and the tokens the broker and the sim use. |
 | `ghcr.io/getfelix/felix-arena-idp` | The stand-in identity provider, for trying the game. Never expose it. |
 
-Tags are the release version without its `v` (`0.1.7`) and `latest`. The release
+Releases from 0.2.0 on use Felix 0.7.0 and need a Felix 0.7 broker and control plane.
+Tags are the release version without its `v` (`0.2.0`) and `latest`. The release
 notes list each image's digest and the command that checks its signature:
 
 ```bash
-cosign verify ghcr.io/getfelix/felix-arena-sim:0.1.7 \
+cosign verify ghcr.io/getfelix/felix-arena-sim:0.2.0 \
   --certificate-identity-regexp '^https://github.com/GetFelix/felix-arena/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
